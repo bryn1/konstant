@@ -1,0 +1,6 @@
+dsh
+--profile
+headless
+--patch
+<WS>/.dsh/konstant.patch.yml
+-

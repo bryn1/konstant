@@ -1,0 +1,156 @@
+# THE one source for task types, their agents, phases, verdict files and classifier vocabulary
+# (DESIGN §6.1). Every consumer (board type validation, task gate, DoD check, phase runner,
+# generator) reads this file through konstant.catalog only; no other module holds a table of
+# types, agents or phases. Each type also names its `skills` and `workflow`.
+#
+# Classifier order = the order of `types` below: the first type whose `keywords` regex matches
+# wins, so specific types come first and `code` (the catch-all) last.
+#
+# Phase keys: agent (required), step (open | close: the architect's bracketing phases),
+# verdict (the verdict file a VERIFYING phase must leave in OUT), parallel (may run with the
+# previous phase), when (changed: runs only when the run changed a project file), task (brief).
+#
+# Content keys: workflow (catalog/workflows/<name>.md, generated into the skill `workflow-<type>`),
+# skills (catalog/skills/<name>/SKILL.md, loaded by that type's agent). `roles` lists the skills of
+# the role agent that is no type's producer (the orchestrator).
+version: 1
+review_types: [review, docs, design, research]   # these close by `job review` into `reviewed`
+types:
+  security:
+    agent: security
+    deliverable: verdict
+    summary: Security review with ranked findings and a verdict.
+    keywords: '\b(security|secur\w*|harden\w*|pentest|threat model|vulnerab\w*|exposure|secret leak|authz|authn|injection)\b'
+    workflow: security
+    skills: [security-review, security-scan-triage, infra-hardening, exposure-gate, workspace-layout, verify]
+    read_only: true
+    done_rows: false
+    phases:
+      - {agent: architect, step: open, when: changed, task: placement plan before any project file changes}
+      - {agent: security, task: 'findings ranked by severity, each with a reproduction (FINDINGS-security.md, not a verdict file)'}
+      - {agent: reviewer, verdict: REVIEW-verdict.md, task: refute or confirm each finding}
+      - {agent: architect, step: close, when: changed, verdict: ARCH-verdict.md, task: architecture doc matches reality; hygiene holds}
+  review:
+    agent: reviewer
+    deliverable: verdict
+    summary: Adversarial review of a change or plan - SHIP, FIX or RECONSIDER.
+    keywords: '^\s*(?:please\s+)?(audit|review|inspect|assess|critique)\b|\b(an audit of|a review of|post-?mortem|audit the|review the)\b'
+    workflow: review
+    skills: [test-quality, contract-audit, failure-taxonomy, findings-triage, replace-a-running-system, workspace-layout, verify]
+    read_only: true
+    done_rows: false
+    phases:
+      - {agent: architect, step: open, when: changed, task: placement plan before any project file changes}
+      - {agent: reviewer, task: 'correctness findings (FINDINGS-review.md, not a verdict file)'}
+      - {agent: security, parallel: true, task: 'security findings (FINDINGS-security.md, not a verdict file)'}
+      - {agent: tester, verdict: TEST-verdict.md, task: reproduce the top findings}
+      - {agent: architect, step: close, when: changed, verdict: ARCH-verdict.md, task: architecture doc matches reality; hygiene holds}
+  docs:
+    agent: writer
+    deliverable: doc
+    summary: User or developer documentation written from the artifacts.
+    keywords: '\b(documentation|readme|tech[- ]writer|write[- ]up|runbook|handbook|changelog|user guide|api docs)\b|\b(write|update|produce) (the |an? )?(docs?|document|adr)\b'
+    workflow: docs
+    skills: [doc-hygiene, citation-discipline, adr, workspace-layout, verify]
+    read_only: false
+    done_rows: false
+    phases:
+      - {agent: writer, task: 'the document, written from the artifacts, not from reports'}
+      - {agent: reviewer, verdict: REVIEW-verdict.md, task: accuracy review against the artifacts}
+  infra:
+    agent: infra
+    deliverable: build
+    summary: Deploy, services, configuration, scripts that run the system.
+    keywords: '\b(infra|deploy\w*|systemd|cron|docker|container|nginx|dns|firewall|backup|migrate|provision)\b|\b(set up|install|configure) (a |the )?(service|server|host|vm)\b'
+    workflow: infra
+    skills: [coding-discipline, infra-hardening, exposure-gate, replace-a-running-system, reuse-first, workspace-layout, verify]
+    read_only: false
+    done_rows: true
+    phases:
+      - {agent: architect, step: open, task: placement plan; nothing is written before it}
+      - {agent: infra, task: make the change with backups and commit it}
+      - {agent: tester, verdict: TEST-verdict.md, task: verify the literal artifact against the DoD}
+      - {agent: reviewer, verdict: REVIEW-verdict.md, parallel: true, task: adversarial review}
+      - {agent: architect, step: close, verdict: ARCH-verdict.md, task: architecture doc matches reality; hygiene holds}
+  frontend:
+    agent: frontend
+    deliverable: build
+    summary: User-facing UI work - pages, components, styling, accessibility.
+    keywords: '\b(frontend|front-end|ui|user interface|css|html page|web page|react|next\.js|htmx|jinja|landing page|component)\b'
+    workflow: frontend
+    skills: [coding-discipline, ui-quality, exploratory-qa, reuse-first, workspace-layout, verify]
+    read_only: false
+    done_rows: true
+    phases:
+      - {agent: architect, step: open, task: placement plan; nothing is written before it}
+      - {agent: frontend, task: build the UI deliverable and commit it}
+      - {agent: tester, verdict: TEST-verdict.md, task: independent tests against the DoD}
+      - {agent: reviewer, verdict: REVIEW-verdict.md, parallel: true, task: adversarial review}
+      - {agent: architect, step: close, verdict: ARCH-verdict.md, task: architecture doc matches reality; hygiene holds}
+  research:
+    agent: researcher
+    deliverable: doc
+    summary: A cited answer to a question, with the sources checked.
+    keywords: '\b(research|investigate|compare|benchmark|evaluate|survey|literature|which (?:model|library|tool)|options for)\b'
+    workflow: research
+    skills: [citation-discipline, reuse-first, workspace-layout, verify]
+    read_only: false
+    done_rows: false
+    phases:
+      - {agent: researcher, task: a cited research document}
+      - {agent: reviewer, verdict: REVIEW-verdict.md, task: refute the claims against their sources}
+  design:
+    agent: architect
+    deliverable: doc
+    summary: A design or plan document - approach, critical files, trade-offs.
+    keywords: '\b(architect|architecture|design doc|schema design|data model|system design|plan|roadmap|break ?down|milestones|scope out)\b'
+    workflow: design
+    skills: [architecture-review, adr, spike, reuse-first, brainstorm, replace-a-running-system, workspace-layout, verify]
+    read_only: false
+    done_rows: false
+    phases:
+      - {agent: architect, task: the design or plan document with a DoD per step}
+      - {agent: reviewer, verdict: REVIEW-verdict.md, task: refute the design}
+  test:
+    agent: tester
+    deliverable: verdict
+    summary: Independent tests against a stated Definition of Done.
+    keywords: '\b(write|create|add|extend|run|produce)\s+(a\s+|the\s+|an\s+)?(test suite|unit tests?|integration tests?|regression tests?|pytest suite)\b|\bcoverage report\b|\bverify that\b'
+    workflow: test
+    skills: [verify, test-design, test-quality, exploratory-qa, contract-audit, failure-taxonomy, workspace-layout]
+    read_only: false
+    done_rows: false
+    phases:
+      - {agent: architect, step: open, task: placement plan; nothing is written before it}
+      - {agent: tester, verdict: TEST-verdict.md, task: write and run the suite}
+      - {agent: reviewer, verdict: REVIEW-verdict.md, task: review the suite for gaps}
+      - {agent: architect, step: close, verdict: ARCH-verdict.md, task: architecture doc matches reality; hygiene holds}
+  code:
+    agent: coder
+    deliverable: build
+    summary: Application or library code, including bug fixes and refactors.
+    keywords: '\b(implement\w*|build|write|create|develop|refactor|fix|patch|add|change|update|remove|rename|replace|migrate|module|package|library|script|cli|api|endpoint|service|function|class|bug)\b'
+    workflow: code
+    skills: [coding-discipline, test-design, api-design, reuse-first, spike, workspace-layout, verify]
+    read_only: false
+    done_rows: true
+    phases:
+      - {agent: architect, step: open, task: placement plan; nothing is written before it}
+      - {agent: coder, task: build the deliverable and commit it}
+      - {agent: tester, verdict: TEST-verdict.md, task: independent tests against the DoD}
+      - {agent: reviewer, verdict: REVIEW-verdict.md, parallel: true, task: adversarial review}
+      - {agent: architect, step: close, verdict: ARCH-verdict.md, task: architecture doc matches reality; hygiene holds}
+roles:
+  orchestrator:
+    skills: [board, fan-out, findings-triage, brainstorm, exposure-gate, skill-authoring, workspace-layout, verify]
+surfaces: [backend, db, frontend, api contract, tests, docs, deploy]
+verdict_words: {pass: [PASS, SHIP], fail: [FAIL, FIX, RECONSIDER], blocked: [BLOCKED]}
+# small shapes (gate/classify.py): the FIRST is the question shape, tried before the keywords
+# unless the question is a request ("can you ...?"); the others are tried only AFTER a keyword +
+# deliverable signal and an imperative had their say, so an opener never ungates real work
+small_shapes:
+  - '^\s*(what|why|how|is|are|does|do|can|could|should|which|who|when|where)\b.*\?\s*$'
+  - '^\s*(hi|hello|hey|thanks|thank you|ok|okay|ping|status)\W*$'
+  - '^\s*(show|list|tell me|explain|summari[sz]e|remind|reply)\b'
+imperative: '^\s*(?:please\s+)?(audit|review|inspect|assess|critique|implement|build|refactor|secure|harden|pentest|research|document|add|fix|change|update|remove|delete|rename|replace|create|write|make|migrate|upgrade|port|rewrite|extract)\b\s+\S+'
+deliverable_signal: '\b(file|files|module|package|repo|artifact|report|document|tests?|verdict|dod|definition of done|deliver|ship|write to|save to|output (?:dir|path)|\.py|\.md|\.sh|\.ya?ml)\b'

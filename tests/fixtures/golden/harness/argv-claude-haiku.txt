@@ -1,0 +1,14 @@
+claude
+-p
+--model
+haiku
+--permission-mode
+dontAsk
+--setting-sources
+project,local
+--strict-mcp-config
+--add-dir
+<WS>
+--settings
+<WS>/.claude/settings.json
+PROMPT

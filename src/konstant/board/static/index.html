@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>konstant board</title>
+  <link rel="stylesheet" href="/static/board.css">
+</head>
+<body>
+  <header>
+    <h1>konstant board</h1>
+    <span id="whoami" class="muted"></span>
+    <button id="forget" type="button" hidden>forget token</button>
+  </header>
+  <form id="login" hidden>
+    <label for="token">Viewer token (<code>var/secrets/viewer.token</code>)</label>
+    <input id="token" type="password" autocomplete="off" required>
+    <button type="submit">Open</button>
+    <p class="muted">Read-only view. The token stays in this browser only.</p>
+  </form>
+  <main>
+    <section id="tree" aria-label="jobs"></section>
+    <section id="detail" aria-live="polite"></section>
+  </main>
+  <p id="error" role="alert"></p>
+  <script src="/static/board.js"></script>
+</body>
+</html>

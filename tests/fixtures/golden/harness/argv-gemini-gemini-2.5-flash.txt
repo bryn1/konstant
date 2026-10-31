@@ -1,0 +1,13 @@
+gemini
+--approval-mode
+auto_edit
+--policy
+<WS>/.gemini/konstant-policy.toml
+--include-directories
+<WS>
+--output-format
+text
+-m
+gemini-2.5-flash
+-p
+Carry out the konstant phase given above.

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "konstant"
+dynamic = ["version"]
+description = "A self-contained workspace for running coding agents with discipline: job board, task gate, DoD check, verifier."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2",
+    "PyYAML>=6",
+    "tomli>=2; python_version < '3.11'",
+    # the DoD check's `tests` rule runs `<venv python> -m pytest` over the tests a run wrote
+    # ([gate] test_cmd = "auto"), so pytest is a runtime dependency, not only a dev one
+    "pytest>=7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "httpx>=0.27"]
+
+[project.scripts]
+konstant = "konstant.cli.main:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "konstant.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+konstant = ["board/migrations/*.sql", "board/static/*", "harnesses/dsh_gate/konstant-gate.mjs"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+filterwarnings = ["ignore:Using .httpx. with .starlette.testclient. is deprecated"]

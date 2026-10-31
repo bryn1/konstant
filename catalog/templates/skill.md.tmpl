@@ -1,0 +1,17 @@
+# Workflow: `{{type}}`
+
+{{summary}} Producer agent: `{{agent}}` · deliverable: {{deliverable}} · read-only type:
+{{read_only}} · closes by {{close}}.
+
+## Phases (from catalog/types.yaml; `konstant task gate` prints the same list for a run)
+
+{{phases}}
+
+Each phase is one run of the named agent (Claude Code: `.claude/agents/<agent>.md`; any harness:
+`bin/konstant task run` composes it into the phase prompt); a phase agent is a leaf and
+never spawns agents. A verifying phase writes its own verdict file in OUT and pins it with the
+judge command; nobody else writes or edits it. FAIL, FIX or RECONSIDER re-runs the producer and then
+the verifiers into new cycle files (`-c2`, `-c3`) up to the cycle cap. The run is done when
+`konstant task check <run>` exits 0.
+
+{{body}}

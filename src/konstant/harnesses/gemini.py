@@ -1,0 +1,127 @@
+"""Google Gemini CLI (`gemini`). Not exercised against a real install: implemented from the official
+docs and source (docs/cli/cli-reference.md, docs/cli/headless.md, docs/reference/policy-engine.md,
+docs/tools/file-system.md, docs/cli/skills.md, packages/cli/src/config/{config,settings}.ts,
+packages/core/src/utils/paths.ts; docs/HARNESSES.md cites them). Its live smoke is NOT RUN.
+
+Start: `gemini --approval-mode auto_edit --policy <workspace>/.gemini/konstant-policy.toml
+--include-directories <workspace> [-m MODEL] -p "<short instruction>"` with the phase prompt on
+stdin (`-p` is appended to stdin and forces non-interactive mode). `auto_edit` approves the file
+edit tools, which work only inside the workspace directories (cwd + --include-directories); the
+policy file allow-lists the konstant verbs, the local git verbs and the `[permissions] allow`
+test runners for `run_shell_command`, and denies edits to konstant's machinery; in
+non-interactive mode every other call (`ask_user`) is denied. GEMINI_CLI_HOME points into
+`var/harness/gemini/`, so the operator's settings, GEMINI.md memory, policies, extensions and MCP
+servers never load; the generated `.gemini/settings.json` is copied in as that home's settings.
+Auth: GEMINI_API_KEY (or Vertex variables) in the environment; an OAuth login in ~/.gemini is not
+visible to a phase. An allowed test runner runs agent code unconfined unless `--sandbox` (Docker or
+Podman) is added through [harness] command.
+"""
+from __future__ import annotations
+
+import json
+import re
+import shutil
+
+from konstant.agents.settings import GIT_ALLOW, KONSTANT_ALLOW, KONSTANT_DENY
+from konstant.harnesses.base import (PROTECTED_DIR_LIST, PROTECTED_FILE_LIST, Adapter, Phase,
+                                     Reach, harness_home, private_dir)
+
+POLICY = ".gemini/konstant-policy.toml"
+SETTINGS = ".gemini/settings.json"
+_BASH = re.compile(r"^Bash\((.+?)(?: \*|\*)?\)$")
+
+
+def settings_json() -> str:
+    data = {"context": {"fileName": ["AGENTS.md"], "loadMemoryFromIncludeDirectories": True}}
+    return json.dumps(data, indent=2) + "\n"
+
+
+def _q(s: str) -> str:
+    return json.dumps(s)              # a JSON string is a valid TOML basic string
+
+
+def shell_prefixes(ws, allow: list) -> list:
+    forms = ["bin/konstant", str(ws / "bin" / "konstant")]
+    out = [f"{f} {v}" for f in forms for v in KONSTANT_ALLOW]
+    out += [f"git {v}" for v in GIT_ALLOW]
+    out += [f"{ws}/.venv/bin/python -m pytest"]
+    for rule in allow:
+        m = _BASH.match(rule)
+        if m:
+            out.append(m.group(1).strip())
+    return list(dict.fromkeys(out))
+
+
+def policy(ws, allow: list, header: str) -> str:
+    forms = ["bin/konstant", str(ws / "bin" / "konstant")]
+    rows = [f"# {header}",
+            "# konstant's Gemini CLI policy (passed with --policy; workspace-tier policies are "
+            "disabled by Gemini CLI). In non-interactive mode anything not allowed is denied."]
+
+    def rule(**kw):
+        rows.append("")
+        rows.append("[[rule]]")
+        rows.extend(f"{k} = {v}" for k, v in kw.items())
+
+    for prefix in shell_prefixes(ws, allow):
+        rule(toolName=_q("run_shell_command"), commandPrefix=_q(prefix), decision=_q("allow"),
+             priority="100")
+    for f in forms:
+        for verb in KONSTANT_DENY:
+            rule(toolName=_q("run_shell_command"), commandPrefix=_q(f"{f} {verb}"),
+                 decision=_q("deny"), priority="200")
+    rule(toolName=_q("run_shell_command"), commandRegex=_q(r"konstant.*--as[ =]?(owner|verifier)"),
+         decision=_q("deny"), priority="200")
+    paths = [re.escape(str(ws / d)) + "/" for d in PROTECTED_DIR_LIST if not d.startswith("var")]
+    paths += [re.escape(str(ws / f)) + '"' for f in PROTECTED_FILE_LIST
+              if not f.startswith("var/")]
+    # all of var/ (tokens, DB, run records) except a run's own OUT (a run without a project)
+    paths += [re.escape(str(ws / "var")) + "/(?!runs/[^/]+/out/)"]
+    paths += [re.escape(str(ws)) + "/(?:.+/)?\\.git/"]
+    rule(toolName='["write_file", "replace"]',
+         argsPattern=_q('"file_path":"(?:' + "|".join(paths) + ")"),
+         decision=_q("deny"), priority="300")
+    return "\n".join(rows) + "\n"
+
+
+class Gemini(Adapter):
+    name = "gemini"
+    binary = "gemini"
+    stdin = True
+    model_key = "-m <model> (e.g. gemini-2.5-flash)"
+    local_models = ("no: Gemini CLI speaks the Gemini API only (an OpenAI-compatible endpoint "
+                    "needs a translating gateway, not tested)")
+    surfaces_doc = ("AGENTS.md (context.fileName), .agents/skills/*/SKILL.md (workspace tier), "
+                    ".gemini/settings.json, .gemini/konstant-policy.toml (passed with --policy)")
+
+    def argv(self, ph: Phase) -> list:
+        a = [self.binary, "--approval-mode", "auto_edit", "--policy", str(ph.workspace / POLICY),
+             "--include-directories", str(ph.workspace), "--output-format", "text"]
+        if ph.model:
+            a += ["-m", ph.model]
+        return a + ["-p", "Carry out the konstant phase given above."]
+
+    def env(self, ph: Phase) -> dict:
+        return {"GEMINI_CLI_HOME": str(harness_home(ph.workspace, "gemini"))}
+
+    def prepare(self, ph: Phase) -> None:
+        d = private_dir(harness_home(ph.workspace, "gemini") / ".gemini")
+        src = ph.workspace / SETTINGS
+        if src.is_file():
+            shutil.copyfile(src, d / "settings.json")
+
+    def files(self, gen, hcfg: dict) -> dict:
+        return {SETTINGS: settings_json(), POLICY: policy(gen.ws, gen.perm.get("allow", []),
+                                                           gen.header)}
+
+    def reach(self, hcfg: dict, perm: dict, jail: bool = True) -> Reach:
+        return Reach(
+            edits=("enforced", "edit tools work only inside the workspace directories; the policy "
+                   "denies konstant's machinery and .git/ (from the docs; not exercised live)"),
+            commands=("partial", "policy allow list; ask_user = deny in non-interactive mode; an "
+                      "allowed test runner runs agent code UNSANDBOXED unless --sandbox "
+                      "(Docker/Podman)"),
+            reads=("partial", "file tools confined to the workspace directories (var/secrets/ is "
+                   "inside them); allowed commands read anything you can"),
+            user_level=("enforced", "GEMINI_CLI_HOME relocated into var/harness/gemini: no user "
+                        "settings, GEMINI.md memory, policies, extensions or MCP servers"))

@@ -1,0 +1,8 @@
+# Maintainer-only paths (CI, private planning notes, the local denylist) never enter the release
+# tarball (git archive); release/build.py refuses the notes and the denylist again.
+docs/INVENTORY.md export-ignore
+docs/PLAN.md export-ignore
+docs/OPEN-QUESTIONS.md export-ignore
+docs/build/ export-ignore
+release/denylist* export-ignore
+.github/ export-ignore

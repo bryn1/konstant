@@ -1,0 +1,16 @@
+/.venv/
+__pycache__/
+*.egg-info/
+/build/
+/dist/
+/var/
+/projects/
+/konstant.toml
+/.claude/
+/CLAUDE.md
+/AGENTS.md
+/release/denylist*
+.pytest_cache/
+/.agents/
+/.dsh/
+/.gemini/

@@ -1,0 +1,7 @@
+#!/bin/sh
+# konstant wrapper (written by install.sh): runs konstant from this folder's venv with this folder
+# as the workspace (KONSTANT_HOME), unless KONSTANT_HOME is already set.
+HERE=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+: "${KONSTANT_HOME:=$HERE}"
+export KONSTANT_HOME
+exec "$HERE/.venv/bin/python" -m konstant "$@"

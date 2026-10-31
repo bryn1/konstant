@@ -1,0 +1,44 @@
+# konstant workspace: rules for any coding agent
+
+This folder (`{{workspace}}`) is a **konstant** workspace: a local job board, a deterministic task
+gate, a mechanical Definition-of-Done check and a verifier. These rules are generated from `catalog/`
+by `bin/konstant agents sync` for harnesses that read `AGENTS.md` (Codex, Gemini CLI, DeepSeek
+Harness and others; docs/HARNESSES.md); Claude Code reads the same rules from `CLAUDE.md` and
+`.claude/`.
+
+**Agent profiles:** {{profiles}} Skills are in `{{skills_dir}}<name>/SKILL.md` and each type's
+workflow in `{{skills_dir}}workflow-<type>/SKILL.md`.
+When your harness cannot spawn subagents, run the phases yourself in order, each time reading and
+following that phase's agent profile, and never write the verdict of a phase you also produced: hand
+verifying phases to another session or to the unattended runner (`bin/konstant task run`).
+
+**If your prompt starts with `# konstant phase`, you are a phase agent:** follow the profile and the
+phase brief in your prompt, do only your phase, and ignore the orchestrator section below.
+
+## Operating konstant (any agent, any model)
+
+Everything goes through `bin/konstant` (from a project directory: `{{workspace}}/bin/konstant`);
+add `--json` before the verb for machine-readable output, and `--help` after any verb for its
+flags. Exit codes: 0 ok, 1 refused or failed (the reason is printed), 2 usage or not found; the DoD
+check and the verifier also use 3 (UNMET / FAIL) and 4 (BLOCKED). Start with `bin/konstant job
+list` and `bin/konstant job search "<words>"`: the board is the record of all work; a task without
+a job does not exist.
+
+{{operate}}
+
+Not yours (whatever your harness lets you run): `konstant verify` and `job verdict` (the verifier's
+role; the identity that closed a job can never verify it), `job approve`, `konstant task run` (the
+person at the keyboard starts the unattended runner), `konstant board ...` and `agents sync`. Never
+read or print `var/secrets/`. The full command reference is `docs/CLI.md`.
+
+## Task types: one agent each
+
+Types: {{types}}.
+
+{{routing}}
+
+{{orchestrator}}
+
+## Shared doctrine
+
+{{base}}

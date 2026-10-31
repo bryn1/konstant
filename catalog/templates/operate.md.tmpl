@@ -1,0 +1,12 @@
+| need | command |
+|---|---|
+| find prior work | `bin/konstant job search "<words>"` |
+| classify a task | `bin/konstant task classify "<task>"` |
+| file a job (brief needs a `DoD:` section) | `bin/konstant job add "<title>" --project <slug> --type <type> --brief <file>` |
+| start it | `bin/konstant job claim <id>` |
+| record progress, or stop with a reason | `bin/konstant job note <id> "<text>"`, `bin/konstant job block <id> "<reason>"` |
+| gate a typed task | `bin/konstant task gate "<task>" --job <id>` |
+| check the DoD of a run | the check command printed in the gate block (exit 0 MET, 3 UNMET, 4 BLOCKED) |
+| close with evidence | `bin/konstant job close <id> --evidence <file>` (needs a real `VERIFY_EXIT=0`) |
+| close a review/docs/design/research job | not you: the owner or the verifier runs `bin/konstant job review <id> --verdict <file> --done <file>` (the board refuses a review by the identity that filed, claimed or closed the job); leave a `job note` that it is ready |
+| see a job in full | `bin/konstant job show <id> --json --trail` |

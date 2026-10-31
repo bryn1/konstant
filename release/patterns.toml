@@ -1,0 +1,44 @@
+# Public-safety patterns for `python -m konstant.release scan|build` (DESIGN §11).
+#
+# Each [patterns.<name>] has a Python regex `regex` and an optional `allow` list of regexes; a
+# match that fully matches any `allow` entry is not a finding. Names that must never be published
+# (people, hosts, organisations, private repos) do NOT belong here: this file ships. They go in the
+# maintainer-local, git-ignored `release/denylist.local.txt`, one case-insensitive regex per line.
+
+[patterns.ipv4]
+regex = '(?<![\w.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\w.])'
+# loopback, unspecified, and the documentation ranges (RFC 5737)
+allow = ['127\.\d+\.\d+\.\d+', '0\.0\.0\.0', '192\.0\.2\.\d+', '198\.51\.100\.\d+', '203\.0\.113\.\d+']
+
+[patterns.email]
+regex = '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
+allow = ['[^@]+@example\.(?:com|org|net)', 'noreply@[A-Za-z0-9.-]+', '[^@]+@[A-Za-z0-9.-]+\.(?:invalid|test|example)']
+
+[patterns.github_token]
+regex = '\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})'
+
+[patterns.cloud_key]
+regex = '\b(?:AKIA|ASIA)[0-9A-Z]{16}\b|\bAIza[0-9A-Za-z_-]{35}\b|\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{32,}'
+
+[patterns.chat_token]
+regex = '\bxox[abposr]-[A-Za-z0-9-]{10,}|\b\d{8,10}:AA[A-Za-z0-9_-]{30,}'
+
+[patterns.private_key]
+regex = '-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----'
+
+[patterns.assigned_secret]
+# token = "<24+ chars of hex/base64>" (also key, secret, password); values built at run time are
+# not literals and do not match
+regex = '''(?i)\b(?:token|secret|api[_-]?key|password|passwd)\b["']?\s*[:=]\s*["'][A-Za-z0-9+/_=-]{24,}["']'''
+
+[patterns.home_path]
+regex = '/home/[A-Za-z0-9_.-]+/'
+allow = ['/home/(?:user|you|me|name|USER|alice|bob)/', '/home/<[^>]*>/']
+
+[patterns.server_path]
+regex = '(?<![\w.])/srv/[A-Za-z0-9_.-]+'
+allow = ['/srv/(?:ws|example)']
+
+[patterns.ticket_ref]
+# internal ticket references: an uppercase prefix, optional space, `#` and 3+ digits
+regex = '\b[A-Z]{2,5} ?#\d{3,}\b'

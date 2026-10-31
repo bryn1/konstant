@@ -1,0 +1,32 @@
+# konstant workspace
+
+This folder is a **konstant** workspace (`{{workspace}}`): a local job board, a deterministic task
+gate that turns a typed task into phases run by one agent per phase, a mechanical Definition-of-Done
+check, and a verifier that re-checks closed work. Everything lives in this folder; the board listens
+on loopback only. These rules are generated from `catalog/` by `bin/konstant agents sync`; change
+the catalog, not this file.
+
+**If your prompt starts with `# konstant phase` (it carries `KONSTANT-AGENT:` lines), you are a
+phase agent:** follow the profile and the phase brief in your prompt, do only your phase, never spawn
+agents, and ignore the orchestrator section below.
+
+## Using konstant (`bin/konstant`, or `{{workspace}}/bin/konstant` from a project directory)
+
+{{operate}}
+
+Not from inside a session (denied by `.claude/settings.json`): `konstant verify` and verdicts (the
+verifier's role; the identity that closed a job can never verify it), `konstant task run` (the
+person at the keyboard starts the unattended runner), `konstant board ...` and `agents sync`.
+
+## Task types: one agent each
+
+Types: {{types}}. A typed task runs the phases of its workflow skill; the producer agent builds the
+deliverable and different agents verify it.
+
+{{routing}}
+
+{{orchestrator}}
+
+## Shared doctrine (every agent follows it)
+
+{{base}}
