@@ -137,8 +137,9 @@ and 5 for a failure of the check itself. The rules:
 A DONE.md row `DECLINED | <claim> | job <id>` excuses a finding only when the claim quotes it and
 job `<id>` carries an owner note `DECLINED: <the same claim>` (`bin/konstant --as owner job note
 <id> "DECLINED: ..."`), read from a reachable board. It never excuses the verdicts, phases,
-judged, tests, verified or authorship rules: what the verifiers and the tests say is not waived by
-text an agent writes.
+judged, tests, verified, authorship or holdouts rules: what the verifiers, the tests and the
+holdouts say is not waived by text an agent writes. A producer that believes a holdout contradicts
+the DoD writes `DISPUTE | H<n> | <why>`: the run stops BLOCKED and the owner decides.
 
 On UNMET the runner resumes the phase that owns the first reason, up to `[gate] max_resumes`
 times. It stops early when the same reason comes back unchanged. BLOCKED is never resumed.
@@ -170,6 +171,40 @@ times. It stops early when the same reason comes back unchanged. BLOCKED is neve
    means nothing independent could be verified. Then it posts the verdict.
 
 `--dry-run` reads and prints without writing anything. `--pending` verifies every job that waits.
+
+## Holdouts
+
+A holdout is a black-box acceptance scenario for one job that the agent doing the work never
+sees (level 5, [LEVEL5.md](LEVEL5.md) section 3). You write it before the job is claimed, in a
+file OUTSIDE the workspace:
+
+```
+SCENARIO: greet uses the caller's name
+KIND: proof
+RUN: python3 -c "from greeter import greet; print(greet('Ada'))"
+EXPECT_EXIT: 0
+EXPECT_OUT: hello Ada
+HINT: names other than the default are used verbatim
+```
+
+`bin/konstant holdout add JOB --file h1.scenario --file h2.scenario` checks the files (every key
+present; `RUN` drives the product itself, not a test runner, and runs without a shell; the
+expectation is not trivial and does not appear in the job's brief or DoD; the hint gives nothing
+away; at least `[holdout] min_per_job` scenarios, one of them `proof`), runs each once on the
+project's current commit (a `proof` that already passes there checks nothing: `VACUOUS`; a
+`regression` must pass), and then MOVES the files into the sealed store `var/holdout/`. The board
+keeps only a hash of each file. The job is now `holdout_required`: it cannot be claimed without a
+sealed set.
+
+The store is masked inside konstant's jail and read-denied by every harness adapter, and a job
+with holdouts runs only when every phase is jailed (`task run --harness dsh` today; otherwise exit
+2 `holdouts need a confined phase`). The producer is told only that holdouts exist and how many.
+`konstant verify` then checks the store against the hashes, scans for a leaked canary or a copied
+expectation, materialises the exact commit the job closed with, and runs every scenario there
+without network. A failure shows only `holdout H1 failed (hint: ...)`; PASS needs everything a
+level-4 PASS needs **and** every holdout passed. Repeated failures wear a set out (it is retired
+and a fresh one must be sealed); a leaked canary burns it. `holdout list` shows ids, kinds, hashes
+and states, never content; `holdout show` prints one file and is refused inside a task run.
 
 ## Generated surfaces
 
@@ -244,6 +279,11 @@ loopback (a remote bind needs `[board] allow_remote = true`); request bodies cap
   minus `~/.claude/.credentials.json` (their sandboxed shells need the rest). Everything else is
   NOT masked: other files in your home stay readable to jailed code (a key kept in
   `~/notes.txt` is readable). Keep secrets in the listed locations or out of reach.
+- **The holdout store `var/holdout/` is unreadable to every phase**: the jail masks it, Claude
+  Code's settings and sandbox deny reading it, the codex profile denies it and the gemini policy
+  denies its file tools; a job with holdouts runs only on jailed phases. A process you run
+  yourself, unjailed and as the same OS user, can still read it: for stronger separation put
+  `[holdout] store` outside the workspace, owned by the OS user that runs `konstant verify`.
 - **konstant's machinery is read-only to every phase, whatever the harness**
   (`konstant/machinery.py`, one list read by the Claude settings, the codex profile, the gemini
   policy and the jail): `bin/`, `.venv/`, `src/`, `catalog/`, `tests/`, `install.sh`, `get.sh`,

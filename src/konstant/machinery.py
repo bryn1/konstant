@@ -14,6 +14,11 @@ in every one of them. A phase may never write any of these paths, whatever the h
     and the other bookkeeping files under var/,
   - any .git/ directory (a .git/config or hook edit turns a later git command into arbitrary
     execution; shells that must commit get .git/config and .git/hooks read-only instead).
+
+SEALED (docs/LEVEL5.md 2.3, 3.3) lists what no phase may even READ: the holdout store
+var/holdout/. The jail masks it (jail.hidden), Claude Code's settings deny Read on it and
+read-deny it in the sandbox, the codex profile denies it and the gemini policy denies its file
+tools under it. No holdout content is ever stored anywhere else a phase can read.
 """
 from __future__ import annotations
 
@@ -23,11 +28,13 @@ from pathlib import Path
 # workspace-relative directories no phase may write
 DIRS = ("bin", ".venv", "src", "catalog", "tests",
         ".claude", ".agents", ".dsh", ".gemini",
-        ".git", "var/secrets", "var/harness", "var/logs", "var/locks")
+        ".git", "var/secrets", "var/harness", "var/logs", "var/locks", "var/holdout")
 # workspace-relative files no phase may write
 FILES = ("konstant.toml", "install.sh", "get.sh", "pyproject.toml", "AGENTS.md", "CLAUDE.md",
          "var/board.db", "var/board.db-wal", "var/board.db-shm", "var/board.pid",
          "var/sessions.json")
+# workspace-relative directories no phase may READ (the sealed holdout store; LEVEL5 2.3)
+SEALED = ("var/holdout",)
 # inside a git repository a shell may commit to: the parts that make git run commands
 GIT_GUARDS = (".git/config", ".git/hooks")
 # per run (var/runs/<run>/): the records konstant writes and the DoD check trusts
@@ -51,6 +58,11 @@ SELF_HOME = {"claude": ("~/.claude", ("~/.claude/.credentials.json",)),
 
 def dirs(ws) -> list:
     return [Path(ws) / d for d in DIRS]
+
+
+def sealed(ws) -> list:
+    """The absolute sealed paths of workspace `ws` (read at call time: tests empty SEALED)."""
+    return [Path(ws) / d for d in SEALED]
 
 
 def files(ws) -> list:

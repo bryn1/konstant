@@ -1,8 +1,10 @@
 # konstant level 5: the dark factory
 
-Status: **plan**. Nothing on this page exists in 0.1.0. It is the design that the next releases
-build in the waves listed in section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as
-each part lands, and this page stays the roadmap until level 5 is reached.
+Status: **plan, being built**. Wave L5-1 (pillar A, sealed holdouts: section 3) has landed and is
+described as built in DESIGN.md §7.1; "L5-1 as built" in section 8 lists where it differs from the
+text below. Everything else on this page is still the plan that the next releases build in the
+waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as each part lands, and
+this page stays the roadmap until level 5 is reached.
 
 ## 0. Levels
 
@@ -103,7 +105,7 @@ The board DB and run records stay readable to phases, as in 0.1.0 (the second re
 **Therefore no holdout content ever enters the DB, a run record or a trail row.** The board stores
 only a commitment per scenario (3.2).
 
-`machinery.py` gains `var/holdout` and `var/factory` in `DIRS` (no phase writes them) and a new
+`machinery.py` gains `var/holdout` (L5-1) and `var/factory` (L5-5) in `DIRS` (no phase writes them) and a new
 tuple `SEALED = ("var/holdout",)` (no phase reads it). `jail.hidden()` masks `SEALED` next to
 `var/secrets/`. Every adapter renders `SEALED` as a read denial (3.3). The existing test that
 checks every machinery entry against every adapter
@@ -134,15 +136,17 @@ src/konstant/verify/holdout.py           # materialise the pinned commit, run sc
 src/konstant/factory/   goal.py intake.py ship.py budget.py notify.py loop.py
 src/konstant/cli/       goal.py factory.py holdout.py ship.py
 src/konstant/board/api/factory.py        # read routes for the status view; ship/escalation writes
-src/konstant/board/migrations/0002_factory.sql
+src/konstant/board/migrations/0002_holdouts.sql 0003_... (one per wave that adds tables)
 ```
 
-`0002_factory.sql` (`board/migrate.py` drives it from `schema_meta.version`):
+The migrations (`board/migrate.py` drives them from `schema_meta.version`). L5-1 shipped
+`0002_holdouts.sql`: `holdouts`, `jobs.holdout_required`, `verifications.holdout_json` and every
+level-5 trail kind (one rebuild of `trail` for all of them); the other tables come with their waves:
 
 | table | columns (essential) | rules |
 |---|---|---|
 | `goals` | `id, slug, project_id, spec_json, spec_sha256, status (active/paused/done/stopped), created_at` | `spec_sha256` immutable (trigger, like `jobs_acceptance_immutable`) |
-| `holdouts` | `id, job_id, hid, kind (proof/regression), sha256, author_label, sealed_at, state (sealed/burned/retired)` | no delete; `sha256` immutable; no content column |
+| `holdouts` | `id, job_id, hid, kind (proof/regression), sha256, author_label, sealed_at, trail_id, generation, state (sealed/burned/retired)` | no delete; `sha256` immutable; no content column; `trail_id` orders the seal against claims, `generation` numbers the sets |
 | `ships` | `id, job_id, goal_id, target, commit_sha, pre_ref, rollback_sha, state (shipped/rolled_back/rollback_failed), post_json, created_at, updated_at` | append-only state changes |
 | `budget_ledger` | `id, goal_id, job_id, run_id, kind (wall_s/task_runs/phases/tokens/cost/rollbacks), amount, at` | append-only (trigger, like `trail_no_update`) |
 | `escalations` | `id, goal_id, job_id, kind, reason, delivered_at, acked_by, created_at` | append-only except `delivered_at`/`acked_by` |
@@ -168,15 +172,20 @@ File format (one scenario per file, `var/holdout/<job>/H<n>.scenario`):
 
 ```
 SCENARIO: greet uses the caller's name
-KIND: proof                       # proof: must FAIL before the work; regression: must PASS before and after
+KIND: proof
 RUN: python3 -c "from greeter import greet; print(greet('Ada'))"
 EXPECT_EXIT: 0
-EXPECT_OUT: hello Ada             # exact stripped stdout; or EXPECT_RE: ^hello Ada$ (fullmatch)
+EXPECT_OUT: hello Ada
 HINT: names other than the default are used verbatim
 CANARY: khc-6c1d0f0e9b2a47d8a3f5
 ```
 
-- `RUN` is a command, as a DoD `VERIFY_CMD:` is. It may not call a test runner (`pytest`,
+- `KIND: proof` must FAIL before the work; `regression` must PASS before and after. A line that
+  starts with `#` is a comment; a value runs to the end of its line, so an expectation may hold `#`.
+
+- `RUN` is a command, as a DoD `VERIFY_CMD:` is, but it is split with shlex and runs as an argv,
+  never through a shell: a control character, or a shell operator (`; & | < >`, a backtick, `$`)
+  outside quotes is refused. It may not call a test runner (`pytest`,
   `unittest`, `npm test`, ...). A project's conftest, plugins or test config could rewrite a test
   runner's verdict, so a holdout drives the product's own interface.
 - The expectation never enters the jail. The verifier matches stdout and the exit code outside
@@ -194,12 +203,14 @@ CANARY: khc-6c1d0f0e9b2a47d8a3f5
 (3.4) both end in `holdout/store.py` `seal()`:
 
 1. **Lint** (`holdout/lint.py`, deterministic):
-   - every key is present, and `RUN` parses with the same safe-character rules as probes;
+   - every key is present, and `RUN` parses as an argv under the rules of 3.1 (the probes'
+     stricter character rules would refuse the `;` inside a quoted `python3 -c` argument);
    - the expectation is not trivial;
    - **held out**: no expectation literal of 4 or more characters and no quoted `RUN` argument
      appears in the job's brief or acceptance (`NOT HELD OUT: H1 ...`);
-   - the job has at least `[holdout] min_per_job` scenarios (default 2), and at least one of
-     them is `proof`.
+   - the job, counting its sealed scenarios and the files of this `holdout add` (`--file` is
+     repeatable), has at least `[holdout] min_per_job` scenarios (default 2), at least one of
+     them `proof`, and no canary twice.
 2. **Negative control.** Every scenario is run once against the job's base commit (the target
    tip the clone starts from), the same way the verifier will run it (3.6). A `proof` scenario
    that already passes on the base checks nothing: `VACUOUS: H1 passes before the work`. A
@@ -727,7 +738,7 @@ for what it lands.
 
 | wave | delivers | extends (existing code) | depends on | acceptance |
 |---|---|---|---|---|
-| **L5-1** sealed holdouts (before L5-2 only dsh phases are confined, so the adversarial modes run through the real dsh adapter with `tests/fixtures/stub_dsh.py`, as the second review's fixes did) | scenario format, `holdout add/list/check/show`, `holdout/store.py` + `lint.py` + `leak.py`, `verify/holdout.py` (pinned materialisation, jailed no-network runs, redacted findings), settle extension, `0002` tables `holdouts` + `verifications.holdout_json`, `machinery.SEALED` in jail + all adapters, DECLINED cannot excuse holdouts, the claim guard, `jobs.holdout_required`, fake modes `overfit`, `peek`, `leak` | `machinery.py`, `jail.py` `hidden`, `verify/verifier.py` `settle`/`verify_job`, `verify/rerun.py`, `agents/settings.py` `render`, `harnesses/codex.py` `filesystem`, `harnesses/gemini.py`, `gate/rules/done.py`, `board/migrate.py` | v0.1.0 | A1-A3, A5-A13 (through the dsh adapter) |
+| **L5-1** sealed holdouts (**done**; see "L5-1 as built" below) (before L5-2 only dsh phases are confined, so the adversarial modes run through the real dsh adapter with `tests/fixtures/stub_dsh.py`, as the second review's fixes did) | scenario format, `holdout add/list/check/show`, `holdout/store.py` + `lint.py` + `leak.py`, `verify/holdout.py` (pinned materialisation, jailed no-network runs, redacted findings), settle extension, `0002` tables `holdouts` + `verifications.holdout_json`, `machinery.SEALED` in jail + all adapters, DECLINED cannot excuse holdouts, the claim guard, `jobs.holdout_required`, fake modes `overfit`, `peek`, `leak` | `machinery.py`, `jail.py` `hidden`, `verify/verifier.py` `settle`/`verify_job`, `verify/rerun.py`, `agents/settings.py` `render`, `harnesses/codex.py` `filesystem`, `harnesses/gemini.py`, `gate/rules/done.py`, `board/migrate.py` | v0.1.0 | A1-A3, A5-A13 (through the dsh adapter) |
 | **L5-2** confinement + identities | generalised `Adapter.confine` for every harness in factory mode, one exposed identity token per phase, labelled worker tokens, board label guards, job clones + target read-only, `jobs.workdir` and the `{workdir}` probe substitution (`verify/probe.py`, `verifier.project_dir`), `Adapter.relocatable_home`, doctor `factory` rows, live smoke of a jailed claude phase (records whether Claude's sandbox nests) | `harnesses/base.py`, `claude.py`, `codex.py`, `gemini.py`, `command.py`, `board/auth.py`, `board/api/lifecycle.py`, `board/transitions.py`, `cli/task_run.py`, `cli/doctor.py` | L5-1 | A4 on every adapter, B6, B7, C9 |
 | **L5-3** intake + scenario writer | goal files (`goal add/list/show/pause/resume/cancel`), type `intake` + agent `planner`, `DOD-verdict.md`, deterministic filing, approval rule, role agent `scenario-writer`, `holdout/author.py` with the run dir in the store, fake planner / reviewer / scenario modes incl. `weak-dod` | `catalog/types.yaml`, `catalog.py` `ROLE_AGENTS`, `board/dod.py` `lint`, `gate/runner.py`, `gate/rules/authorship.py`, `gate/rules/judged.py`, `agents/generate.py` | L5-2 | B1-B5, B8-B10 |
 | **L5-R1** independent review 1 | review only, by someone who built none of L5-1..3: try to reach `verified` past holdouts, read the store from every harness, leak through feedback, transcripts, the board or run records, forge identities, weaken a generated DoD; one reproduction per finding | the adversarial fake harness, as the first two reviews did | L5-3 | report with severity per finding |
@@ -737,6 +748,33 @@ for what it lands.
 | **L5-6** proof of level 5 | `examples/greeter/`, `tests/e2e/factory.sh` (P1-P5), CI job, QUICKSTART "level 5" section, the optional live run recorded | `tests/e2e/fresh_install.sh`, `tests/fixtures/fake_harness.py` | L5-5 | `E2E-FACTORY: PASS`; full `pytest`; release build CLEAN |
 | **L5-R2** independent review 2 | review of the whole factory (ship, rollback, budgets, loop, notifier, view) plus a regression run of F-01..F-35, G-01..G-07 and the L5-R1 findings, on a tarball installed the documented way | — | L5-6 | report |
 | **L5-F2** fixes 2 + release | red-then-green tests per finding, zero open P0/P1, CHANGELOG, a release build; tagging and publication are the owner's step | — | L5-R2 | full `pytest`, `E2E-FACTORY: PASS`, `RESULT: CLEAN` |
+
+### L5-1 as built
+
+Landed as DESIGN.md §7.1 describes. Where it differs from sections 2-3 above, and why:
+
+- The migration is `0002_holdouts.sql`, not one `0002_factory.sql`: each wave adds its own tables
+  in its own migration. It also rebuilds `trail` once for every level-5 trail kind, and adds
+  `holdouts.trail_id` (the seal is ordered against claims by trail id, not by second-precision
+  timestamps) and `holdouts.generation` (the exposure budget counts failed rounds per set).
+- Scenario format: no inline comments (the example in 3.1 had them); `RUN` follows argv rules, not
+  the probes' character rules (3.1, 3.2). `holdout add` takes several `--file`s, because the set
+  rule (min_per_job, a proof) is checked over the sealed set plus the new files.
+- Confinement before L5-2: a holdout job runs only when every harness of the run confines its
+  phases (`Adapter.confines`; dsh only), else exit 2 `holdouts need a confined phase`; `task gate`
+  (an interactive, unconfined session) refuses such a job with exit 2 as well. Without job clones
+  (L5-2) the scenarios run on the evidence `COMMIT=` materialised at the project's own path, and the
+  negative control on the project's current HEAD.
+- The board also refuses a PASS verdict on a holdout job unless it carries the verifier's holdout
+  result for the sealed set (every holdout passed, the commitment digest, no LEAK), whoever posts
+  it; holdouts are sealed only while the job is `queued` or `waiting_approval`.
+- A `DISPUTE` row stops the run BLOCKED (`rules/holdouts.py`) until the escalation path of L5-5
+  exists; a second worn set blocks the job with a `DECISION` reason on the trail.
+- A program in `RUN` that is not on PATH (or not executable in the tree) makes a scenario
+  unrunnable (BLOCKED), as a timeout does: bubblewrap's own exit code cannot tell "not found" from
+  the product's exit 1.
+- The scenario runs see the host `/tmp` read-only (the same jail shape as the tests rule, 3.6
+  step 2) and write only to the materialised tree and a private `TMPDIR`, both deleted.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

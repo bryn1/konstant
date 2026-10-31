@@ -282,3 +282,9 @@ toolName = ["write_file", "replace"]
 argsPattern = "\"file_path\":\"(?:<WS>/bin/|<WS>/\\.venv/|<WS>/src/|<WS>/catalog/|<WS>/tests/|<WS>/\\.claude/|<WS>/\\.agents/|<WS>/\\.dsh/|<WS>/\\.gemini/|<WS>/\\.git/|<WS>/konstant\\.toml\"|<WS>/install\\.sh\"|<WS>/get\\.sh\"|<WS>/pyproject\\.toml\"|<WS>/AGENTS\\.md\"|<WS>/CLAUDE\\.md\"|<WS>/var/(?!runs/[^/]+/out/)|<WS>/(?:.+/)?\\.git/)"
 decision = "deny"
 priority = 300
+
+[[rule]]
+toolName = ["read_file", "read_many_files", "glob", "search_file_content"]
+argsPattern = "(?:<WS>/var/holdout|var/holdout)(?:/|\"|$)"
+decision = "deny"
+priority = 300

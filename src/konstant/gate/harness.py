@@ -108,6 +108,12 @@ class Harness:
             return build_argv(self.command, {**values, "model": self.model}, self.stdin)
         return self.adapter.argv(self.phase(values))
 
+    def confines(self) -> bool:
+        """True when every phase on this harness runs inside konstant.jail (an adapter that
+        confines itself; an explicit command template never does)."""
+        return self.command is None and self.adapter is not None and \
+            self.adapter.confines(self.jail)
+
     def check(self, run_dir: Path | None = None) -> None:
         """Fail fast on a template that cannot work (before any phase starts)."""
         rd = Path(run_dir or self.workspace / "var" / "runs" / "-")
@@ -219,6 +225,11 @@ class HarnessSet:
     def check(self) -> None:
         for h in [self.default, *self.by_type.values()]:
             h.check()
+
+    def unconfined(self) -> list:
+        """Names of the harnesses of this set whose phases would run outside konstant.jail."""
+        return list(dict.fromkeys(h.name for h in [self.default, *self.by_type.values()]
+                                  if not h.confines()))
 
     def run(self, prompt: str, *, agent: str, **kw) -> PhaseResult:
         return self.for_agent(agent).run(prompt, agent=agent, **kw)

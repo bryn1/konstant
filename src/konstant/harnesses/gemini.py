@@ -8,7 +8,9 @@ Start: `gemini --approval-mode auto_edit --policy <workspace>/.gemini/konstant-p
 stdin (`-p` is appended to stdin and forces non-interactive mode). `auto_edit` approves the file
 edit tools, which work only inside the workspace directories (cwd + --include-directories); the
 policy file allow-lists the konstant verbs, the local git verbs and the `[permissions] allow`
-test runners for `run_shell_command`, and denies edits to konstant's machinery; in
+test runners for `run_shell_command`, denies edits to konstant's machinery and denies the file
+tools that read (read_file, read_many_files, glob, search_file_content) under the sealed holdout
+store var/holdout/; in
 non-interactive mode every other call (`ask_user`) is denied. GEMINI_CLI_HOME points into
 `var/harness/gemini/`, so the operator's settings, GEMINI.md memory, policies, extensions and MCP
 servers never load; the generated `.gemini/settings.json` is copied in as that home's settings.
@@ -22,11 +24,13 @@ import json
 import re
 import shutil
 
+from konstant import machinery
 from konstant.agents.settings import GIT_ALLOW, KONSTANT_ALLOW, KONSTANT_DENY
 from konstant.harnesses.base import (PROTECTED_DIR_LIST, PROTECTED_FILE_LIST, Adapter, Phase,
                                      Reach, harness_home, private_dir)
 
 POLICY = ".gemini/konstant-policy.toml"
+READ_TOOLS = ["read_file", "read_many_files", "glob", "search_file_content"]
 SETTINGS = ".gemini/settings.json"
 _BASH = re.compile(r"^Bash\((.+?)(?: \*|\*)?\)$")
 
@@ -81,6 +85,13 @@ def policy(ws, allow: list, header: str) -> str:
     rule(toolName='["write_file", "replace"]',
          argsPattern=_q('"file_path":"(?:' + "|".join(paths) + ")"),
          decision=_q("deny"), priority="300")
+    # the sealed holdout store (machinery.SEALED): no file tool reads, lists or searches it
+    # (LEVEL5 3.3); a shell command is outside the policy's reach (the jail covers it)
+    sealed = [re.escape(str(ws / d)) for d in machinery.SEALED]
+    sealed += [re.escape(d) for d in machinery.SEALED]
+    if sealed:
+        rule(toolName=_q(READ_TOOLS), argsPattern=_q("(?:" + "|".join(sealed) + ")(?:/|\"|$)"),
+             decision=_q("deny"), priority="300")
     return "\n".join(rows) + "\n"
 
 

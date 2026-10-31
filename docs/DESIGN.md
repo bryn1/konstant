@@ -1,4 +1,4 @@
-# konstant — design (v0.1.0, pre-release)
+# konstant — design (v0.1.0, pre-release; level-5 wave L5-1 landed)
 
 konstant is a self-contained workspace for running coding agents with discipline: a local job
 board (**board**), a deterministic **task gate** that turns a task into phases run by one agent
@@ -6,6 +6,10 @@ profile per task type, a mechanical **Definition-of-Done (DoD) check + loop**, a
 **verifier** that re-checks closed work by read-only probes, and a catalog of **agents, skills and
 workflows** generated into the surfaces an agent harness reads (Claude Code, Codex, Gemini CLI,
 DeepSeek Harness or any CLI agent; docs/HARNESSES.md).
+
+Level 5 (docs/LEVEL5.md) lands wave by wave; this document describes what exists. Wave L5-1 added
+sealed holdout scenarios (§7.1): black-box acceptance checks a producing phase cannot read, run
+only by the verifier.
 
 References of the form F-nn and G-nn name findings of the two independent security reviews of
 v0.1; docs/CONCEPTS.md "Security reviews" summarises them, and each has a test under `tests/review/`.
@@ -49,12 +53,13 @@ konstant-0.1.0/
     client.py                  # stdlib HTTP client (urllib) used by every CLI verb
     catalog.py                 # load + validate catalog/types.yaml, agents, skills, workflows
     cli/                       # argparse front end: main, board, project, job, task (+ task_run,
-                               # task_session), verify, agents, dsh, doctor
+                               # task_session), verify, holdout, agents, dsh, doctor
     board/
       app.py                   # FastAPI app factory, static read-only UI
       api/                     # deps (auth deps, serialisation), projects, jobs (file/read),
-                               # lifecycle (claim..move), verify (verdict), trail, tokens routes
-      db.py  migrate.py  migrations/0001_init.sql
+                               # lifecycle (claim..move), verify (verdict), trail, tokens routes,
+                               # holdouts (seal + list commitments; the verdict's holdout hooks)
+      db.py  migrate.py  migrations/0001_init.sql  migrations/0002_holdouts.sql
       dod.py                   # DoD extraction from a brief (required) + DoD row lint (warnings)
       policy.py                # role sets + switches from konstant.toml, fail-closed defaults
       transitions.py           # the job state machine (one table)
@@ -70,6 +75,8 @@ konstant-0.1.0/
       rules/  common.py verdicts.py (verdicts + phases) judged.py done.py tests.py
               lastmile.py hygiene.py exercise.py verified.py authorship.py cleanup.py
     verify/   probe.py  shapes.py  native.py  procenv.py  rerun.py  verifier.py
+              holdout.py                     # materialise the pinned commit, jailed no-net runs (§7.1)
+    holdout/  lint.py  store.py  leak.py     # scenario format + lint, seal/check, leak scan (§7.1)
     harnesses/ base.py claude.py codex.py gemini.py dsh.py command.py   # adapters (§9)
                dsh_session.py dsh_gate/{index.ts,build.mjs,konstant-gate.mjs} # dsh session plugin (§6.6)
     jail.py                                  # bubblewrap jail for agent-written code
@@ -103,6 +110,8 @@ konstant-0.1.0/
   var/board.db               # SQLite (WAL)
   var/secrets/<role>.token   # 0600, dir 0700; plaintext only here, sha256 only in the DB
   var/runs/<stamp>-<slug>/   # task-run records: record.json, phases/*.json, logs, events
+  var/holdout/<job>/H<n>.scenario   # the SEALED holdout store (0700 dirs, 0400 files; §7.1):
+                             # masked in every jail, read-denied by every adapter
   var/logs/  var/backups/  var/board.pid
   projects/<slug>/           # default home of user projects (git repos)
   .claude/agents/<agent>.md  .claude/skills/<skill>/SKILL.md  .claude/settings.json
@@ -143,9 +152,10 @@ supported, but the generated surfaces only apply inside it (stated in QUICKSTART
 |---|---|---|
 | `schema_meta` | `version` | one row |
 | `projects` | `id, slug UNIQUE, name, path, root_job_id, status(active/archived), created_at` | `path` = project dir (default `projects/<slug>`) |
-| `jobs` | `id, project_id, parent_id, type, title, brief, acceptance, status, priority, requested_by, assignee, after_id, approval_required, verify_round, closed_by, evidence_json, result_summary, created_at, updated_at` | `acceptance` immutable after insert; `type` validated against `catalog/types.yaml` (root jobs have type `project`) |
-| `trail` | `id, job_id, ts, actor, role, kind, body, payload_json` | append-only; kinds: `note status evidence verdict finding move approval review` |
-| `verifications` | `id, job_id, round, actor, started_at, finished_at, verdict(PASS/FAIL/BLOCKED), probes_json, rerun_json` | the verifier's ledger |
+| `jobs` | `id, project_id, parent_id, type, title, brief, acceptance, status, priority, requested_by, assignee, after_id, approval_required, verify_round, closed_by, evidence_json, result_summary, created_at, updated_at, holdout_required` | `acceptance` immutable after insert; `type` validated against `catalog/types.yaml` (root jobs have type `project`); `holdout_required` (v2): claimable only with sealed holdouts |
+| `trail` | `id, job_id, ts, actor, role, kind, body, payload_json` | append-only; kinds: `note status evidence verdict finding move approval review`, and since v2 the level-5 kinds `dod-review holdout ship rollback escalation budget` (only `holdout` is written yet) |
+| `verifications` | `id, job_id, round, actor, started_at, finished_at, verdict(PASS/FAIL/BLOCKED), probes_json, rerun_json, holdout_json` | the verifier's ledger; `holdout_json` (v2) holds scenario ids, pass/fail, timings, the commit and the commitment digest, never a command or an output |
+| `holdouts` (v2) | `id, job_id, hid, kind(proof/regression), sha256, author_label, sealed_at, trail_id, generation, state(sealed/burned/retired)` | a COMMITMENT per scenario (sha256 of the file; its canary is the salt), never content; no delete; commitment columns immutable; `state` only moves forward from `sealed` (DB triggers) |
 | `runs` | `id, job_id, run_dir, type, started_at, finished_at, result(MET/UNMET/BLOCKED/ERROR)` | links task runs to jobs; written by `task run --job` through `POST /api/jobs/{ref}/runs`; `GET /api/jobs/{ref}` returns the job's `verifications` and `runs` |
 | `tokens` | `id, role, label, sha256 UNIQUE, active, created_at` | `label` is the actor identity (e.g. `orchestrator`, `verifier`) |
 
@@ -167,12 +177,12 @@ Terminal: `verified`, `reviewed`. `cancelled` is closed but reopenable.
 |---|---|---|---|---|
 | (new) | `add` | `queued` or `waiting_approval` | owner, orchestrator, worker | acceptance non-empty with a DoD line; type known; depth ≤ 2; `approval_required` → `waiting_approval` |
 | `waiting_approval` | `approve` | `queued` | owner | — |
-| `queued` | `claim` | `claimed` | orchestrator, worker | `after_id`, if set, is `verified`/`reviewed` |
+| `queued` | `claim` | `claimed` | orchestrator, worker | `after_id`, if set, is `verified`/`reviewed`; a `holdout_required` job has at least `[holdout] min_per_job` sealed holdouts (409 `no holdout sealed`; §7.1) |
 | `claimed` | `block` | `blocked` | owner, orchestrator, worker | reason required |
 | `blocked` | `claim` | `claimed` | orchestrator, worker | — |
 | `claimed` | `close` | `completed_unverified` | requester or assignee, owner | evidence contract (§4.3) |
 | `claimed`, `completed_unverified` | `review` | `reviewed` | review roles | type in `review_types` (review, docs, design, research); actor ≠ requester, assignee and closer (nobody reviews their own job; F-03); a reviewer verdict `SHIP` and a DONE.md given |
-| `completed_unverified` | `verdict PASS` | `verified` | verifier, owner | actor ≠ `closed_by` |
+| `completed_unverified` | `verdict PASS` | `verified` | verifier, owner | actor ≠ `closed_by`; a holdout job's PASS carries the verifier's holdout result: every sealed holdout passed, the set's commitment digest, no LEAK (else 409) |
 | `completed_unverified` | `verdict FAIL` | `queued` (round+1) or `blocked` at `max_rounds` | verifier, owner | findings appended to the trail |
 | `completed_unverified` | `verdict BLOCKED` | unchanged | verifier, owner | reason appended |
 | `completed_unverified`, `blocked`, `cancelled` | `reopen` | `queued` | reopen roles | reason required |
@@ -195,6 +205,9 @@ verdict, and `verified` cannot be left.
 4. Warnings, never refusals: no `DOCS:` line; every `PROBE:` line points only at the evidence file
    itself (self-attested; recorded in `evidence_json.self_attested`).
 Modes per check: `off | warn | strict` in `[board.policy]` (default strict for 1-3).
+For a job with holdouts the runner's close evidence carries `COMMIT=<HEAD of the project>` and
+`BASE=<the run's base>` (and DONE.md lines can never set either): the holdouts run on exactly that
+commit (§7.1).
 The CLI builds the payload from the evidence file: `VERIFY_CMD:` (or `=`), every `VERIFY_EXIT=<n>`
 line (any non-zero one wins: never close on red), `CONTROL_CMD:`/`CONTROL_EXIT=`, `COMMIT=`,
 `BASE=`, `PROBE:` lines, the first `DOCS:` line, and the first 4,000 bytes as `verify_output`. The
@@ -329,13 +342,14 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 | verdicts | `rules/verdicts.py` | fresh verdict files end with exactly one `# VERDICT: <word>` line; at most one `# JUDGED:` line |
 | phases | `rules/phases.py` | every verifying phase has a fresh verdict file named for it; a cycle writes a new suffixed file (`-c2`); the newest decides; after 3 cycles a non-pass verdict counts as BLOCKED |
 | judged | `rules/judged.py` | a decisive PASS verdict's `# JUDGED: <sha>` equals the content hash of OUT (minus verdicts/DONE/CYCLES/.tmp) + the git diff of the project tree vs the run base (a project that is not a git tree: every project file outside OUT), recomputed by replaying the args recorded with the pin; mismatch = edited after judging (the changed paths are named); unrecorded args (`PIN-ARGS-UNRECORDED`) / base mismatch (`PIN-BASE-DIFFERS`) = UNMET by name; the judge refuses an EMPTY state (exit 2) |
-| done | `rules/done.py` | DONE.md rows `ID | claim | STATUS | evidence`, STATUS in PASS FAIL BLOCKED N/A UNVERIFIED; the header is only a line whose first four cells are exactly those names (F-09); FAIL/UNVERIFIED/placeholder evidence/N/A without reason = UNMET; ≥1 PASS row; with a job, one `DoD-<n>` row per row of the job's DoD (`board.dod.dod_rows`), PASS or BLOCKED, never N/A (F-21); `DECLINED | <claim> | job <id>` excuses an EXCUSABLE condition only when the claim quotes it (≥2 contiguous shared words, claim ≥3 words) AND job `<id>` carries an owner-role note/approval `DECLINED: <the same claim>` read from a reachable board (F-01: a quoted "owner statement" and "any existing job" were text the close-out agent could author); offline or unreachable = unresolved (fail closed); never excuses the rules verdicts, phases, judged, tests, verified, authorship |
+| done | `rules/done.py` | DONE.md rows `ID | claim | STATUS | evidence`, STATUS in PASS FAIL BLOCKED N/A UNVERIFIED; the header is only a line whose first four cells are exactly those names (F-09); FAIL/UNVERIFIED/placeholder evidence/N/A without reason = UNMET; ≥1 PASS row; with a job, one `DoD-<n>` row per row of the job's DoD (`board.dod.dod_rows`), PASS or BLOCKED, never N/A (F-21); `DECLINED | <claim> | job <id>` excuses an EXCUSABLE condition only when the claim quotes it (≥2 contiguous shared words, claim ≥3 words) AND job `<id>` carries an owner-role note/approval `DECLINED: <the same claim>` read from a reachable board (F-01: a quoted "owner statement" and "any existing job" were text the close-out agent could author); offline or unreachable = unresolved (fail closed); never excuses the rules verdicts, phases, judged, tests, verified, authorship, holdouts; `DECLINED`/`DISPUTE` rows are not matrix rows |
 | tests | `rules/tests.py` | the test command passes: `[gate] test_cmd` read from the WORKSPACE config, never the record (F-06); `auto` = `pytest` over `test_*.py` under OUT and over the project when it holds Python test files outside OUT (F-18); every run of agent code goes through `konstant.jail` (bubblewrap: read-only root, writes to OUT/project/private tmp, secrets + credential dirs masked, no network) when it works |
 | last mile | `rules/lastmile.py` | in a git tree: no untracked file created during the run outside OUT/.audits/.tmp; no marker words (`TODO`, `FIXME`, `XXX`) added to source since start; changed test files pass |
 | hygiene | `rules/hygiene.py` | non-test source in OUT > 400 lines needs a `reason` in its first 5 lines; a project source file the run grew past 600 lines without one = UNMET (thresholds configurable) |
 | absence | `rules/done.py` | build types: ≥1 `N<n>` proof-of-absence row or `N1 | proof of absence | N/A | <reason>` |
 | surfaces | `rules/done.py` | build types: one `surface <name>` row per surface, PASS or N/A with reason |
 | exercise | `rules/exercise.py` | Python only: tests under OUT enter at least one function of every non-test `.py` in OUT (traced run) |
+| holdouts | `rules/holdouts.py` | the verifier's newest holdout result since the run start: each failed holdout UNMET `holdout H<n> failed (hint: ...)` (owner producer), a LEAK or a commitment mismatch BLOCKED; a `DISPUTE \| H<n> \| <why>` row in DONE.md is BLOCKED (an owner decision, never resolved automatically, excuses nothing), a malformed one UNMET; unexcusable (§7.1) |
 | verified | `rules/verified.py` | the run's job, once closed, has a `konstant verify` verdict newer than the run start; FAIL = UNMET, BLOCKED = BLOCKED; a board that cannot be read = UNMET (fail closed); `task check --offline` skips the rule with a warning (the evidence the runner closes with uses it, so the verifier's re-run does not wait on its own verdict) |
 | authorship | `rules/authorship.py` | runner mode: EVERY verdict file (superseded cycles too) must have been created by a run of the verifying phase it names (phase manifests, §6.5) and touched by no other phase run, and its content must equal the sha256 the last phase that touched it recorded (F-05: a change outside every phase window); otherwise UNMET `AUTHORSHIP:` (also for a verdict file no phase run created). No re-run can undo it: the loop stops (owner `none`). Inside a parallel group (one shared snapshot) a verdict file is credited by NAME to the member it names. Interactive mode: an unattributed WARNING |
 | cleanup | `rules/cleanup.py` | DONE.md carries `CLEANUP: <what was moved/removed and where>` or `CLEANUP: NONE-NEEDED`; `[gate] cleanup = warn` (default) or `fail` |
@@ -343,7 +357,7 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 Every finding carries an owner (`producer`, `orchestrator`, `verifier:<file>`, `none`) that the
 loop resumes. Rule order is fixed because the repeat-stop compares the FIRST reason: verdicts,
 phases, authorship, judged, done (+absence, surfaces), cleanup, tests (+exercise), lastmile,
-hygiene, verified; the DECLINED filter runs last.
+hygiene, holdouts, verified; the DECLINED filter runs last.
 
 What the check trusts (F-06, F-11): only run dirs directly under `<workspace>/var/runs/` (the
 workspace of KONSTANT_HOME / `--config` when the caller has one, else the one the run dir sits
@@ -398,6 +412,13 @@ The runner is the enforcing mode: konstant, not the model, drives the phases.
    check --offline <run>` + `VERIFY_EXIT=0` + the DONE.md rows (`<run>/evidence.md`), then
    `konstant verify` when `[gate] verify_after_close = true`; the run is linked to the job in the
    `runs` table. Exit: 0 MET (and verify PASS), 3 UNMET or verify FAIL, 4 BLOCKED, 5 check error.
+
+A job with sealed holdouts (§7.1) runs only when every phase is confined: the jail must work
+(`[gate] jail`, bubblewrap) and every harness of the run must jail its phases (`Adapter.confines`;
+until wave L5-2 only dsh does), else the run exits 2 `holdouts need a confined phase` before it
+claims anything; `task gate` refuses such a job the same way (an interactive session is not
+confined). Its phase prompts say only THAT holdouts exist and how many (`KONSTANT-HOLDOUTS: <n>`
+and a short "Holdouts" paragraph); the close evidence carries `COMMIT=`/`BASE=` (§4.3).
 
 Read-only types: the conditional opening architect never runs under the runner (nothing is known
 to change before the work); the closing one runs when the project changed. The cycle log the
@@ -503,6 +524,12 @@ the verifier token. Steps:
 6. Record a `verifications` row and a `verdict` trail row (kind reserved for verifier/owner), then the
    transition from §4.2. `--dry-run` prints the result and writes nothing.
 
+Holdouts (§7.1) run after the probes and the re-run and extend step 5: a commitment mismatch or
+a LEAK is BLOCKED first; a failed holdout or a LEAK-SUSPECT is FAIL; an unrunnable holdout is
+BLOCKED; PASS needs the level-4 PASS AND every sealed holdout passed (holdouts alone never pass a
+job). The result's `holdouts` key and `verifications.holdout_json` carry ids, pass/fail, timings,
+the commit and the digest only.
+
 Exit: 0 PASS, 3 FAIL, 4 BLOCKED, 2 not found / wrong state, 1 refusal; `--pending` exits 3 if any
 job FAILs, else 4 if any is BLOCKED, else 1 if one errored, else 0. Decisions: a re-run that
 times out is unverifiable (BLOCKED), not FAIL; `--as owner` posts with the owner token (the
@@ -517,6 +544,54 @@ with a scrubbed env and git pinned (`GIT_TERMINAL_PROMPT=0`, no fsmonitor, no cr
 lines the allowlist would refuse (exit 1, `PROBE REFUSED:` lines; roots = the verifier's own root
 builder over the board's projects, `[verify] path_roots` + `projects/` when the board is down) —
 at filing time, before the work starts. `job add` prints the same PROBE warnings (F-30).
+
+### 7.1 Holdouts (level 5, pillar A; docs/LEVEL5.md §3)
+
+A holdout is a black-box acceptance scenario for one job, sealed before the producer claims it,
+stored where no producing phase can read it, and run only by the verifier on the commit the job
+closed with.
+
+- **Format** (`holdout/lint.py`): one file per scenario, `KEY: value` lines (`#` lines are
+  comments): `SCENARIO`, `KIND` (`proof`: must fail on the base; `regression`: must pass before
+  and after), `RUN` (shlex-split and run as an argv, never through a shell: control characters
+  and shell operators outside quotes are refused, and so is a test runner), `EXPECT_EXIT`,
+  `EXPECT_OUT` (the whole stripped stdout) or `EXPECT_RE` (fullmatch of it, non-trivial), `HINT`
+  (the only text a failure reveals; it may not hold a token of RUN or of the expectation) and
+  `CANARY` (`khc-` + 20 hex, written by `holdout add` when absent).
+- **Seal** (`holdout/store.py`, `konstant holdout add JOB --file F [--file F ...]`, owner): lint
+  (keys, safe RUN, no test runner, non-trivial, **held out**: no expectation literal or quoted RUN
+  argument of 4+ characters in the brief or DoD, hint), the set rule over sealed + new (at least
+  `[holdout] min_per_job`, at least one `proof`, unique canaries), then the **negative control**:
+  every new scenario runs on the project's current HEAD the way the verifier will run it
+  (`VACUOUS: H<n> passes before the work`, `REGRESSION FAILS`, `UNRUNNABLE`). Then the board
+  stores `sha256(file)` per scenario (`POST /api/jobs/{id}/holdouts`, only while the job is
+  `queued`/`waiting_approval`; it marks the job `holdout_required`) and the file is MOVED into
+  `var/holdout/<job>/H<n>.scenario` (0400 in 0700). A source inside the workspace is refused.
+  `holdout show` reads the store directly and is refused inside a task run; no route serves content.
+- **Reach** (`machinery.SEALED`): the jail masks `var/holdout/` (`jail.hidden`), Claude Code's
+  settings deny `Read` on it and read-deny it in the sandbox, the codex profile denies it, the
+  gemini policy denies `read_file`/`read_many_files`/`glob`/`search_file_content` under it, and
+  probes never read `var/`. A job with holdouts never runs on an unconfined phase (§6.5).
+- **Verifier** (`verify/holdout.py`, from `verify_job`): the commitment (store file hash = the
+  board's sha256, else `holdout commitment mismatch: H<n>`, BLOCKED); the leak scan
+  (`holdout/leak.py`: each canary as raw bytes in the diff `BASE..COMMIT`, OUT, the phase logs and
+  prompts of the job's runs and the trail -> `LEAK: canary of H<n> found in <path>`, BLOCKED, the
+  set is burned; a distinctive literal on an added line -> `LEAK-SUSPECT`, FAIL); every sealed
+  holdout sealed before the round's claim; then the tree of the evidence `COMMIT=` is materialised
+  from `ls-tree`/`cat-file` into a private temp dir (no checkout, filter or hook), each RUN runs in
+  `jail.session` with **no network**, that dir bound at the project's own path, the store masked
+  and the env scrubbed, timeout `[holdout] run_timeout_s`; stdout and the exit code are matched
+  outside the jail; the temp dir is deleted. Findings are redacted to `holdout H<n> failed (hint:
+  ...)`.
+- **Exposure budget** (board, on the verdict): a FAIL round caused by holdouts counts against the
+  sealed set; after `[holdout] max_failed_rounds` the set is worn and `retired` (the claim guard
+  then holds the job until a fresh set, generation n+1, is sealed); a second worn set blocks the
+  job for the owner. A LEAK burns the set (the job stays `completed_unverified`).
+- **DECLINED / DISPUTE**: the `holdouts` rule is unexcusable; a `DISPUTE | H<n> | <why>` row is
+  BLOCKED, an owner decision.
+- Limits (LEVEL5 §3.8): holdouts raise the cost of cheating, they do not prove correctness; under
+  one OS user a process you run unjailed can read the store (`[holdout] store` outside the
+  workspace for a second OS user; `doctor` reports which applies).
 
 ## 8. Catalog, generator and generated surfaces
 
@@ -583,7 +658,8 @@ explicitly changed `command` is a user template for any name (placeholders below
 `catalog/` or `.git/config`/hooks where the harness can deny them, user-level settings, hooks,
 MCP and memory excluded where the harness allows it (otherwise a `reach` WARN names the leak),
 and `[gate] jail` plus the subreaper apply to every harness because they never depended on it.
-An adapter may confine its own phase (`Adapter.confine`); dsh does: its sandbox confines writes
+An adapter may confine its own phase (`Adapter.confine`, and `Adapter.confines` says whether it
+does: a job with sealed holdouts runs only on such harnesses); dsh does: its sandbox confines writes
 only, so every dsh phase runs inside `konstant.jail` (writes to the project, OUT, the phase's own
 dsh home and a private `/tmp`; `var/secrets/` masked except the worker and viewer tokens;
 credential and agent homes masked; network on for the loopback board). Its `reads` reach is
@@ -594,7 +670,8 @@ write, whatever the harness: the release's code and tools (`bin/ .venv/ src/ cat
 install.sh get.sh pyproject.toml konstant.toml`), every generated harness surface (`.claude/
 .agents/ .dsh/ .gemini/ AGENTS.md CLAUDE.md`), `var/harness/`, `var/secrets/`, the board DB and
 the bookkeeping files under `var/`, run records, and `.git/` (shells that commit get
-`.git/config` + `.git/hooks` read-only). The Claude settings (deny rules + sandbox `denyWrite`),
+`.git/config` + `.git/hooks` read-only), and `var/holdout/`. `machinery.SEALED` lists what no phase may
+even READ (the holdout store, §7.1). The Claude settings (deny rules + sandbox `denyWrite`),
 the codex profile, the gemini policy and the jail's bind rules all read it (`jail.wrap(home=)`
 re-binds every machinery path and all of `var/` read-only inside any writable bind, then reopens
 the narrower writable binds such as OUT); a test checks each entry against each consumer. The
@@ -833,7 +910,7 @@ Global: `--as ROLE`, `--json`, `--config PATH`; env `KONSTANT_HOME`. Exit 0 ok, 
 | `board backup` | `--to PATH` | SQLite online backup into `var/backups/` |
 | `project add SLUG` | `--name --path --init-git` | create project + root job (+ `projects/<slug>`) |
 | `project list` | | |
-| `job add TITLE` | `--project --parent --type --brief FILE|- --priority --after --approval` | brief must carry a `DoD:`/`Acceptance:` section; prints the DoD lint and `PROBE REFUSED:` warnings |
+| `job add TITLE` | `--project --parent --type --brief FILE|- --priority --after --approval --holdout-required` | brief must carry a `DoD:`/`Acceptance:` section; prints the DoD lint and `PROBE REFUSED:` warnings |
 | `job list` | `--status --type --project --tree --self-attested --limit` | |
 | `job show ID` | `--trail --json` | untruncated row (+ trail) |
 | `job search WORDS` | `--open --project` | prior-work lookup over titles/briefs |
@@ -853,6 +930,8 @@ Global: `--as ROLE`, `--json`, `--config PATH`; env `KONSTANT_HOME`. Exit 0 ok, 
 | `task check RUN` | `--json --offline` | DoD check, gate exit codes; RUN = run dir under `var/runs/`, its record.json or its name (anything else: exit 2) |
 | `task judge` | `--run RUN` or `--out DIR [--project P --base SHA]` | print `# JUDGED: <sha>` and record its args (exit 2 on an empty state) |
 | `verify ID` / `verify --pending` | `--dry-run --no-rerun --json` | §7 (exit 0 PASS, 3 FAIL, 4 BLOCKED) |
+| `holdout add ID` | `--file FILE` (repeatable) | lint + negative control + commitment; moves the files into the store (owner; §7.1; exit 1 refused, 2 no jail) |
+| `holdout list ID` / `holdout check ID` / `holdout show ID HID` | `--control` (check) | commitments and states / commitment + parse (+ negative control) / one file from the store; check and show refused inside a task run |
 | `agents sync` | `--check --harness NAME` | §8 (configured harnesses only) |
 | `dsh APP [ARGS]` | `--project --dry-run` | start your dsh session (web, tui, headless) with konstant's two layers (§6.6); refused (exit 1) when the session would load a layer from outside the workspace |
 | `agents list` | | types, agents, skills, workflows |
@@ -917,6 +996,12 @@ hygiene = { target = 250, hard = 400, tests = 600, grown = 600 }
 jail = true                    # run agent-written tests, verifier re-runs and dsh phases in bubblewrap
 file_job = false               # a gated dsh session files + claims a job for a typed task naming none
 
+[holdout]                      # level-5 holdouts (§7.1); each default is one key
+min_per_job = 2                # sealed scenarios a holdout job needs (at least one proof)
+max_failed_rounds = 2          # failed holdout rounds before the set is worn and retired
+run_timeout_s = 60             # one scenario run in the verifier's jail
+store = "var/holdout"          # or an absolute path outside the workspace (a second OS user)
+
 [verify]
 rerun = true
 rerun_timeout_s = 900
@@ -974,4 +1059,9 @@ board at start (a typo must not silently disarm a gate).
   reviews (`test_F<nn>_...`, `test_G<nn>_...`; CONCEPTS "Security reviews"), written from the
   review's reproduction; the fake harness carries the reviews' adversarial modes (`declined`,
   `daemon`, `catalog`, `broken`).
+- **Holdouts (`tests/holdout/`):** every lint rule, the negative control, the leak scan and the
+  settle extension `_red`/`_green`; the sealed-store reach of the jail and every adapter, red when
+  `machinery.SEALED` is emptied; the board's claim guard, PASS guard, burn and exposure budget;
+  the CLI; and holdout jobs run through the real dsh adapter (stub dsh + the fake harness's
+  `peek`, `overfit` and `leak` modes) to `verify`.
 - **CI:** GitHub Actions on Ubuntu, Python 3.10 and 3.12: unit + board + gate + e2e.

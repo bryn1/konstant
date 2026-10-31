@@ -16,6 +16,8 @@ sandboxing docs (DESIGN §9 names them).
   more agents (task run, board, agents sync), and `--as owner|verifier` anywhere on a konstant
   command line. Deny rules are evaluated before allow rules, so they carve holes in the
   workspace allow.
+- the sealed holdout store (machinery.SEALED, var/holdout/): Read denied for the file tools and
+  read-denied in the sandbox, next to var/secrets/ (docs/LEVEL5.md 3.3).
 - permissions.blockReadsOutsideWorkingDirectories: file tools refuse reads outside the working
   directories (the phase's project dir + the workspace via `--add-dir`).
 - permissions.disableBypassPermissionsMode: no session in this workspace may skip permissions.
@@ -108,6 +110,7 @@ def render(workspace: Path, perm: dict, python: str | None = None) -> str:
     allow += [f"Bash({workspace}/.venv/bin/python -m pytest *)"]
     allow += [r for r in perm.get("allow", []) if r not in allow]
     deny = [f"Read({ws}/var/secrets/**)"]
+    deny += [f"Read({ws}/{d}/**)" for d in machinery.SEALED]      # the holdout store (LEVEL5 3.3)
     deny += [f"Edit({ws}/{d}/**)" for d in PROTECTED_DIRS]
     deny += [f"Edit({ws}/{f})" for f in PROTECTED_FILES]
     deny += [f"Edit({ws}/var/runs/*/{r})" if "." in r else f"Edit({ws}/var/runs/*/{r}/**)"
@@ -136,7 +139,8 @@ def render(workspace: Path, perm: dict, python: str | None = None) -> str:
             "filesystem": {
                 "allowWrite": [str(workspace)],
                 "denyWrite": [str(workspace / p) for p in PROTECTED_DIRS + PROTECTED_FILES],
-                "denyRead": [str(workspace / "var" / "secrets"), *CREDENTIALS],
+                "denyRead": [str(workspace / "var" / "secrets"),
+                             *(str(p) for p in machinery.sealed(workspace)), *CREDENTIALS],
             },
         }
     return json.dumps(data, indent=2) + "\n"

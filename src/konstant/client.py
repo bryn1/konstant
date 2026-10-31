@@ -35,10 +35,11 @@ def default_role(configured: str) -> str:
 class ClientError(Exception):
     """A refusal or failure to report to the user. `status` is the HTTP code, 0 if none."""
 
-    def __init__(self, message: str, status: int = 0):
+    def __init__(self, message: str, status: int = 0, exit_code: int | None = None):
         super().__init__(message)
         self.status = status
         self.message = message
+        self.exit_code = exit_code          # overrides the CLI's 1/2 mapping when set
 
 
 def token_for(cfg: Config, role: str) -> str:

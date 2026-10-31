@@ -59,6 +59,8 @@ def serialize(conn, row) -> dict:
     out = dict(row)
     out["evidence"] = json.loads(out.pop("evidence_json")) if row["evidence_json"] else None
     out["approval_required"] = bool(out["approval_required"])
+    if "holdout_required" in out:
+        out["holdout_required"] = bool(out["holdout_required"])
     out["display_id"] = tree.display_id(conn, row["id"])
     out["depth"] = tree.depth(conn, row["id"])
     proj = conn.execute("SELECT slug FROM projects WHERE id=?", (row["project_id"],)).fetchone()

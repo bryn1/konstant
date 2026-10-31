@@ -97,6 +97,16 @@ def prepare(ctx, task: str, mode: str):
         rec["acceptance"] = job.get("acceptance") or ""
         rec["job_display"] = job.get("display_id") or str(job["id"])
         rec["job_bound_by"] = how
+        if job.get("holdout_required"):
+            if mode != "runner":
+                import shutil
+                shutil.rmtree(run_dir, ignore_errors=True)
+                raise ClientError(f"holdouts need a confined phase: job {rec['job_display']} has "
+                                  "sealed holdouts and an interactive session is not confined; "
+                                  f"run it with `konstant task run --job {job['id']}` on a "
+                                  "harness konstant jails", exit_code=EXIT_USAGE)
+            # the producer is told THAT holdouts exist and how many, nothing else (LEVEL5 3.1)
+            rec["holdouts"] = ctx.client("viewer").get(f"/api/jobs/{job['id']}/holdouts")["sealed"]
     record_mod.write(run_dir, rec)
     return cat, t, why, rec, run_dir
 

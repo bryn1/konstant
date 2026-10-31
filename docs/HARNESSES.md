@@ -72,6 +72,13 @@ konstant's jail for dsh (read-only binds, even inside the project or the workspa
 checks that each entry has a rule in each of them. So a phase of one harness cannot rewrite what
 another harness, or your own session, loads later.
 
+The sealed holdout store `var/holdout/` (`machinery.SEALED`; [CONCEPTS.md](CONCEPTS.md),
+"Holdouts") is denied for READS the same way: Claude Code `Read` deny + sandbox `denyRead`, codex
+`deny`, a gemini policy rule denying `read_file`, `read_many_files`, `glob` and
+`search_file_content` under it, and an empty tmpfs over it in konstant's jail. Commands are only
+covered by the jail, so a job with holdouts runs only on harnesses whose phases konstant jails
+(today `dsh`; the others from level-5 wave L5-2).
+
 Read "none" and "partial" literally. With `codex` and with `dsh` (inside konstant's jail) a phase
 cannot read the privileged tokens, but any command may run inside the file boundary and the
 network is open; without the jail a `dsh` phase can read `var/secrets/` and act on the board

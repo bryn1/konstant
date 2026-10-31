@@ -163,6 +163,10 @@ class Dsh(Adapter):
                          expose=[secrets / "worker.token", secrets / "viewer.token"],
                          tmpfs=() if under_tmp else ("/tmp",), cwd=ph.cwd, net=True)
 
+    def confines(self, jail: bool = True) -> bool:
+        from konstant import jail as jail_mod
+        return bool(jail) and jail_mod.available()
+
     def reach(self, hcfg: dict, perm: dict, jail: bool = True) -> Reach:
         from konstant import jail as jail_mod
         jailed = jail and jail_mod.available()

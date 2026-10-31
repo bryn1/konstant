@@ -66,6 +66,20 @@ def _small(ctx, task: str, why: str) -> int:
     return res.rc
 
 
+def holdout_confinement(ctx, cat) -> str | None:
+    """Why a job with sealed holdouts may not run here (docs/LEVEL5.md 2.1): every phase must run
+    inside konstant's jail, whatever the harness; nothing falls back to "procedural"."""
+    from konstant.verify.holdout import UNCONFINED, confined
+    why = confined(ctx.cfg)
+    if why:
+        return why
+    loose = _harness(ctx, cat).unconfined()
+    if loose:
+        return (f"{UNCONFINED}: the harness(es) {', '.join(loose)} do not run their phases in "
+                "konstant's jail (before L5-2 only dsh does): run this job with --harness dsh")
+    return None
+
+
 def project_lock(home: Path, project):
     """An open, flock-ed file for the project, or None when another run holds it."""
     if not project:
@@ -101,6 +115,12 @@ def _run(ctx, task: str, prepare) -> int:
     cat, t, why, rec, run_dir = prepare(ctx, task, "runner")
     if t is None:
         return _small(ctx, task, why)
+    if "holdouts" in rec:
+        why = holdout_confinement(ctx, cat)
+        if why:
+            shutil.rmtree(run_dir, ignore_errors=True)
+            err(f"konstant task: {why}")
+            return EXIT_USAGE
     lock = project_lock(cfg.home, rec.get("project"))
     if lock is None:
         shutil.rmtree(run_dir, ignore_errors=True)

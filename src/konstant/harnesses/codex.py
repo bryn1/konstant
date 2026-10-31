@@ -66,6 +66,9 @@ def filesystem(ph: Phase) -> dict:
             fs[str(ws / f)] = "read"
     if (ws / "var").is_dir():
         fs[f"{ws / 'var'}/**"] = "read"
+    for d in machinery.sealed(ws):                 # the holdout store: unreadable (LEVEL5 3.3)
+        if d.is_dir():
+            fs[f"{d}/**"] = "deny"
     for t in PRIVILEGED_TOKENS:
         if (ws / "var" / "secrets" / t).is_file():
             fs[str(ws / "var" / "secrets" / t)] = "deny"

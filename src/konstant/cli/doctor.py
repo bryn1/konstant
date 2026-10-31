@@ -358,6 +358,8 @@ def cmd_doctor(ctx) -> int:
         check_agents(rep, cfg)
         check_sandbox(rep, cfg, check_harness(rep, cfg))
         check_jail(rep, cfg)
+        from konstant.holdout.store import doctor_row
+        rep.add(*doctor_row(cfg))
     counts = {s: sum(r["status"] == s for r in rep.rows) for s in ("PASS", "WARN", "FAIL", "INFO")}
     summary = (f"doctor: {counts['PASS']} PASS, {counts['WARN']} WARN, {counts['FAIL']} FAIL, "
                f"{counts['INFO']} INFO")

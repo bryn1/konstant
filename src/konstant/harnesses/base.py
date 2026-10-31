@@ -135,6 +135,12 @@ class Adapter:
         itself in konstant.jail here (dsh); the default is the argv unchanged."""
         return argv
 
+    def confines(self, jail: bool = True) -> bool:
+        """Whether confine() puts the phase inside konstant.jail ([gate] jail = `jail`). A job
+        with sealed holdouts runs only on harnesses that do (docs/LEVEL5.md 2.1); before L5-2
+        only dsh does."""
+        return False
+
     def files(self, gen, hcfg: dict) -> dict:
         """{workspace-relative path: content} this harness reads beyond AGENTS.md and the shared
         `.agents/skills/` (rendered by agents/generate.py)."""

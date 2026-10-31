@@ -1,12 +1,14 @@
 """Filing and reading jobs: add, list, show, search."""
 from __future__ import annotations
 
+import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from konstant.board import db, dod, transitions, tree
+from konstant.board.api import holdouts
 from konstant.board.api.deps import (Actor, add_trail, load_job, reader, refuse, serialize,
                                      trail_rows, writer)
 from konstant.board.redact import redact
@@ -36,6 +38,7 @@ class JobIn(BaseModel):
     priority: int = 2
     after: str = ""
     approval: bool = False
+    holdout_required: bool = False      # claimable only with sealed holdouts (LEVEL5 3.2)
 
 
 @router.post("/api/jobs")
@@ -88,9 +91,10 @@ def add_job(body: JobIn, request: Request, actor: Actor = Depends(writer)):
         status = "waiting_approval" if body.approval else "queued"
         job_id = conn.execute(
             "INSERT INTO jobs (project_id, parent_id, type, title, brief, acceptance, status, "
-            "priority, requested_by, after_id, approval_required) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "priority, requested_by, after_id, approval_required, holdout_required) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (proj["id"], parent_id, jtype, title, brief, acceptance, status, body.priority,
-             actor.label, after_id, int(body.approval))).lastrowid
+             actor.label, after_id, int(body.approval), int(body.holdout_required))).lastrowid
         add_trail(conn, job_id, actor, "status", f"filed as {status}")
         out = serialize(conn, conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
     out["warnings"] = [f"DoD {cls}: {row!r} - {dod.ADVICE[cls]}" for cls, row in dod.lint(brief)]
@@ -151,9 +155,16 @@ def show_job(ref: str, request: Request, trail: bool = False, actor: Actor = Dep
     with db.reading(request.app.state.db_path) as conn:
         row = load_job(conn, ref)
         out = serialize(conn, row)
-        out["verifications"] = [dict(v) for v in conn.execute(
-            "SELECT id, round, actor, started_at, finished_at, verdict FROM verifications "
-            "WHERE job_id=? ORDER BY id", (row["id"],)).fetchall()]
+        out["verifications"] = []
+        for v in conn.execute("SELECT id, round, actor, started_at, finished_at, verdict, "
+                              "holdout_json FROM verifications WHERE job_id=? ORDER BY id",
+                              (row["id"],)).fetchall():
+            d = dict(v)
+            raw = d.pop("holdout_json")
+            if raw:                      # ids, pass/fail, timings: never content (LEVEL5 3.6)
+                d["holdouts"] = json.loads(raw)
+            out["verifications"].append(d)
+        out["holdouts"] = holdouts.listing(conn, row["id"])
         out["runs"] = [dict(r) for r in conn.execute(
             "SELECT * FROM runs WHERE job_id=? ORDER BY id", (row["id"],)).fetchall()]
         if trail:

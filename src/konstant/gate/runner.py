@@ -63,6 +63,15 @@ def groups(phases: list) -> list:
     return out
 
 
+HOLDOUT_NOTE = ("This job has {n} sealed holdout scenario(s): black-box acceptance checks written "
+                "before this work, stored where no phase can read them, and run only by "
+                "konstant's verifier, without network, on the commit the job closes with. A "
+                "failing one reveals only its id and a one-line hint. Build what the DoD asks for "
+                "in general; never special-case an example. If you believe a holdout contradicts "
+                "the DoD, write `DISPUTE | H<n> | <why>` in DONE.md: the owner decides; it "
+                "excuses nothing.")
+
+
 class PhaseRunner:
     def __init__(self, rec: dict, cat, harness, *, run_dir: Path, max_parallel: int = 2,
                  acceptance: str = "", log=print, isolate: bool = False):
@@ -113,6 +122,10 @@ class PhaseRunner:
                 f"KONSTANT-PROJECT: {r.get('project') or '-'}",
                 f"KONSTANT-VERDICT: {verdict_file or '-'}", f"KONSTANT-JUDGE: {r['judge_cmd']}",
                 f"KONSTANT-CYCLE: {self.runs.get(phase.get('n'), 0) + 1}"]
+        if r.get("job"):
+            head.append(f"KONSTANT-JOB: {r['job']}")
+        if "holdouts" in r:
+            head.append(f"KONSTANT-HOLDOUTS: {r['holdouts']}")
         head += [f"KONSTANT-CYCLE-ROW: {row}" for row in (self.cycles if closeout else [])]
         head += [f"KONSTANT-DOD-ROW: DoD-{i} | {row}"
                  for i, row in enumerate(self.dod_rows() if closeout else [], 1)]
@@ -120,6 +133,8 @@ class PhaseRunner:
                 "## The task", r["task"]]
         if self.acceptance:
             body += ["", "## Definition of Done", self.acceptance]
+        if "holdouts" in r:
+            body += ["", "## Holdouts", HOLDOUT_NOTE.format(n=r["holdouts"])]
         body += ["", "## Your phase", phase.get("task") or "",
                  "You are a leaf: never spawn agents or sub-sessions. Work in the project "
                  f"directory; OUT is {r['out']}; scratch goes under OUT/.tmp/."]

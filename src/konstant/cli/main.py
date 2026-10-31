@@ -61,7 +61,7 @@ def common_flags(suppress: bool) -> argparse.ArgumentParser:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from konstant.cli import agents, board, doctor, dsh, job, project, task, verify
+    from konstant.cli import agents, board, doctor, dsh, holdout, job, project, task, verify
     parser = argparse.ArgumentParser(prog="konstant", parents=[common_flags(False)],
                                      description="konstant: job board, task gate and verifier "
                                                  "for coding agents.")
@@ -73,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     job.register(sub, leaf)
     task.register(sub, leaf)
     verify.register(sub, leaf)
+    holdout.register(sub, leaf)
     agents.register(sub, leaf)
     dsh.register(sub, leaf)
     doctor.register(sub, leaf)
@@ -93,6 +94,8 @@ def main(argv=None) -> int:
         rc = args.func(ctx)
     except ClientError as exc:
         print(f"konstant: {exc.message}", file=sys.stderr)
+        if exc.exit_code is not None:
+            return exc.exit_code
         return EXIT_USAGE if exc.status == 404 else EXIT_FAIL
     except config_mod.ConfigError as exc:
         print(f"konstant: {exc}", file=sys.stderr)

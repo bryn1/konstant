@@ -88,6 +88,14 @@ def claim(ref: str, request: Request, actor: Actor = Depends(writer)):
                 state = dep["status"] if dep else "missing"
                 raise Refused(409, f"job {job['id']} runs after job {job['after_id']}, which "
                                    f"is {state}; it must be verified or reviewed first")
+        if job["holdout_required"]:              # the claim guard (docs/LEVEL5.md 3.2 step 4)
+            from konstant.board.api.holdouts import sealed_count
+            need = request.app.state.cfg.data["holdout"]["min_per_job"]
+            have = sealed_count(conn, job["id"])
+            if have < need:
+                raise Refused(409, f"no holdout sealed: job {job['id']} needs {need} sealed "
+                                   f"holdout scenario(s) before a claim and has {have} "
+                                   "(`konstant holdout add`)")
         set_status(conn, job["id"], "claimed", assignee=actor.label)
         add_trail(conn, job["id"], actor, "status", f"claimed by {actor.label}")
     return run(request, ref, "claim", actor, apply)

@@ -9,7 +9,7 @@ from konstant.board import auth, db, migrate
 
 
 def test_migrate_is_idempotent(board):
-    assert migrate.current_version(board.cfg.db_path) == migrate.target_version() == 1
+    assert migrate.current_version(board.cfg.db_path) == migrate.target_version() == 2
     assert migrate.migrate(board.cfg.db_path) == []
 
 

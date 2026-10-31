@@ -9,7 +9,9 @@ pass it alone: they replay the closer's claim. The re-run command is the DoD's `
 when it has one; else the closer's verify_cmd, and that only in procedural mode - when this OS user
 cannot read the closer-side tokens (OS-separation mode) the closer's shell is never executed by the
 verifier. Every re-run runs in konstant.jail when it works (tokens and credentials masked, writes
-only to the project dir).
+only to the project dir). A job with sealed holdouts also runs them (verify/holdout.py: leak scan,
+commitment, the pinned commit, no network) after the probes and the re-run; their findings are
+redacted to ids and hints.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import os
 import re
 from pathlib import Path
 
+from konstant.verify import holdout as holdout_mod
 from konstant.verify import probe as probe_mod
 from konstant.verify import rerun as rerun_mod
 from konstant.verify.shapes import Roots
@@ -44,9 +47,34 @@ def collect(job: dict) -> list:
     return out
 
 
-def settle(rows: list, rerun: dict | None) -> tuple:
-    """-> (PASS|FAIL|BLOCKED, reasons). PASS = re-run ok (or none) AND >=1 DoD probe matched AND
-    every probe matched; FAIL = failed re-run or any contradiction; BLOCKED = the rest."""
+def settle(rows: list, rerun: dict | None, holdout: dict | None = None) -> tuple:
+    """-> (PASS|FAIL|BLOCKED, reasons). Level 4: PASS = re-run ok (or none) AND >=1 DoD probe
+    matched AND every probe matched; FAIL = failed re-run or any contradiction; BLOCKED = the
+    rest. With holdouts (docs/LEVEL5.md 3.6 step 4) they ADD a condition and never replace one:
+    a commitment mismatch or a LEAK is BLOCKED before anything else; a failed holdout or a
+    LEAK-SUSPECT is FAIL; an unrunnable holdout is BLOCKED; PASS needs the level-4 PASS AND every
+    sealed holdout passed - holdouts alone never pass a job (F-02)."""
+    verdict, reasons = _settle4(rows, rerun)
+    if holdout is None:
+        return verdict, reasons
+    from konstant.verify.holdout import reasons as holdout_reasons
+    integrity, fail, blocked = holdout_reasons(holdout)
+    if integrity:
+        return "BLOCKED", integrity
+    if verdict == "FAIL" or fail:
+        return "FAIL", (reasons if verdict == "FAIL" else []) + fail
+    if blocked:
+        return "BLOCKED", (reasons if verdict == "BLOCKED" else []) + blocked
+    rows_h = holdout.get("rows") or []
+    if verdict != "PASS":
+        return verdict, reasons
+    if len(rows_h) < holdout.get("min_per_job", 1) or not all(r["passed"] for r in rows_h):
+        return "BLOCKED", ["holdouts incomplete: not every sealed holdout ran and passed"]
+    return "PASS", reasons + [f"{len(rows_h)} holdout(s) passed on commit "
+                              f"{(holdout.get('commit') or '')[:12]}"]
+
+
+def _settle4(rows: list, rerun: dict | None) -> tuple:
     kinds = [probe_mod.verdict_of(r) for r in rows]
     ran = bool(rerun) and rerun.get("ok") is not None
     reasons = []
@@ -150,12 +178,17 @@ def verify_job(client, cfg, ref, *, dry_run: bool, rerun: bool = True, projects=
                                   project_dir(cfg, projects, job["project"]),
                                   vcfg["rerun_timeout_s"], source=source, home=cfg.home,
                                   jail=cfg.data["gate"]["jail"])
-    verdict, reasons = settle(rows, res)
+    hres = holdout_mod.evaluate(client, cfg, job, projects)
+    verdict, reasons = settle(rows, res, hres)
+    hpub = holdout_mod.public(hres)
     out = {"job": job["id"], "display_id": job["display_id"], "verdict": verdict,
            "reasons": reasons, "probes": rows, "rerun": res, "dry_run": dry_run}
+    if hpub is not None:
+        out["holdouts"] = hpub
     if not dry_run:
         findings = [r for r in reasons if verdict == "FAIL"]
         client.post(f"/api/jobs/{job['id']}/verdict", {
             "verdict": verdict, "reason": "; ".join(reasons), "findings": findings,
-            "probes": rows, "rerun": res, "started_at": started})
+            "probes": rows, "rerun": res, "started_at": started,
+            **({"holdout": hpub} if hpub is not None else {})})
     return out

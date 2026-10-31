@@ -89,6 +89,16 @@ DEFAULTS: dict = {
         # task that names none ([job:N]); the task text is the brief, so it needs a DoD section
         "file_job": False,
     },
+    # sealed holdout scenarios (docs/LEVEL5.md 3): each default is ONE key, so an owner answer to
+    # the open questions (LEVEL5 9) is a config change
+    "holdout": {
+        "min_per_job": 2,              # sealed scenarios a holdout job needs (>= 1 proof)
+        "max_failed_rounds": 2,        # failed verification rounds before the set counts as worn
+        "run_timeout_s": 60,           # one scenario run in the verifier's jail
+        # the sealed store: var/holdout (masked in every jail), or an absolute path OUTSIDE the
+        # workspace readable only by a second OS user who runs the verifier (Q3, LEVEL5 3.8)
+        "store": "var/holdout",
+    },
     "verify": {
         "rerun": True,
         "rerun_timeout_s": 900,
@@ -185,6 +195,17 @@ def _validate(data: dict, path) -> None:
         raise ConfigError(f"{path}: [board] port = {b['port']}: must be 1-65535")
     check_host(b["host"], b["allow_remote"], f"{path}: [board]")
     check_harness(data["harness"], path)
+    check_holdout(data["holdout"], path)
+
+
+def check_holdout(h: dict, path) -> None:
+    for key in ("min_per_job", "max_failed_rounds", "run_timeout_s"):
+        if h[key] < 1:
+            raise ConfigError(f"{path}: [holdout] {key} = {h[key]}: must be >= 1")
+    store = h["store"]
+    if store != "var/holdout" and not os.path.isabs(store):
+        raise ConfigError(f"{path}: [holdout] store = {store!r}: var/holdout (masked in every "
+                          "jail) or an absolute path outside the workspace")
 
 
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]*")

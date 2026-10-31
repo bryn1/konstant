@@ -22,6 +22,7 @@ positional arguments:
     job          jobs on the board
     task         task gate, phase runner, DoD check
     verify       verify a completed job (probes + re-run)
+    holdout      sealed holdout scenarios of a job (run only by verify)
     agents       generate and list the agent catalog surfaces
     dsh          start your dsh session (web, tui, headless) with the konstant gate plugin
     doctor       check that this workspace is ready (exit 0 when nothing FAILs)
@@ -219,7 +220,7 @@ options:
 ```
 usage: konstant job add [-h] [--as ROLE] [--json] [--config PATH] --project PROJECT --brief FILE|-
                         [--type TYPE] [--parent PARENT] [--priority {0,1,2,3,4}] [--after ID]
-                        [--approval]
+                        [--approval] [--holdout-required]
                         title
 
 positional arguments:
@@ -237,6 +238,7 @@ options:
   --priority {0,1,2,3,4}
   --after ID              claimable only once this job is verified
   --approval              file as waiting_approval
+  --holdout-required      claimable only once its holdout scenarios are sealed
 ```
 
 ## `konstant job list`
@@ -633,6 +635,85 @@ options:
   --pending      verify every completed_unverified job
   --dry-run      print the result, write nothing
   --no-rerun     skip the verify_cmd re-run
+```
+
+## `konstant holdout`
+
+```
+usage: konstant holdout [-h] VERB ...
+
+positional arguments:
+  VERB
+    add       lint, control and seal scenario files (moves them into the store; owner)
+    list      ids, kinds, commitments and states
+    check     commitment + parse of each sealed file
+    show      print one sealed scenario (never in a task)
+
+options:
+  -h, --help  show this help message and exit
+```
+
+## `konstant holdout add`
+
+```
+usage: konstant holdout add [-h] [--as ROLE] [--json] [--config PATH] --file FILE id
+
+positional arguments:
+  id             job id or display id
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+  --file FILE    a scenario file outside the workspace (repeat for a set)
+```
+
+## `konstant holdout list`
+
+```
+usage: konstant holdout list [-h] [--as ROLE] [--json] [--config PATH] id
+
+positional arguments:
+  id
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant holdout check`
+
+```
+usage: konstant holdout check [-h] [--as ROLE] [--json] [--config PATH] [--control] id
+
+positional arguments:
+  id
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+  --control      also re-run the negative control on the project's HEAD
+```
+
+## `konstant holdout show`
+
+```
+usage: konstant holdout show [-h] [--as ROLE] [--json] [--config PATH] id hid
+
+positional arguments:
+  id
+  hid            H<n>
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
 ```
 
 ## `konstant agents`

@@ -89,7 +89,8 @@ def cmd_add(ctx) -> int:
     brief = read_text(a.brief)
     body = {"title": a.title, "project": a.project, "brief": brief,
             "type": a.type or "", "parent": a.parent or "", "priority": a.priority,
-            "after": a.after or "", "approval": a.approval}
+            "after": a.after or "", "approval": a.approval,
+            "holdout_required": a.holdout_required}
     res = ctx.client().post("/api/jobs", body)
     for ln, why in probe_refusals(ctx, brief):        # the same lint `job lint` runs (F-30)
         warn(f"PROBE REFUSED: {ln!r} - {why}: `konstant verify` will report it unverifiable")
@@ -209,6 +210,8 @@ def register(sub, leaf) -> None:
     p.add_argument("--priority", type=int, default=2, choices=range(0, 5))
     p.add_argument("--after", metavar="ID", help="claimable only once this job is verified")
     p.add_argument("--approval", action="store_true", help="file as waiting_approval")
+    p.add_argument("--holdout-required", action="store_true",
+                   help="claimable only once its holdout scenarios are sealed")
     p = leafp("list", "list jobs", cmd_list)
     p.add_argument("--status", default="", help="comma-separated states")
     p.add_argument("--type", default="")

@@ -92,7 +92,15 @@ def close_and_verify(rec: dict, client, cfg, err, out: dict | None = None) -> in
     done = Path(rec["out"]) / "DONE.md"
     rows = done.read_text(errors="replace")[:2500] if done.is_file() else ""
     text = (f"VERIFY_CMD: {check_cmd}\nVERIFY_EXIT=0\nkonstant task check: MET for run "
-            f"{rec['run_dir']} (type {rec['type']}, every verifying phase PASS)\n{rows}")
+            f"{rec['run_dir']} (type {rec['type']}, every verifying phase PASS)\n")
+    if "holdouts" in rec:          # the commit the holdouts run on (docs/LEVEL5.md 3.6 step 1)
+        from konstant.gate.rules.common import git_head
+        head = git_head(rec.get("git_top"))
+        text += (f"COMMIT={head}\n" if head else "") + \
+            (f"BASE={rec['git_base']}\n" if rec.get("git_base") else "")
+        rows = "".join(ln for ln in rows.splitlines(keepends=True)   # DONE.md never pins it
+                       if not re.match(r"\s*(COMMIT|BASE)=", ln))
+    text += rows
     ev = Path(rec["run_dir"]) / "evidence.md"
     ev.write_text(text, encoding="utf-8")
     from konstant.cli.job import parse_evidence

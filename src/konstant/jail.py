@@ -45,8 +45,10 @@ def available() -> bool:
 
 
 def hidden(home=None, env=None) -> list:
-    """What a jail masks: the workspace's var/secrets/ and machinery.credentials()."""
+    """What a jail masks: the workspace's var/secrets/, the sealed holdout store
+    (machinery.SEALED) and machinery.credentials()."""
     out = [os.path.join(str(home), "var", "secrets")] if home else []
+    out += [str(p) for p in machinery.sealed(home)] if home else []
     return out + [os.path.expanduser(c) for c in machinery.credentials(env=env)]
 
 
@@ -55,13 +57,15 @@ def _inside(p: str, root: str) -> bool:
 
 
 def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = True,
-         home=None) -> list:
+         home=None, binds=()) -> list:
     """The jailed argv (or argv unchanged when the jail is unavailable). `tmpfs`: directories
     replaced by an empty private tmpfs first (e.g. /tmp); `rw`: directories bound writable;
     `home`: the workspace, whose machinery stays read-only inside any writable bind (module
     docstring); `hide`: directories masked by an empty tmpfs (files: by /dev/null), never one
     that holds the workspace, a writable bind or the cwd; `expose`: files inside a hidden
-    directory bound back read-only (a phase's own role token)."""
+    directory bound back read-only (a phase's own role token); `binds`: (source, destination)
+    pairs bound writable at ANOTHER path (a holdout's materialised tree at the project's own
+    path, so the code under test sees the path the tests rule shows it)."""
     if not available():
         return list(argv)
     a = [shutil.which("bwrap"), "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
@@ -75,6 +79,8 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
              if os.path.isdir(p)]
     for p in roots:
         a += ["--bind", p, p]
+    for src, dst in binds:
+        a += ["--bind", os.path.realpath(str(src)), os.path.realpath(str(dst))]
     ro = []
     if home:
         guard = [os.path.realpath(str(x)) for x in machinery.jail_read_only(home)]
@@ -90,7 +96,8 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
         for p in roots:                       # a writable bind nested in a read-only one
             if any(_inside(p, q) and p != q for q in ro):
                 a += ["--bind", p, p]
-    keep = [os.path.realpath(str(x)) for x in (home, cwd) if x] + roots
+    keep = [os.path.realpath(str(x)) for x in (home, cwd) if x] + roots + \
+        [os.path.realpath(str(d)) for _s, d in binds]
     for p in dict.fromkeys(os.path.realpath(str(x)) for x in hide if x):
         if any(_inside(k, p) for k in keep):
             continue                          # never mask the workspace, a writable bind, the cwd
@@ -108,7 +115,7 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
 
 @contextmanager
 def session(argv, *, rw=(), home=None, cwd=None, net: bool = True, env=None,
-            enabled: bool = True):
+            enabled: bool = True, binds=()):
     """(argv, env) to run: jailed with a private TMPDIR when enabled and available."""
     env = dict(os.environ if env is None else env)
     if not (enabled and available()):
@@ -118,6 +125,6 @@ def session(argv, *, rw=(), home=None, cwd=None, net: bool = True, env=None,
     try:
         env["TMPDIR"] = tmp
         yield wrap(argv, rw=(*rw, tmp), hide=hidden(home), cwd=cwd, net=net,
-                   home=home), env
+                   home=home, binds=binds), env
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
