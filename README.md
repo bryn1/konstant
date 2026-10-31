@@ -65,6 +65,8 @@ the two security reviews) · [CLI reference](docs/CLI.md) · [HARNESSES](docs/HA
 [DSH](docs/DSH.md) · [DESIGN](docs/DESIGN.md) · [CONTRIBUTING](CONTRIBUTING.md) ·
 [SECURITY](SECURITY.md) · [CHANGELOG](CHANGELOG.md)
 
+Roadmap: level 5 — see [docs/LEVEL5.md](docs/LEVEL5.md).
+
 ## Install in one line
 
 ```sh
