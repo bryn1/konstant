@@ -62,8 +62,8 @@ def common_flags(suppress: bool) -> argparse.ArgumentParser:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from konstant.cli import (agents, board, doctor, dsh, goal, holdout, job, project, task,
-                              verify)
+    from konstant.cli import (agents, board, confinement, doctor, dsh, goal, holdout, job,
+                              project, task, verify)
     parser = argparse.ArgumentParser(prog="konstant", parents=[common_flags(False)],
                                      description="konstant: job board, task gate and verifier "
                                                  "for coding agents.")
@@ -79,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     goal.register(sub, leaf)
     agents.register(sub, leaf)
     dsh.register(sub, leaf)
+    confinement.register(sub, leaf)
     doctor.register(sub, leaf)
     v = sub.add_parser("version", parents=[leaf], help="print the version")
     v.set_defaults(func=lambda ctx: ctx.out({"version": __version__},
@@ -86,10 +87,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def drop_shim_dir() -> None:
+    """Inside a `konstant dsh` session the PATH starts with the refusing agent-CLI shims
+    (cli/dsh.py, [confinement] host_agents): konstant itself drops them, so the harness CLIs of
+    its own phases (which it jails and composes) are found."""
+    shim = os.environ.get("KONSTANT_SHIM_DIR")
+    if shim:
+        parts = os.environ.get("PATH", "").split(os.pathsep)
+        os.environ["PATH"] = os.pathsep.join(p for p in parts if p and p != shim)
+
+
 def main(argv=None) -> int:
     # everything konstant writes (DB, tokens, run records, logs) is private to this user
     # (REVIEW F-25); harness phases get the caller's own umask back (gate/harness.py)
     config_mod.ORIG_UMASK = os.umask(0o077)
+    drop_shim_dir()
     parser = build_parser()
     args = parser.parse_args(argv)
     ctx = Ctx(args)

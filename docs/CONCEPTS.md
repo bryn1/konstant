@@ -276,7 +276,8 @@ names every drifted file.
 
 ## Permissions model
 
-Headless phases are **workspace-scoped** (a design decision), whatever the harness; how that maps
+Headless phases are **workspace-scoped** (a design decision; the default `closed` confinement
+profile, next section), whatever the harness; how that maps
 onto Codex, Gemini CLI and DeepSeek Harness, and what each cannot enforce, is in
 [HARNESSES.md](HARNESSES.md). For Claude Code (the default) the command is
 `claude -p --permission-mode dontAsk --add-dir {workspace} --settings {workspace}/.claude/settings.json {prompt}`,
@@ -304,6 +305,88 @@ and the generated settings file defines the whole reach:
 A live check (one `claude -p` run with this setup) ran an allowed `bin/konstant job list`, while
 reading `/etc/hostname` with the Read tool, `cat /etc/hostname` and `touch /tmp/...` were each
 denied.
+
+## Confinement profiles
+
+What a phase may see and do is ONE choice in `konstant.toml`, plus options that override it
+(`konstant/confinement.py`; `./install.sh --confinement closed|open` and `get.sh` ask on a
+terminal and write it for a new workspace):
+
+```toml
+[confinement]
+profile = "closed"      # closed (the default) | open
+integrity = "on"        # on | off (off: level 4 only, with profile = "open"; see below)
+# any option of the table below overrides the profile, e.g.
+# credentials = ["~/.ssh", "~/.config/myservice/token", "$GITHUB_TOKEN"]
+# docker_socket = false
+```
+
+- **closed** (default, the 0.1.0 reach): a phase writes only inside its project (in factory mode
+  its job clone) and OUT; the credential and agent homes konstant lists (below) are masked; no ssh
+  agent, no docker socket; the credential variables konstant lists (`GITHUB_TOKEN`, `GH_TOKEN`,
+  `AWS_*`, `VAULT_TOKEN`, ... in `machinery.CREDENTIAL_ENV`; never a harness's own API key) are
+  not in its environment.
+- **open**: a phase gets the host the way your own shell does: it reads and writes anywhere your
+  user can, uses the network, ssh and your ssh agent, the docker socket, your credential files
+  and variables. Use it when you trust your agents with your servers, as you would a colleague at
+  your keyboard.
+
+**The integrity core holds in every profile** (and always in factory mode): the sealed holdout
+store is unreadable; every token but the phase's own identity's (and the read-only viewer's) is
+unreadable; konstant's machinery (the catalog, the generated harness surfaces, `var/`
+bookkeeping, the board DB with the job's verdict history, `.git` of the workspace) is not
+writable; in factory mode the target repository and the other job clones are read-only too. This
+protects the meaning of "verified", not the host: whatever a phase may do to your machine, it
+cannot read the tests it is judged by, act as the verifier, or rewrite konstant's record of what
+happened. Under the open profile every phase therefore runs in konstant's jail at level 4 too, as
+a thin layer: the host root bound writable, with masks and read-only binds over only the
+integrity core (claude, codex, gemini, dsh and `command` alike; without a working bubblewrap an
+open level-4 phase gets only its harness's own rules, and `doctor` says so).
+
+| option | closed | open | allows | risks |
+|---|---|---|---|---|
+| `network` | harness default | true | commands of a phase reach the network (beyond the harness's own model traffic) | exfiltration of anything the phase can read; downloads that run code |
+| `home_read` | true | true | read your home folder outside the workspace (the credential locations stay masked unless `credentials` passes them) | private files (notes, other projects, browser data) reach the model |
+| `home_write` | false | true | write anywhere in your home folder | a phase can plant code your own unjailed sessions run later (shell rc files, agent homes, ~/.local/bin) |
+| `host_write` | false | true | write anywhere you can outside the workspace (implies home_write) | anything your user can change on this host, including other repositories |
+| `extra_read` | `[]` | `[]` | read these paths even where the profile masks them | what is in them reaches the model |
+| `extra_write` | `[]` | `[]` | write these paths | whatever later reads those paths trusts what a phase wrote |
+| `credentials` | `[]` | `["*"]` | pass these credential files/folders (e.g. ~/.ssh, a token file) and $VARIABLES through; "*" = every location and variable konstant lists | the phase can act as you on every service those credentials reach |
+| `ssh_agent` | false | true | use your ssh agent (SSH_AUTH_SOCK and its socket) | ssh to every server your agent's keys open, without seeing a key; an ssh login into THIS host leaves konstant's jail |
+| `docker_socket` | false | true | use the docker daemon (its socket, DOCKER_HOST); never in factory mode | the docker socket is root on this host: a phase that uses it can read and change anything, the integrity core included (so factory mode never passes it) |
+| `host_agents` | false | false | the orchestrator session started by `konstant dsh` may run the host's own agent launchers (dsh, claude, codex, gemini) by name | a launcher that loads your personal agent setup (its profiles, servers, passwords) runs outside the workspace's composition and every gate |
+
+`bin/konstant confinement show` prints the effective value and source of every option and, per
+configured harness, how each one is enforced at level 4 and in factory mode (`enforced`,
+`partial` or `no`, with the mechanism: the jail, Claude Code's settings and sandbox, the codex
+profile, the gemini policy, the dsh patch); `doctor` reports the profile (WARN when it is wider
+than closed), the integrity core, and the hazards below. A path option that lies inside the
+integrity core is refused when the config loads.
+
+- **`integrity = "off"`** (only with `profile = "open"`, only at level 4): no mask and no deny
+  rule for the core; phases can read every token and the holdout store and write konstant's
+  machinery, so `verified` no longer means anything. `doctor` reports it as a FAIL, and factory
+  mode (a job with sealed holdouts, intake, the scenario writer, `holdout add`) refuses to start
+  (exit 2).
+- **Limits of the open profile.** The docker socket is root on this host: a level-4 phase that
+  uses it can reach the core (factory mode never passes it). A phase that can ssh into THIS host
+  as you (a key of yours that your own `authorized_keys` accepts; `doctor` WARNs) leaves the jail
+  the same way. A phase that may write your home can plant code your own unjailed shell or agent
+  sessions run later. `network = false` is enforced only where the harness separates its tool
+  traffic from its model traffic (Claude Code's sandbox, codex); a jailed dsh, gemini or
+  `command` phase shares the host network (`confinement show` marks it `no`).
+- **What never follows the profile**: the scenario writer always runs closed (it handles sealed
+  content; an open one could copy its drafts where a producer reads), and konstant's own checks
+  (`task check`'s test runs, the verifier's re-run, holdout runs, probes) always run in the
+  closed jail without network.
+- **Host agents** (found in a live run: the orchestrator session is unjailed, and its model ran
+  the host's own dsh launcher, which loads your personal dsh home): unless `host_agents = true`,
+  `konstant dsh` puts refusing `dsh`, `claude`, `codex` and `gemini` launchers first on the
+  session's PATH (`var/harness/dsh/session/bin/`), so running them by name exits 126 and names
+  what it shadows; konstant's own commands drop that directory and still find the real CLIs. A
+  program named by its absolute path is not stopped: the session is not jailed. Under the open
+  profile the session's own dsh sandbox stays `workspace-write`: the profile widens phases, never
+  the unjailed session.
 
 ## Security model and limits
 
@@ -378,7 +461,8 @@ loopback (a remote bind needs `[board] allow_remote = true`); request bodies cap
   the second line.
 - **Process containment is Linux-only** (a child subreaper). A process started through another
   service (cron, `systemd-run`, ssh to localhost) is out of reach; none of those is on a phase's
-  allow list.
+  allow list under the closed profile (the open one lets a phase use ssh: see "Confinement
+  profiles").
 - **User-level Claude Code memory.** The default command skips user-level settings, hooks and MCP
   servers. Your user-level `~/.claude/CLAUDE.md` memory is not a settings source and may still
   shape a headless phase: keep it free of instructions that would mislead a phase.

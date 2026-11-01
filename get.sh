@@ -3,6 +3,7 @@
 #
 #   curl -fsSL https://github.com/bryn1/konstant/releases/latest/download/get.sh | bash
 #   curl -fsSL https://github.com/bryn1/konstant/releases/latest/download/get.sh | bash -s -- --dir myproj --harness dsh
+#   ... | bash -s -- --confinement open      # phases get your host (docs/CONCEPTS.md "Confinement profiles")
 #
 # It checks the prerequisites, resolves the version (the latest release unless --version), downloads
 # konstant-<V>.tar.gz and its .sha256, verifies the checksum BEFORE unpacking, unpacks into ./konstant
@@ -24,6 +25,9 @@ usage: curl -fsSL <release>/get.sh | bash -s -- [options]      (or: sh get.sh [o
                   command template for any other CLI (e.g. "mycli -p {prompt}"); without it you are
                   asked on a terminal, otherwise the first of claude/codex/gemini/dsh on PATH is used
   --port N        board port (default: the first free port from 8470)
+  --confinement P what phases may see and do: closed (default: inside the workspace only) or open
+                  (your host like your own shell: ssh, docker, your credentials; the integrity
+                  core is kept in both); without it you are asked on a terminal
   --wheels DIR    offline install of the Python dependencies (see install.sh --help)
   --no-install    download, verify and unpack only; run ./install.sh yourself
   --yes           never ask (non-interactive)
@@ -165,6 +169,26 @@ kg_harness() {
   fi
 }
 
+# the confinement profile: --confinement, else ask on a terminal, else closed (install.sh's default)
+kg_confinement() {
+  [ -z "$KG_CONFINEMENT" ] || return 0
+  if [ "$KG_YES" != 1 ] && ( : </dev/tty ) 2>/dev/null && [ -t 2 ]; then
+    {
+      printf '\nConfinement: closed keeps every phase inside the workspace; open gives phases your\n'
+      printf 'host like your own shell (ssh, docker, your credentials), convenient but a model can act as you.\n'
+      printf 'confinement [closed]: '
+    } >&2
+    read -r KG_CONFINEMENT </dev/tty || KG_CONFINEMENT=""
+  fi
+  case "$KG_CONFINEMENT" in
+    ''|closed|open) ;;
+    *) kg_die "confinement: answer closed or open (got $KG_CONFINEMENT)" ;;
+  esac
+  if [ -n "$KG_CONFINEMENT" ]; then
+    kg_say "confinement: $KG_CONFINEMENT (change it later in konstant.toml [confinement]; docs/CONCEPTS.md)"
+  fi
+}
+
 kg_download() {
   kg_base=${KONSTANT_RELEASE_URL:-https://github.com/bryn1/konstant/releases}
   kg_base=${kg_base%/}
@@ -219,6 +243,7 @@ kg_install() {
   KG_CREATED=0   # unpacked: from here on a failure keeps the folder so ./install.sh can be re-run
   set -- --yes
   [ -z "$KG_HARNESS" ] || set -- "$@" --harness "$KG_HARNESS"
+  [ -z "$KG_CONFINEMENT" ] || set -- "$@" --confinement "$KG_CONFINEMENT"
   [ -z "$KG_PORT" ] || set -- "$@" --port "$KG_PORT"
   [ -z "$KG_WHEELS" ] || set -- "$@" --wheels "$KG_WHEELS"
   kg_say "running ./install.sh $*"
@@ -239,10 +264,11 @@ kg_install() {
 konstant_get() {
   set -u
   KG_DIR=konstant KG_VERSION="" KG_HARNESS="" KG_PORT="" KG_WHEELS="" KG_NOINSTALL=0 KG_YES=0
+  KG_CONFINEMENT=""
   KG_STAGE="" KG_CREATED=0 KG_PY=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir|--version|--harness|--port|--wheels)
+      --dir|--version|--harness|--port|--wheels|--confinement)
         [ $# -ge 2 ] && [ -n "$2" ] || { printf 'konstant-get: %s needs a value\n' "$1" >&2; exit 2; }
         case "$1" in
           --dir) KG_DIR=$2 ;;
@@ -250,6 +276,7 @@ konstant_get() {
           --harness) KG_HARNESS=$2 ;;
           --port) KG_PORT=$2 ;;
           --wheels) KG_WHEELS=$2 ;;
+          --confinement) KG_CONFINEMENT=$2 ;;
         esac
         shift 2 ;;
       --no-install) KG_NOINSTALL=1; shift ;;
@@ -260,11 +287,16 @@ konstant_get() {
   done
   [ "$KG_HARNESS" != command ] \
     || { printf 'konstant-get: --harness command: pass the command itself, e.g. --harness "mycli -p {prompt}"\n' >&2; exit 2; }
+  case "$KG_CONFINEMENT" in
+    ''|closed|open) ;;
+    *) printf 'konstant-get: --confinement must be closed or open\n' >&2; exit 2 ;;
+  esac
   if [ -n "$KG_VERSION" ]; then kg_check_version "$KG_VERSION"; fi
   trap 'kg_cleanup; exit 130' INT TERM HUP
   kg_prereqs
   kg_target
   [ "$KG_NOINSTALL" = 1 ] || kg_harness
+  [ "$KG_NOINSTALL" = 1 ] || kg_confinement
   kg_download
   trap - INT TERM HUP
   kg_install

@@ -83,8 +83,9 @@ curl -fsSL https://github.com/bryn1/konstant/releases/latest/download/get.sh | b
 `konstant-<version>.tar.gz` and its `.sha256`, verifies the checksum before unpacking, refuses a
 non-empty folder, runs `./install.sh` there and prints the next steps. It never uses sudo and writes
 nothing outside the folder. A failed download or a checksum mismatch leaves nothing behind.
-Options: `--dir DIR`, `--version V`, `--harness H`, `--port N`, `--wheels DIR`, `--no-install`,
-`--yes`. To read the script first, download it, inspect it and run `sh get.sh`; its checksum is
+Options: `--dir DIR`, `--version V`, `--harness H`, `--port N`, `--confinement closed|open`
+(what phases may see and do; closed by default, open = your host like your own shell, the
+integrity core kept: docs/CONCEPTS.md), `--wheels DIR`, `--no-install`, `--yes`. To read the script first, download it, inspect it and run `sh get.sh`; its checksum is
 the release asset `get.sh.sha256`.
 
 ## Why

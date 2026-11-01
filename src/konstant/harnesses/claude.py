@@ -72,12 +72,12 @@ class Claude(Adapter):
         return build_argv(self.template(ph.model), ph.values, False)
 
     def env(self, ph: Phase) -> dict:
-        if not self.confines(ph.jail, ph.factory):
+        if not self.jails(ph):
             return {}
         return {"CLAUDE_CONFIG_DIR": str(phase_home(ph, "claude"))}
 
     def prepare(self, ph: Phase) -> None:
-        if self.confines(ph.jail, ph.factory):
+        if self.jails(ph):
             phase_home(ph, "claude")
 
     def cleanup(self, ph: Phase) -> None:
@@ -90,7 +90,8 @@ class Claude(Adapter):
         return [(Path(CREDENTIAL).expanduser(), phase_home(ph, "claude") / ".credentials.json")]
 
     def confine(self, argv: list, ph: Phase) -> list:
-        if self.confines(ph.jail, ph.factory) and not sandbox_nests(ph.workspace):
+        # the open profile's host_write shares the host /tmp: no short private TMPDIR to nest in
+        if self.jails(ph) and not (sandbox_nests(ph.workspace) and not ph.conf.host_write):
             argv = without_sandbox(argv, ph)
         return super().confine(argv, ph)
 

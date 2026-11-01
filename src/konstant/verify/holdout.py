@@ -114,6 +114,9 @@ def confined(cfg) -> str | None:
     """Why no holdout can run here (None: the jail works)."""
     if not cfg.data["gate"]["jail"]:
         return f"{UNCONFINED}: [gate] jail = false"
+    if not cfg.confinement().integrity:
+        return (f"{UNCONFINED}: [confinement] integrity = \"off\" (factory mode never starts "
+                "without the integrity core: docs/CONCEPTS.md \"Confinement profiles\")")
     if not jail_mod.available():
         return f"{UNCONFINED}: konstant's jail (bubblewrap) is unavailable" + \
             (" (KONSTANT_NO_JAIL=1)" if os.environ.get("KONSTANT_NO_JAIL") == "1" else "")

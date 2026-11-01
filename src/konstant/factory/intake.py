@@ -88,7 +88,8 @@ def run(ctx, slug: str, override: str | None = None) -> int:
         if override else None
     hs = harness_mod.HarnessSet(cfg.data["harness"], cfg.home, cat,
                                 cfg.data["permissions"]["allow"], override=over,
-                                jail=bool(cfg.data["gate"]["jail"]), factory=True)
+                                jail=bool(cfg.data["gate"]["jail"]), factory=True,
+                                conf=cfg.confinement())
     loose = hs.unconfined()
     if why or loose:
         err(f"konstant intake: {why or 'holdouts need a confined phase'}"

@@ -53,7 +53,11 @@ def plugin_config(ws: Path, gate: dict, policy: dict) -> dict:
             **({"chat": True} if gate.get("chat") else {})}
 
 
-def session_patch(ws: Path, gate: dict, policy: dict, header: str) -> str:
+def session_patch(ws: Path, gate: dict, policy: dict, header: str, conf=None) -> str:
+    """The session layer. The session is NOT jailed, so when the confinement lets PHASES write
+    outside their project (their patch then sets dsh's sandbox to danger-full-access and
+    konstant's jail bounds them), this layer puts the session back on workspace-write: the open
+    profile is for phases, never a wider reach for the unjailed session."""
     cfg = plugin_config(ws, gate, policy)
     lines = [f"# {header}",
              "# konstant's dsh SESSION layer (docs/DSH.md): the task gate + DoD loop plugin for your",
@@ -63,6 +67,10 @@ def session_patch(ws: Path, gate: dict, policy: dict, header: str) -> str:
              "- insert:", "    - id: konstant-gate",
              f"      name: {json.dumps(str(ws / PLUGIN))}", "      config:"]
     lines += [f"        {k}: {json.dumps(v)}" for k, v in cfg.items()]
+    if conf is not None and conf.writes_outside:
+        from konstant.harnesses.dsh import sandbox_lines
+        lines += ["# the session stays workspace-write ([confinement] widens phases only)"]
+        lines += sandbox_lines("workspace-write")
     return "\n".join(lines) + "\n"
 
 
@@ -73,7 +81,8 @@ def plugin_file(header: str) -> str:
 def files(gen, hcfg: dict) -> dict:
     gate = getattr(gen, "gate", None) or {}
     policy = getattr(gen, "policy", None) or {}
-    out = {SESSION_PATCH: session_patch(gen.ws, gate, policy, gen.header),
+    out = {SESSION_PATCH: session_patch(gen.ws, gate, policy, gen.header,
+                                        getattr(gen, "conf", None)),
            PLUGIN: plugin_file(gen.header)}
     for agent in gen.cat.agents():
         out[f"{AGENTS_DIR}{agent}.md"] = gen.header + "\n" + gen.agent_prompt(agent)

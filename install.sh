@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # konstant installer: turns THIS unpacked folder into a konstant workspace (DESIGN §10).
 #
-#   ./install.sh [--port N] [--harness "<cmd>"] [--wheels DIR] [--from OLD_FOLDER] [--yes]
+#   ./install.sh [--port N] [--harness "<cmd>"] [--confinement closed|open] [--wheels DIR]
+#                [--from OLD_FOLDER] [--yes]
 #
 # Idempotent: a re-run keeps konstant.toml, the tokens and the board data, re-installs the package
 # into .venv, migrates the DB and regenerates the agent surfaces. Nothing is written outside this
@@ -10,13 +11,18 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: ./install.sh [--port N] [--harness "<cmd>"] [--wheels DIR] [--from OLD_FOLDER] [--yes]
+usage: ./install.sh [--port N] [--harness "<cmd>"] [--confinement closed|open] [--wheels DIR]
+                    [--from OLD_FOLDER] [--yes]
 
   --port N        board port for a NEW konstant.toml (default: first free port from 8470)
   --harness H     for a NEW konstant.toml: an adapter name (claude, codex, gemini, dsh: written as
                   [harness] name) or an argv template for any other CLI, the command adapter
                   (e.g. "mycli -p {prompt}"; written as [harness] command); default: Claude Code,
                   workspace-scoped (docs/HARNESSES.md)
+  --confinement P for a NEW konstant.toml: what phases may see and do ([confinement] profile):
+                  closed (default: inside the workspace only) or open (your host like your own
+                  shell: ssh, docker, your credentials), the integrity core kept in both; asked
+                  on a terminal when not given (docs/CONCEPTS.md "Confinement profiles")
   --wheels DIR    offline install from pre-downloaded wheels (pip --no-index --find-links DIR);
                   make DIR on a machine with network and a current pip (>= 23):
                     python3 -m pip download -d DIR <this folder> setuptools wheel
@@ -26,11 +32,12 @@ usage: ./install.sh [--port N] [--harness "<cmd>"] [--wheels DIR] [--from OLD_FO
 EOF
 }
 
-PORT="" HARNESS="" WHEELS="" FROM="" YES=0
+PORT="" HARNESS="" CONFINEMENT="" WHEELS="" FROM="" YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT="${2:?--port needs a value}"; shift 2 ;;
     --harness) HARNESS="${2:?--harness needs a value}"; shift 2 ;;
+    --confinement) CONFINEMENT="${2:?--confinement needs a value}"; shift 2 ;;
     --wheels) WHEELS="${2:?--wheels needs a value}"; shift 2 ;;
     --from) FROM="${2:?--from needs a value}"; shift 2 ;;
     --yes|-y) YES=1; shift ;;
@@ -56,6 +63,7 @@ if [ -n "$PORT" ] && { [ "$PORT" -lt 1024 ] || [ "$PORT" -gt 65535 ]; }; then
   die "--port must be 1024-65535 (got $PORT)"
 fi
 if [ -n "$WHEELS" ]; then [ -d "$WHEELS" ] || die "--wheels: no such directory: $WHEELS"; fi
+case "$CONFINEMENT" in ''|closed|open) ;; *) die "--confinement must be closed or open (got $CONFINEMENT)";; esac
 [ "$HARNESS" != command ] \
   || die "--harness command: pass the command template itself, e.g. --harness \"mycli -p {prompt}\" (docs/HARNESSES.md)"
 
@@ -81,6 +89,12 @@ if [ "$YES" -ne 1 ]; then
     printf 'Install konstant into %s%s? [y/N] ' "$HERE" "${FROM:+ (upgrade from $FROM)}"
     read -r answer
     case "$answer" in y|Y|yes|YES) ;; *) say "cancelled"; exit 1 ;; esac
+    if [ -z "$CONFINEMENT" ] && [ ! -f "$HERE/konstant.toml" ] && [ -z "$FROM" ]; then
+      printf 'Confinement: closed keeps every phase inside this workspace; open gives phases your host like your own shell (ssh, docker, your credentials), which is convenient but lets a model act as you. [closed/open] (closed) '
+      read -r answer
+      case "$answer" in ''|closed) CONFINEMENT=closed ;; open) CONFINEMENT=open ;;
+        *) die "answer closed or open (got $answer)" ;; esac
+    fi
   else
     die "not a terminal: pass --yes to install without asking"
   fi
@@ -173,9 +187,10 @@ fi
 mkdir -p "$HERE/var/logs" "$HERE/var/runs" "$HERE/var/backups" "$HERE/projects"
 if [ -f "$HERE/konstant.toml" ]; then
   say "kept existing konstant.toml"
-  [ -z "$PORT$HARNESS" ] || say "note: --port/--harness only apply to a NEW konstant.toml; edit it instead"
+  [ -z "$PORT$HARNESS$CONFINEMENT" ] || say "note: --port/--harness/--confinement only apply to a NEW konstant.toml; edit it instead"
 else
-  KONSTANT_PORT="$PORT" KONSTANT_HARNESS="$HARNESS" "$HERE/.venv/bin/python" - "$HERE/konstant.toml" <<'EOF'
+  KONSTANT_PORT="$PORT" KONSTANT_HARNESS="$HARNESS" KONSTANT_CONFINEMENT="${CONFINEMENT:-closed}" \
+    "$HERE/.venv/bin/python" - "$HERE/konstant.toml" <<'EOF'
 import json, os, socket, sys
 
 def free(port):
@@ -208,11 +223,18 @@ else:
 lines += ["[permissions]",
           "# extra Claude Code rules for headless phases, e.g. your test runner:",
           '# allow = ["Bash(pytest *)", "Bash(python -m pytest *)", "Bash(npm test *)"]', ""]
+conf = os.environ.get("KONSTANT_CONFINEMENT") or "closed"
+lines += ["[confinement]",
+          "# what phases may see and do: closed (inside the workspace) or open (your host, like",
+          "# your own shell); per-capability options override it; the integrity core (holdouts,",
+          "# other identities' tokens, konstant's machinery) holds in both. See",
+          "# docs/CONCEPTS.md \"Confinement profiles\" and `bin/konstant confinement show`.",
+          f"profile = {json.dumps(conf)}", ""]
 path = sys.argv[1]
 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
 with os.fdopen(fd, "w") as fh:
     fh.write("\n".join(lines))
-print(f"install: wrote konstant.toml (board port {port})")
+print(f"install: wrote konstant.toml (board port {port}, confinement {conf})")
 EOF
 fi
 

@@ -1,4 +1,4 @@
-# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2 and L5-3 landed)
+# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b and L5-3 landed)
 
 konstant is a self-contained workspace for running coding agents with discipline: a local job
 board (**board**), a deterministic **task gate** that turns a task into phases run by one agent
@@ -58,7 +58,7 @@ konstant-0.1.0/
     catalog.py                 # load + validate catalog/types.yaml, agents, skills, workflows
     cli/                       # argparse front end: main, board, project, job, task (+ task_run,
                                # task_session), verify, holdout, goal (goal, intake, chat), agents,
-                               # dsh, doctor
+                               # dsh, confinement, doctor
     board/
       app.py                   # FastAPI app factory, static read-only UI
       api/                     # deps (auth deps, serialisation), projects, jobs (file/read),
@@ -94,6 +94,7 @@ konstant-0.1.0/
                dsh_session.py dsh_gate/{index.ts,build.mjs,konstant-gate.mjs} # dsh session plugin (§6.6)
     jail.py                                  # bubblewrap jail for agent-written code
     machinery.py                             # ONE list: paths no phase writes + credential homes (§9)
+    confinement.py                           # [confinement] profiles + options, the integrity core (§9.1)
     agents/   generate.py                    # catalog -> harness surfaces
     release/  build.py  scan.py  clidoc.py   # maintainer tooling (`python -m konstant.release`)
   catalog/
@@ -675,6 +676,12 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
   as a project path. The negative control of a re-sealed set runs on `workdir_base`.
 - **doctor** rows `factory jail`, `factory harness` (per harness: home relocation), `claude
   sandbox`, `identities`.
+- **Confinement profiles** (wave L5-2b, §9.1): the factory jail above is the `closed` profile.
+  Under `open` a factory phase's jail binds the host root writable and keeps only the integrity
+  core: `var/secrets/` (but its own and viewer's token) and `var/holdout/` masked, every machinery
+  path, `projects/` (the target and the other job clones; its own clone re-opened) and the git
+  guards read-only. Factory mode never passes the docker socket and never starts with
+  `integrity = "off"` (exit 2); the scenario writer always runs closed.
 
 ### 7.3 Intake: goals -> jobs -> reviewed DoD -> sealed holdouts (level 5; docs/LEVEL5.md 4)
 
@@ -909,6 +916,71 @@ copy, and the same rules passed with `--settings` still applied, which confirms 
 suite and the fresh-install test prove the runner with the deterministic fake harness (`tests/fixtures/fake_harness.py`) and need
 no model; `doctor` checks that the settings file is in sync before a run.
 
+### 9.1 Confinement profiles (`konstant/confinement.py`; wave L5-2b)
+
+`[confinement] profile` = `closed` (default: the reach this section describes) or `open` (a phase
+gets the host like the owner's own shell), plus per-capability options that override the profile
+(`OPTIONS`, the one table: `network`, `home_read`, `home_write`, `host_write`, `extra_read`,
+`extra_write`, `credentials`, `ssh_agent`, `docker_socket`, `host_agents`; each with what it allows
+and risks, copied into docs/CONCEPTS.md and checked by a test). `confinement.parse` fails closed:
+an unknown key, a wrong type, a relative or `..` path, a path inside the integrity core, or
+`integrity = "off"` without `profile = "open"` stop the config load.
+
+**The integrity core** holds in every profile: the sealed store unreadable, every token but the
+phase identity's and viewer's unreadable, `machinery.DIRS/FILES` (catalog, generated surfaces,
+`var/` bookkeeping, the board DB with the verdict history, the workspace `.git`) not writable, in
+factory mode `projects/` read-only but the phase's own clone. It protects the meaning of
+"verified", not the host. `integrity = "off"` (open, level 4 only) drops it from every adapter and
+the jail; `doctor` FAILs and every factory path (`verify/holdout.py` `confined`) refuses.
+
+Per phase, `Phase.wconf` is the workspace's confinement (what the static surfaces were rendered
+from) and `Phase.conf` = `wconf.for_phase(identity, factory)`: the scenario writer always
+`CLOSED`, a factory phase never with the docker socket and never without the core. The mapping:
+
+- **konstant's jail** (`harnesses/base.py` `jail_layout`, `jail.wrap`): closed = the shape above;
+  open = `root_rw` (the host root bound writable, the host `/tmp`), the credential locations and
+  variables passed, the ssh-agent and docker sockets reachable; always the core (masks, `expose`
+  of the phase's own tokens, machinery and `ro_dirs` read-only, guards re-bound inside any
+  re-opened writable dir). Options: `home_read = false` masks every `$HOME` entry that does not
+  lead to a kept path; `home_write` binds `$HOME`; `extra_write` binds paths writable;
+  `extra_read` and passed credentials are bound back after the masks. Under `open` every adapter
+  confines at level 4 too (`Adapter.confines(jail, factory, conf)`: `conf.jails_level4()`), so the
+  jail keeps the core around a phase that otherwise has the host; dsh confines always, unless the
+  core is off.
+- **phase environment** (`gate/harness.py`): `Confinement.env_drop()` removes
+  `machinery.CREDENTIAL_ENV` not passed, `SSH_AUTH_SOCK` without `ssh_agent`, `DOCKER_HOST`
+  without `docker_socket` (the `[harness] env` table still wins).
+- **Claude Code** (`agents/settings.py` `render(conf=)`): open adds `Bash`, `Read(//**)`, unsets
+  `blockReadsOutsideWorkingDirectories`; `host_write`/`home_write` add `Edit(//**)`/`Edit(~/**)`
+  and sandbox `allowWrite`; `extra_*` add rules (+ `additionalDirectories`); passed credentials
+  leave the sandbox `denyRead`; `home_read = false` denyReads `~/` (allowRead the workspace);
+  `network` -> `sandbox.network.allowedDomains` (`["*"]` / `[]`); `ssh_agent` ->
+  `allowAllUnixSockets` (a static file cannot name the per-login socket), `docker_socket` ->
+  `allowUnixSockets`. The core's deny rules and `denyRead`/`denyWrite` stay unless it is off. A
+  jailed claude phase keeps its sandbox only when it nests AND the phase has a private `/tmp`.
+- **codex** (`filesystem(ph)`): `:root` write under `host_write`, `$HOME` write, deny rules for
+  `home_read = false`, extra paths, passed credentials not denied; `network.enabled` from
+  `network`; the core's read/deny rules unless off.
+- **gemini** (`policy(conf=)`): open adds an allow-all `run_shell_command` rule at priority 50 (every
+  deny is 200/300); `extra_*` become `--include-directories`; the core's deny rules unless off.
+- **dsh** (`patch(conf=)`): `danger-full-access` sandbox (and preset, and `DSH_PERMISSION_MODE`)
+  when the profile writes outside the project, the jail being the boundary; `Harness.check`
+  refuses such a dsh phase when the jail cannot wrap it. The session patch puts the unjailed
+  session back on `workspace-write`.
+- **`konstant dsh`** (`cli/dsh.py`): unless `host_agents`, refusing `dsh`/`claude`/`codex`/`gemini`
+  shims in `var/harness/dsh/session/bin/` first on the session's PATH (`KONSTANT_SHIM_DIR`;
+  `cli/main.py` drops it for konstant's own processes).
+- **konstant's own checks** (tests rule, verifier re-run, holdout runs, probes) never read the
+  profile: closed jail, no network.
+
+`konstant confinement show` (`cli/confinement.py`) prints the effective options with their source
+and, per configured harness, level 4 and factory mode, the mechanism and level (`enforced`,
+`partial`, `no`) of each option and of the integrity core; `doctor` rows `integrity core`,
+`confinement`, and the WARNs `docker socket`, `ssh to this host` (a `~/.ssh/*.pub` accepted by
+the user's own `authorized_keys`: an ssh login back into this host leaves the jail), `host agents`.
+`install.sh --confinement` / `get.sh --confinement` (asked on a terminal) write the profile into a
+new konstant.toml.
+
 ## 10. Install and workspace flow
 
 ### 10.1 One-line install (`get.sh`)
@@ -947,6 +1019,10 @@ asset (§11):
    is refused by get.sh and install.sh with the template hint), else asked on `/dev/tty` when
    there is one (the script itself is on stdin), else the first of claude, codex, gemini, dsh on
    PATH, else install.sh's default (Claude Code). The choice is printed with where to change it.
+8. Confinement (L5-2b, §9.1): `--confinement closed|open` passed through to install.sh, else
+   asked on `/dev/tty` with its one-sentence trade-off (empty answer = closed), else not passed
+   (install.sh writes `profile = "closed"`). install.sh asks the same on a terminal when it runs
+   without `--yes` and writes `[confinement] profile` into a new konstant.toml.
 
 Tests: `tests/release/test_get.py` serves a built dist/ over a local `http.server` in the GitHub
 layout and runs the documented pipe against it (happy path with a full install, checksum
@@ -954,8 +1030,9 @@ mismatch, malformed sum, missing release, non-empty dir, truncation, missing/old
 missing tools, harness asked on a pty and detected on PATH); `tests/e2e/one_line.sh` is the
 fresh-install e2e installed by the one-liner.
 
-`./install.sh [--port N] [--harness "<cmd>"] [--wheels DIR] [--from OLD] [--yes]`, run in the unpacked
-folder (without `--yes` it asks on a terminal and refuses when stdin is not one):
+`./install.sh [--port N] [--harness "<cmd>"] [--confinement closed|open] [--wheels DIR] [--from OLD] [--yes]`, run in the unpacked
+folder (without `--yes` it asks on a terminal, the confinement profile too when no `--confinement` is
+given and the konstant.toml is new, and refuses when stdin is not one):
 
 1. Require `python3 >= 3.10` with `venv`; refuse to run as root; refuse if the folder path contains
    whitespace or is not writable.
@@ -1087,7 +1164,8 @@ Global: `--as ROLE`, `--json`, `--config PATH`; env `KONSTANT_HOME`. Exit 0 ok, 
 | `intake GOAL` | `--harness` | planner -> DoD review -> filing -> approval -> scenario writer (§7.3; exit 0, 3 refused, 4 authoring BLOCKED, 2 setup) |
 | `chat turn` | `--session TEXT\|-` | one owner message of the orchestrator chat: confirm/withdraw, escalations, the intake block (JSON; the dsh plugin's seam) |
 | `agents sync` | `--check --harness NAME` | §8 (configured harnesses only) |
-| `dsh APP [ARGS]` | `--project --dry-run` | start your dsh session (web, tui, headless) with konstant's two layers (§6.6); refused (exit 1) when the session would load a layer from outside the workspace |
+| `dsh APP [ARGS]` | `--project --dry-run` | start your dsh session (web, tui, headless) with konstant's two layers (§6.6); refused (exit 1) when the session would load a layer from outside the workspace; refusing agent-CLI shims first on its PATH unless `[confinement] host_agents` (§9.1) |
+| `confinement show` | `--json` | the effective `[confinement]` and, per configured harness, how each option is enforced at level 4 and in factory mode (§9.1) |
 | `agents list` | | types, agents, skills, workflows |
 | `doctor` | | §10 |
 | `version` | | |
@@ -1169,6 +1247,21 @@ kind = "stdout"                # stdout | file | chat (the dsh orchestrator chat
 
 [ship]
 decision_types = ["infra"]     # goal jobs of these types are filed ship_mode = decision (Q4)
+
+[confinement]                  # what a phase may see and do (§9.1; docs/CONCEPTS.md)
+profile = "closed"             # closed | open
+integrity = "on"               # on | off (off: profile open, level 4 only; doctor FAIL)
+# options override the profile (unset = the profile's value):
+# network = <bool>             # closed: each harness's own default; open: true
+# home_read = true             # open: true
+# home_write = false           # open: true
+# host_write = false           # open: true (implies home_write)
+# extra_read = []              # absolute or ~ paths, never inside the integrity core
+# extra_write = []
+# credentials = []             # paths and $VARIABLES passed through; open: ["*"]
+# ssh_agent = false            # open: true
+# docker_socket = false        # open: true at level 4; never in factory mode
+# host_agents = false          # the `konstant dsh` session may run host agent launchers
 
 [verify]
 rerun = true

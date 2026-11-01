@@ -29,6 +29,7 @@ positional arguments:
     chat         the orchestrator chat as intake (the dsh plugin's seam)
     agents       generate and list the agent catalog surfaces
     dsh          start your dsh session (web, tui, headless) with the konstant gate plugin
+    confinement  the confinement profile: what phases may see and do, per harness
     doctor       check that this workspace is ready (exit 0 when nothing FAILs)
     version      print the version
 
@@ -1008,6 +1009,36 @@ options:
   --config PATH      konstant.toml to use
   --project PROJECT  run the session in this project's directory
   --dry-run          print the argv, cwd and environment instead of starting dsh
+```
+
+## `konstant confinement`
+
+```
+usage: konstant confinement [-h] [--as ROLE] [--json] [--config PATH] SUBCOMMAND ...
+
+positional arguments:
+  SUBCOMMAND
+    show         print the effective profile, options and how each configured harness enforces them
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant confinement show`
+
+```
+usage: konstant confinement show [-h] [--as ROLE] [--json] [--config PATH]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
 ```
 
 ## `konstant doctor`

@@ -98,9 +98,11 @@ class Harness:
     def __init__(self, command: str | None, *, stdin: bool = False, timeout_s: int = 3600,
                  env: dict | None = None, workspace: Path, adapter=None, model: str = "",
                  endpoint: dict | None = None, allow: list | None = None, name: str = "",
-                 jail: bool = True, factory: bool = False):
+                 jail: bool = True, factory: bool = False, conf=None):
+        from konstant import confinement
         self.command, self.stdin, self.timeout_s = command, stdin, timeout_s
         self.jail, self.factory = jail, factory
+        self.conf = conf or confinement.CLOSED          # the workspace's [confinement]
         self.env, self.workspace = dict(env or {}), Path(workspace)
         self.adapter, self.model = adapter, model
         self.endpoint, self.allow = dict(endpoint or {}), list(allow or [])
@@ -111,7 +113,7 @@ class Harness:
                      jail=self.jail, factory=self.factory,
                      identity=values.get("identity") or "worker",
                      home_base=values.get("home_base"), tokens=values.get("tokens"),
-                     hide=tuple(values.get("hide") or ()))
+                     hide=tuple(values.get("hide") or ()), wconf=self.conf)
 
     def driver(self):
         """The adapter that starts, confines and cleans up a phase: the configured one, or the
@@ -128,7 +130,8 @@ class Harness:
         adapter and every explicit template; outside it only an adapter that always confines
         (dsh)."""
         drv = self.driver()
-        return drv is not None and drv.confines(self.jail, self.factory)
+        conf = self.conf.for_phase("worker", self.factory)
+        return drv is not None and drv.confines(self.jail, self.factory, conf)
 
     def check(self, run_dir: Path | None = None) -> None:
         """Fail fast on a template that cannot work (before any phase starts)."""
@@ -136,9 +139,14 @@ class Harness:
         self.argv({"prompt": "", "prompt_file": rd / "prompts" / "x.md", "agent": "-",
                    "cwd": self.workspace, "run_dir": rd, "workspace": self.workspace})
         if self.command is None and self.adapter is not None:
-            why = self.adapter.preflight(self.workspace)
+            why = self.adapter.preflight(self.workspace, self.conf)
             if why:
                 raise HarnessError(why)
+        if self.name == "dsh" and self.conf.writes_outside and self.conf.integrity and \
+                not self.confines():
+            raise HarnessError("dsh: [confinement] lets a phase write outside its project, so "
+                               "dsh's own sandbox runs danger-full-access and konstant's jail "
+                               "must hold the integrity core, but the jail is off or unavailable")
 
     def run(self, prompt: str, *, agent: str, cwd: Path, run_dir: Path, label: str,
             out: Path | None = None, identity: str = "worker", home_base: Path | None = None,
@@ -162,7 +170,7 @@ class Harness:
             if self.command is None:
                 drv.prepare(ph)
                 extra = drv.env(ph)
-            if drv.confines(self.jail, self.factory):
+            if drv.jails(ph):
                 extra.update(drv.jail_env(ph))
             elif self.factory:
                 raise HarnessError("holdouts need a confined phase: konstant's jail is off or "
@@ -177,7 +185,9 @@ class Harness:
         logs = Path(run_dir) / "phases"
         logs.mkdir(parents=True, exist_ok=True)
         log = logs / f"{label}.log"
-        env = {**os.environ, **extra, **{k: str(v) for k, v in self.env.items()},
+        drop = set(self.conf.for_phase(identity, self.factory).env_drop())
+        host = {k: v for k, v in os.environ.items() if k not in drop}
+        env = {**host, **extra, **{k: str(v) for k, v in self.env.items()},
                "KONSTANT_IN_TASK": "1", "KONSTANT_RUN": str(run_dir), "KONSTANT_ROLE": "worker",
                "KONSTANT_IDENTITY": identity, "KONSTANT_HOME": str(self.workspace)}
         t0, timed_out = time.time(), False
@@ -209,21 +219,22 @@ class Harness:
 
 
 def from_choice(choice, hcfg: dict, workspace: Path, allow: list | None = None,
-                jail: bool = True, factory: bool = False) -> Harness:
+                jail: bool = True, factory: bool = False, conf=None) -> Harness:
     """An explicit template (yours, or name = "command") runs as written; otherwise the
     adapter renders the argv, env and per-phase preparation."""
     return Harness(choice.template, stdin=choice.stdin, timeout_s=hcfg["timeout_s"],
                    env=hcfg["env"], workspace=workspace,
                    adapter=None if choice.template is not None else choice.adapter,
                    model=choice.model, endpoint=hcfg.get("endpoint"), allow=allow,
-                   name=choice.name, jail=jail, factory=factory)
+                   name=choice.name, jail=jail, factory=factory, conf=conf)
 
 
 class HarnessSet:
     """The harness of each phase: its agent's type override, else the default (DESIGN §9)."""
 
     def __init__(self, hcfg: dict, workspace: Path, cat=None, allow: list | None = None,
-                 override: str | None = None, jail: bool = True, factory: bool = False):
+                 override: str | None = None, jail: bool = True, factory: bool = False,
+                 conf=None):
         self.cat = cat
         if override in harnesses.ADAPTERS and override != "command":
             # `task run --harness dsh` (an adapter NAME): every phase on that adapter, with the
@@ -235,15 +246,15 @@ class HarnessSet:
         if override is not None:                # `task run --harness CMD`: one command for all
             self.default = Harness(override, stdin=hcfg["stdin"], timeout_s=hcfg["timeout_s"],
                                    env=hcfg["env"], workspace=workspace, name="command",
-                                   jail=jail, factory=factory)
+                                   jail=jail, factory=factory, conf=conf)
             self.by_type: dict = {}
             return
         if cat is not None:
             harnesses.check_types(hcfg, cat)
         self.default = from_choice(harnesses.resolve(hcfg), hcfg, workspace, allow, jail,
-                                   factory)
+                                   factory, conf)
         self.by_type = {t: from_choice(harnesses.resolve(hcfg, t), hcfg, workspace, allow, jail,
-                                       factory) for t in (hcfg.get("types") or {})}
+                                       factory, conf) for t in (hcfg.get("types") or {})}
 
     def for_agent(self, agent: str) -> Harness:
         t = self.cat.type_of_agent(agent) if self.cat is not None else None

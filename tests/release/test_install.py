@@ -52,6 +52,49 @@ def test_refuses_a_bare_command_harness(tmp_path):
     assert res.returncode == 1 and "pass the command template itself" in res.stderr
 
 
+def test_refuses_a_bad_confinement(tmp_path):
+    res = sh(stub(tmp_path), "--yes", "--confinement", "ajar")
+    assert res.returncode == 1 and "--confinement must be closed or open (got ajar)" in res.stderr
+
+
+def test_confinement_is_asked_on_a_terminal(tmp_path):
+    """Without --confinement and --yes, on a terminal: one question with its trade-off (an
+    unknown answer stops before anything is installed)."""
+    import pty
+    import select
+    import time
+    folder = stub(tmp_path)
+    master, slave = pty.openpty()
+    p = subprocess.Popen(["bash", str(folder / "install.sh")], stdin=slave, stdout=slave,
+                         stderr=slave, env=dict(os.environ), close_fds=True)
+    os.close(slave)
+    out, step, deadline = b"", 0, time.time() + 60
+    while time.time() < deadline and p.poll() is None:
+        r, _, _ = select.select([master], [], [], 0.5)
+        if not r:
+            continue
+        try:
+            out += os.read(master, 4096)
+        except OSError:
+            break
+        if step == 0 and b"[y/N]" in out:
+            os.write(master, b"y\n")
+            step = 1
+        elif step == 1 and b"[closed/open]" in out:
+            os.write(master, b"ajar\n")
+            step = 2
+    p.wait(timeout=30)
+    try:
+        out += os.read(master, 4096)
+    except OSError:
+        pass
+    os.close(master)
+    text = out.decode(errors="replace")
+    assert "closed keeps every phase inside this workspace; open gives phases your host" in text
+    assert p.returncode == 1 and "answer closed or open (got ajar)" in text, text
+    assert not (folder / ".venv").exists() and not (folder / "konstant.toml").exists()
+
+
 def test_refuses_a_path_with_whitespace(tmp_path):
     d = stub(tmp_path, "my ws")
     res = sh(d, "--yes")
@@ -128,9 +171,13 @@ def test_install_twice_is_idempotent_then_upgrade_with_from(tmp_path):
     old = _copy_release_tree(tmp_path / "old")
     env = {k: v for k, v in os.environ.items() if not k.startswith("KONSTANT_")}
     harness = "python3 -c pass {prompt}"
-    first = sh(old, "--yes", "--port", "18999", "--harness", harness, env=env)
+    first = sh(old, "--yes", "--port", "18999", "--harness", harness, "--confinement", "open",
+               env=env)
     assert first.returncode == 0, first.stdout + first.stderr
     assert "0 FAIL" in first.stdout and os.access(old / "bin" / "konstant", os.X_OK)
+    assert "(board port 18999, confinement open)" in first.stdout          # L5-2b
+    assert '[confinement]' in (old / "konstant.toml").read_text() and \
+        'profile = "open"' in (old / "konstant.toml").read_text()
     before = _hashes(old)
     assert len(before) == 10        # 9 tokens (5 roles + 4 factory identities, LEVEL5 2.2) + konstant.toml
     second = sh(old, "--yes", env=env)

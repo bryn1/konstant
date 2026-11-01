@@ -1,10 +1,11 @@
 # konstant level 5: the dark factory
 
 Status: **plan, being built**. Wave L5-1 (pillar A, sealed holdouts: section 3), wave L5-2
-(factory confinement, identities, job clones: section 2) and wave L5-3 (pillar B, intake from the
-orchestrator chat, DoD review and the scenario writer: section 4) have landed and are described as
-built in DESIGN.md §7.1, §7.2 and §7.3; "L5-1 as built", "L5-2 as built" and "L5-3 as built" in
-section 8 list where they differ from the text below. The owner answered the open questions on 2026-11-01 (section 9); the
+(factory confinement, identities, job clones: section 2), wave L5-2b (confinement profiles open /
+closed and per-capability options around an integrity core: section 2.1) and wave L5-3 (pillar B,
+intake from the orchestrator chat, DoD review and the scenario writer: section 4) have landed and
+are described as built in DESIGN.md §7.1, §7.2, §9.1 and §7.3; "L5-1 as built", "L5-2 as built",
+"L5-2b as built" and "L5-3 as built" in section 8 list where they differ from the text below. The owner answered the open questions on 2026-11-01 (section 9); the
 sections they change say so. Everything else on this page is still the plan that the next
 releases build in the waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as
 each part lands, and this page stays the roadmap until level 5 is reached.
@@ -74,6 +75,26 @@ factory mode is on. Each harness keeps its own sandbox nested inside, as dsh's d
   unjailed). Where it cannot, a claude phase in factory mode runs with Claude Code's sandbox off
   and konstant's jail as the boundary (the plan's fallback; without it every Bash call would be
   denied, because the generated settings forbid unsandboxed commands). `doctor` says which.
+
+**Confinement profiles (owner, 2026-11-01; wave L5-2b).** Verbatim (typos kept): "so far my
+experience has been that i can trst my agents not to take the shortcuts and run destructive
+commands irresponsibly. my dsh has access to my servers passwords and proxmox. adding open and
+closed mode is a good idea, pwrhaoes choosing what the models can see and do as options."
+`konstant.toml [confinement] profile` is `closed` (the default and the public product's: the jail
+shape above) or `open` (a phase gets the host like the owner's own shell: read and write anywhere
+the user can, network, ssh and the ssh agent, the docker socket, the user's credential files and
+variables), and per-capability options override it (`network`, `home_read`, `home_write`,
+`extra_read`, `extra_write`, `credentials`, `ssh_agent`, `docker_socket`, `host_write`,
+`host_agents`; CONCEPTS.md "Confinement profiles" has the table with what each allows and risks).
+What no profile opens is the **integrity core**, always enforced in factory mode: the sealed
+store unreadable, every token but the phase's own identity's unreadable, konstant's machinery
+(`machinery.py`: catalog, generated harness surfaces, `var/` bookkeeping, the board DB with the
+job's verdict history, `.git` of the workspace; in factory mode also the target and the other job
+clones) not writable. It protects the meaning of "verified", not the host. Under `open` the jail
+is a thin layer (the host root bound writable, masks and read-only binds over the core only) and
+wraps every phase at level 4 too; the scenario writer always runs closed; factory mode never
+passes the docker socket (root on the host). Outside factory mode the owner may set `integrity =
+"off"` (with `open`): `doctor` FAILs and factory mode refuses to start.
 
 ### 2.2 Identities
 
@@ -830,6 +851,7 @@ for what it lands.
 |---|---|---|---|---|
 | **L5-1** sealed holdouts (**done**; see "L5-1 as built" below) (before L5-2 only dsh phases are confined, so the adversarial modes run through the real dsh adapter with `tests/fixtures/stub_dsh.py`, as the second review's fixes did) | scenario format, `holdout add/list/check/show`, `holdout/store.py` + `lint.py` + `leak.py`, `verify/holdout.py` (pinned materialisation, jailed no-network runs, redacted findings), settle extension, `0002` tables `holdouts` + `verifications.holdout_json`, `machinery.SEALED` in jail + all adapters, DECLINED cannot excuse holdouts, the claim guard, `jobs.holdout_required`, fake modes `overfit`, `peek`, `leak` | `machinery.py`, `jail.py` `hidden`, `verify/verifier.py` `settle`/`verify_job`, `verify/rerun.py`, `agents/settings.py` `render`, `harnesses/codex.py` `filesystem`, `harnesses/gemini.py`, `gate/rules/done.py`, `board/migrate.py` | v0.1.0 | A1-A3, A5-A13 (through the dsh adapter) |
 | **L5-2** confinement + identities (**done**; see "L5-2 as built" below) | generalised `Adapter.confine` for every harness in factory mode, one exposed identity token per phase, labelled worker tokens, board label guards, job clones + target read-only, `jobs.workdir` and the `{workdir}` probe substitution (`verify/probe.py`, `verifier.project_dir`), `Adapter.relocatable_home`, doctor `factory` rows, live smoke of a jailed claude phase (records whether Claude's sandbox nests) | `harnesses/base.py`, `claude.py`, `codex.py`, `gemini.py`, `command.py`, `board/auth.py`, `board/api/lifecycle.py`, `board/transitions.py`, `cli/task_run.py`, `cli/doctor.py` | L5-1 | A4 on every adapter, B6, B7, C9 |
+| **L5-2b** confinement profiles (**done**; see "L5-2b as built" below; owner request 2026-11-01) | `[confinement]` profile closed/open + per-capability options + the integrity core, mapped by every adapter and the jail, `confinement show`, doctor rows, `install.sh`/`get.sh --confinement`, `host_agents` (the session's refusing agent-CLI shims) | `jail.py`, `harnesses/*`, `agents/settings.py`, `gate/harness.py`, `cli/dsh.py`, `cli/doctor.py`, `install.sh`, `get.sh` | L5-2 | the open profile's probe on every harness path: host reach yes, core no (factory and level 4); closed red twin; integrity-off red twin |
 | **L5-3** intake + scenario writer (**done**; see "L5-3 as built" below) | intake from the orchestrator chat (4.0: `goal add --from-chat`, `[factory] goal_roles`, `[factory] defaults`), goal files (`goal add/list/show/pause/resume/cancel`), type `intake` + agent `planner`, `DOD-verdict.md`, deterministic filing, approval rule, role agent `scenario-writer`, `holdout/author.py` with the run dir in the store, fake planner / reviewer / scenario modes incl. `weak-dod` | `catalog/types.yaml`, `catalog.py` `ROLE_AGENTS`, `board/dod.py` `lint`, `gate/runner.py`, `gate/rules/authorship.py`, `gate/rules/judged.py`, `agents/generate.py` | L5-2 | B1-B5, B8-B11 |
 | **L5-R1** independent review 1 | review only, by someone who built none of L5-1..3: try to reach `verified` past holdouts, read the store from every harness, leak through feedback, transcripts, the board or run records, forge identities, weaken a generated DoD; one reproduction per finding | the adversarial fake harness, as the first two reviews did | L5-3 | report with severity per finding |
 | **L5-F1** fixes 1 | one red-then-green test per finding under `tests/review/` (`test_H<nn>_...`); zero open P0/P1 | — | L5-R1 | all A and B rows green again |
@@ -917,6 +939,51 @@ above, and why (section 2's text is already corrected where it was wrong):
   `identities` doctor row states that one model may play every role (Q1).
 - The cosmetic `[type:code] (None)` reason print of a holdout run is fixed (the refusal check no
   longer overwrites the classification reason).
+
+### L5-2b as built
+
+Landed as DESIGN.md §9.1 describes (code: `konstant/confinement.py`, `harnesses/base.py`
+`jail_layout`, `cli/confinement.py`). Where it differs from 2.1 above or from the request, and why:
+
+- **Open jails level 4 too.** The request asked for a thin jail with masks over the integrity
+  core; at level 4 claude, codex, gemini and `command` phases were never jailed before. Under
+  `open` every adapter now confines at level 4 whenever bubblewrap works, because the jail is the
+  only thing that keeps the core around a shell that may otherwise do anything (Claude Code's own
+  sandbox, when it cannot nest, is then switched off for the phase as in factory mode). Without a
+  working jail an open level-4 phase has only its harness's own rules (`confinement show` says
+  which).
+- **`integrity = "off"` needs `profile = "open"`** (a config error otherwise): a closed profile
+  without its core is not a coherent setting. "Factory mode refuses to start" is implemented in
+  `verify/holdout.py` `confined`, the one gate of every factory path, so `holdout add` (the
+  negative control), `holdout author`, `intake` and a holdout job's `task run` all exit 2.
+- **The closed profile tightened three things** that 0.1.0 left open to jailed phases and every
+  phase's environment: the ssh-agent socket and the docker socket are masked in the jail, and
+  `SSH_AUTH_SOCK`, `DOCKER_HOST` and the credential variables of `machinery.CREDENTIAL_ENV`
+  (`GITHUB_TOKEN`, `GH_TOKEN`, `AWS_*`, ...; never a harness's own model key) are dropped from a
+  phase's environment. A closed profile that masks `~/.aws` but passes `AWS_SECRET_ACCESS_KEY`
+  was not closed. `[harness] env` still sets anything explicitly.
+- **Not enforceable everywhere**: `network = false` cannot be cut by the jail (the harness reaches
+  its model through the same network), so it holds only where the harness separates tool traffic
+  (Claude Code's sandbox, codex); `ssh_agent` under Claude Code's own sandbox opens every unix
+  socket (a static settings file cannot name the per-login socket); codex's profile cannot name a
+  socket. `confinement show` marks each `partial` or `no`.
+- **Two escapes stated, one guarded**: the docker socket is root on the host, so factory mode never
+  passes it (level 4 open does, with a `doctor` WARN); an ssh login back into this host leaves the
+  jail, so `doctor` WARNs when a `~/.ssh/*.pub` is in the user's own `authorized_keys` (only
+  public files are read).
+- **Scenario writer always closed**: an open scenario writer could copy its drafts to a host path
+  a later producer reads; `Phase.conf` forces `CLOSED` for the `scenario` identity.
+- **The orchestrator session** (found in L5-3's live smoke: its model ran the host's own dsh
+  launcher, which forces the operator's personal dsh home): `host_agents` (default false in both
+  profiles) controls refusing `dsh`/`claude`/`codex`/`gemini` shims first on the session's PATH;
+  konstant drops that dir for its own processes. A program named by its absolute path is not
+  stopped (the session is unjailed by design). The session's own dsh sandbox stays
+  `workspace-write` under `open` (the session patch resets it).
+- **Not run live**: no model call in this wave. The open renderings of Claude Code's settings
+  (`sandbox.network.allowedDomains ["*"]`, `allowAllUnixSockets`) are taken from Claude Code's
+  published settings schema and the dsh `danger-full-access` preset from dsh's source; the probe
+  runs through the real adapters with the stand-in CLIs (`tests/fixtures/stub_cli.py`,
+  `stub_dsh.py`) and the fake harness.
 
 ### L5-3 as built
 

@@ -85,8 +85,9 @@ class Generator:
 
     def __init__(self, cat, workspace: Path, perm: dict | None = None, python: str | None = None,
                  harness: dict | None = None, gate: dict | None = None,
-                 policy: dict | None = None):
+                 policy: dict | None = None, conf=None):
         self.cat, self.root = cat, Path(cat.root)
+        self.conf = conf                                  # [confinement] (None = closed)
         self.ws, self.perm, self.python = Path(workspace), perm or {}, python
         self.hcfg = harness or {"name": "claude", "types": {}}
         self.gate, self.policy = gate or {}, policy or {}   # [gate], [board.policy] (dsh session)
@@ -229,7 +230,8 @@ class Generator:
             out[f".claude/agents/{agent}.md"] = front(keep) + HEADER + "\n" + text
         out.update(self.skill_files(".claude/skills/"))
         try:
-            out[".claude/settings.json"] = settings_mod.render(self.ws, self.perm, self.python)
+            out[".claude/settings.json"] = settings_mod.render(self.ws, self.perm, self.python,
+                                                                 self.conf)
         except settings_mod.SettingsError as exc:
             raise GenerateError(str(exc)) from exc
         out["CLAUDE.md"] = self.top_doc("CLAUDE.md.tmpl")

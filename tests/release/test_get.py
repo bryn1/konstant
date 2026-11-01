@@ -345,6 +345,9 @@ def test_harness_is_asked_on_a_terminal(srv, cwd):
             if not answered and b"harness [" in out:
                 os.write(master, b"mycli -p {prompt}\n")
                 answered = True
+            if answered is True and b"confinement [closed]: " in out:
+                os.write(master, b"\n")              # the default: closed (L5-2b question)
+                answered = "both"
         elif p.poll() is not None:
             break
     p.wait(timeout=30)
@@ -353,6 +356,22 @@ def test_harness_is_asked_on_a_terminal(srv, cwd):
     assert "Which agent CLI should run konstant's phases?" in text, text
     assert "harness: mycli -p {prompt}" in text, text
     assert "--harness mycli -p {prompt} --port 80" in text, text
+    assert "open gives phases your" in text and answered == "both", text
+
+
+def test_confinement_is_passed_on_and_checked(srv, cwd, tmp_path):
+    """--confinement reaches install.sh; a bad value stops before anything is written."""
+    path = farm(tmp_path, drop=("python", "claude", "codex", "gemini", "dsh"),
+                add={"codex": "echo codex-cli 1"})
+    e = dict(os.environ, PATH=path, PYTHON=sys.executable, KONSTANT_RELEASE_URL=srv.url)
+    res = subprocess.run(["sh", str(GET), "--confinement", "open", "--port", "80"], cwd=cwd,
+                         env=e, text=True, capture_output=True, stdin=subprocess.DEVNULL,
+                         start_new_session=True)
+    assert "running ./install.sh --yes --harness codex --confinement open --port 80" in \
+        res.stdout, res.stdout + res.stderr
+    bad = subprocess.run(["sh", str(GET), "--confinement", "ajar"], cwd=cwd, env=e, text=True,
+                         capture_output=True, stdin=subprocess.DEVNULL)
+    assert bad.returncode == 2 and "--confinement must be closed or open" in bad.stderr
 
 
 @pytest.mark.skipif(os.environ.get("KONSTANT_SKIP_INSTALL_TESTS") == "1",

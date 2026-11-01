@@ -23,6 +23,7 @@ Podman) is added through [harness] command.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 
@@ -58,7 +59,12 @@ def shell_prefixes(ws, allow: list) -> list:
     return list(dict.fromkeys(out))
 
 
-def policy(ws, allow: list, header: str) -> str:
+def policy(ws, allow: list, header: str, conf=None) -> str:
+    """The policy for `conf` (konstant/confinement.py; None = closed): open allows every shell
+    command (priority 50, below every deny); the machinery and holdout denies are the integrity
+    core and stay unless the owner turned it off."""
+    from konstant import confinement
+    conf = conf or confinement.CLOSED
     forms = ["bin/konstant", str(ws / "bin" / "konstant")]
     rows = [f"# {header}",
             "# konstant's Gemini CLI policy (passed with --policy; workspace-tier policies are "
@@ -78,6 +84,10 @@ def policy(ws, allow: list, header: str) -> str:
                  decision=_q("deny"), priority="200")
     rule(toolName=_q("run_shell_command"), commandRegex=_q(r"konstant.*--as[ =]?(owner|verifier)"),
          decision=_q("deny"), priority="200")
+    if conf.open:              # the open profile: any command (the denies above still win)
+        rule(toolName=_q("run_shell_command"), decision=_q("allow"), priority="50")
+    if not conf.integrity:
+        return "\n".join(rows) + "\n"
     paths = [re.escape(str(ws / d)) + "/" for d in PROTECTED_DIR_LIST if not d.startswith("var")]
     paths += [re.escape(str(ws / f)) + '"' for f in PROTECTED_FILE_LIST
               if not f.startswith("var/")]
@@ -110,6 +120,8 @@ class Gemini(Adapter):
     def argv(self, ph: Phase) -> list:
         a = [self.binary, "--approval-mode", "auto_edit", "--policy", str(ph.workspace / POLICY),
              "--include-directories", str(ph.workspace), "--output-format", "text"]
+        for p in (*ph.conf.extra_read, *ph.conf.extra_write):    # file tools reach them too
+            a += ["--include-directories", os.path.expanduser(p)]
         if ph.model:
             a += ["-m", ph.model]
         return a + ["-p", "Carry out the konstant phase given above."]
@@ -119,7 +131,7 @@ class Gemini(Adapter):
                 "directory per phase, removed after it")
 
     def _home(self, ph: Phase):
-        if self.confines(ph.jail, ph.factory):
+        if self.jails(ph):
             return phase_home(ph, "gemini")
         return harness_home(ph.workspace, "gemini")
 
@@ -140,7 +152,7 @@ class Gemini(Adapter):
 
     def files(self, gen, hcfg: dict) -> dict:
         return {SETTINGS: settings_json(), POLICY: policy(gen.ws, gen.perm.get("allow", []),
-                                                           gen.header)}
+                                                           gen.header, getattr(gen, "conf", None))}
 
     def reach(self, hcfg: dict, perm: dict, jail: bool = True) -> Reach:
         return Reach(

@@ -56,7 +56,7 @@ def _harness(ctx, cat=None, factory: bool = False) -> harness_mod.HarnessSet:
     over = (a if a in harnesses.ADAPTERS else cli_template(a)) if a else None
     return harness_mod.HarnessSet(h, ctx.cfg.home, cat, ctx.cfg.data["permissions"]["allow"],
                                   override=over, jail=bool(ctx.cfg.data["gate"]["jail"]),
-                                  factory=factory)
+                                  factory=factory, conf=ctx.cfg.confinement())
 
 
 def _small(ctx, task: str, why: str) -> int:

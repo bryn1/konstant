@@ -17,7 +17,10 @@ cd konstant
 `get.sh` verifies the tarball's sha256 before it unpacks anything, refuses a non-empty folder,
 never uses sudo, then runs `./install.sh --yes` (below) with your `--harness`/`--port`/`--wheels`.
 Without `--harness` it asks on a terminal (claude, codex, gemini, dsh or any CLI command), else
-it takes the first agent CLI on PATH. `KONSTANT_RELEASE_URL` points it at a mirror.
+it takes the first agent CLI on PATH. It also asks for the confinement profile (`--confinement
+closed|open`): closed (the default) keeps every phase inside the workspace; open gives phases your
+host like your own shell (ssh, docker, your credentials), keeping only the integrity core
+([CONCEPTS.md](CONCEPTS.md), "Confinement profiles"). `KONSTANT_RELEASE_URL` points it at a mirror.
 
 Or by hand, from a downloaded tarball:
 
@@ -30,7 +33,8 @@ cd konstant-0.1.0
 `install.sh` checks for Python >= 3.10, creates `.venv`, installs the package and writes
 `bin/konstant`. It also writes `konstant.toml` (only when absent), creates the board DB and one
 token per role in `var/secrets/`, generates the agent files and runs `bin/konstant doctor`. Options:
-`--port N` (1024-65535), `--harness "<cmd>"` (both apply only to a new `konstant.toml`),
+`--port N` (1024-65535), `--harness "<cmd>"`, `--confinement closed|open` (these apply only to a
+new `konstant.toml`; without `--yes` the profile is asked on a terminal),
 `--wheels DIR` (offline, from pre-downloaded wheels) and `--from OLD_FOLDER` (upgrade, see
 section 7). The installer refuses to run as root.
 

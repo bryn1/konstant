@@ -102,6 +102,15 @@ class Phase:
     home_base: Path | None = None
     tokens: tuple | None = None
     hide: tuple = ()
+    # the workspace's [confinement] (konstant/confinement.py; None = closed): `wconf` is what the
+    # generated surfaces were rendered from, `conf` what THIS phase gets (wconf.for_phase: the
+    # scenario writer always closed, a factory phase never with the docker socket)
+    wconf: object = None
+
+    @property
+    def conf(self):
+        from konstant import confinement
+        return (self.wconf or confinement.CLOSED).for_phase(self.identity, self.factory)
 
     @property
     def workspace(self) -> Path:
@@ -149,23 +158,30 @@ class Adapter:
     def cleanup(self, ph: Phase) -> None:
         """Remove what prepare() created for this phase only (runs after the phase, always)."""
 
-    def preflight(self, workspace: Path) -> str | None:
+    def preflight(self, workspace: Path, conf=None) -> str | None:
         """Why no phase may start on this harness (None: fine). Checked once per run, before
         the first phase (dsh: its composed layers, fail closed)."""
         return None
 
     def confine(self, argv: list, ph: Phase) -> list:
-        """The argv konstant actually starts: in factory mode (or always, for an adapter whose
-        harness cannot confine reads: dsh) the phase inside konstant.jail; else unchanged."""
-        if not self.confines(ph.jail, ph.factory):
+        """The argv konstant actually starts: in factory mode, in the open confinement profile
+        (or always, for an adapter whose harness cannot confine reads: dsh) the phase inside
+        konstant.jail; else unchanged."""
+        if not self.jails(ph):
             return argv
         return jailed(argv, ph, rw=self.jail_rw(ph), ro_binds=self.jail_ro_binds(ph))
 
-    def confines(self, jail: bool = True, factory: bool = False) -> bool:
+    def confines(self, jail: bool = True, factory: bool = False, conf=None) -> bool:
         """Whether confine() puts the phase inside konstant.jail ([gate] jail = `jail`): every
-        adapter does in factory mode (a job with sealed holdouts, docs/LEVEL5.md 2.1)."""
+        adapter does in factory mode (a job with sealed holdouts, docs/LEVEL5.md 2.1) and, with
+        the open profile, at level 4 too: there the jail is a thin layer that keeps only the
+        integrity core (konstant/confinement.py)."""
         from konstant import jail as jail_mod
-        return bool(jail) and bool(factory) and jail_mod.available()
+        level4 = conf is not None and conf.jails_level4()
+        return bool(jail) and (bool(factory) or level4) and jail_mod.available()
+
+    def jails(self, ph: Phase) -> bool:
+        return self.confines(ph.jail, ph.factory, ph.conf)
 
     def jail_rw(self, ph: Phase) -> list:
         """Directories the harness itself must write inside the jail (its per-phase home)."""
@@ -181,7 +197,7 @@ class Adapter:
         has one (a short path: unix sockets, such as Claude Code's sandbox bridges, need one
         under ~100 bytes), else the run's tmp/ (a workspace under /tmp keeps the host /tmp,
         read-only)."""
-        return {"TMPDIR": "/tmp" if private_tmp(ph.workspace) else str(ph.run_dir / "tmp")}
+        return {"TMPDIR": "/tmp" if phase_private_tmp(ph) else str(ph.run_dir / "tmp")}
 
     def files(self, gen, hcfg: dict) -> dict:
         """{workspace-relative path: content} this harness reads beyond AGENTS.md and the shared
@@ -249,8 +265,13 @@ def phase_tokens(ph: Phase) -> tuple:
 
 
 def phase_hidden(ph: Phase) -> list:
+    """The jail's masks for this phase: the integrity core (var/secrets/, the sealed store), its
+    extra `hide` paths, and what its confinement keeps out (the credential locations it does not
+    pass through, the ssh-agent and docker sockets it does not get)."""
     from konstant import jail
-    return jail.hidden(ph.workspace) + [str(p) for p in ph.hide]
+    conf = ph.conf
+    return jail.hide_core(ph.workspace) + [str(p) for p in ph.hide] + \
+        conf.masked_credentials() + conf.sockets_masked()
 
 
 def prompt_binds(ph: Phase) -> list:
@@ -264,17 +285,71 @@ def prompt_binds(ph: Phase) -> list:
     return [(real, real)] if any(real.startswith(m.rstrip("/") + "/") for m in masked) else []
 
 
-def jailed(argv: list, ph: Phase, rw=(), ro_binds=()) -> list:
-    """The phase inside konstant.jail (the module docstring's shape). Writable: the project dir
-    (the job clone in factory mode), OUT, the phase TMPDIR and `rw`; every machinery path stays
-    read-only inside them (jail.wrap with home=); the tokens readable are the phase identity's and
-    viewer's (machinery.tokens_readable)."""
-    from konstant import jail
-    ws = ph.workspace
+def phase_private_tmp(ph: Phase) -> bool:
+    """The phase jail gets its own empty /tmp (base.private_tmp), unless the confinement lets
+    the phase write the host (host_write: it shares the host /tmp, as your own shell does)."""
+    return private_tmp(ph.workspace) and not ph.conf.host_write
+
+
+def home_masks(keep: list, home: str | None = None) -> list:
+    """home_read = false: every entry of $HOME masked except the ones that lead to a path in
+    `keep` (the workspace, the phase's writable dirs), which are walked down the same way."""
+    home = os.path.realpath(home or os.path.expanduser("~"))
+    keep = [os.path.realpath(str(k)) for k in keep if k]
+
+    def under(d: str, ks: list) -> list:
+        out = []
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            return out
+        for n in names:
+            p = os.path.join(d, n)
+            ks2 = [k for k in ks if k == p or k.startswith(p + "/")]
+            if not ks2:
+                out.append(p)
+            elif p not in ks2 and os.path.isdir(p) and not os.path.islink(p):
+                out += under(p, ks2)
+        return out
+    if any(home == k or home.startswith(k.rstrip("/") + "/") for k in keep):
+        return []                                    # $HOME lies inside a kept path
+    return under(home, [k for k in keep if k.startswith(home + "/")])
+
+
+def factory_ro(ph: Phase) -> list:
+    """Factory mode: the workspace's projects/ (the target and every other job clone) bound
+    read-only even under the open profile; the phase's own clone is re-opened (LEVEL5 2.4)."""
+    return [ph.workspace / "projects"] if ph.factory else []
+
+
+def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True) -> dict:
+    """jail.wrap's arguments for this phase under its confinement (konstant/confinement.py).
+    Always (the integrity core): var/secrets/ masked except the phase identity's token and
+    viewer's, the sealed store masked, every machinery path read-only (jail.wrap home=), in
+    factory mode projects/ read-only but the phase's clone. Then the profile: closed = the root
+    read-only, writable only the project (the clone), OUT, the phase TMPDIR and `rw`, the
+    credential homes, the ssh-agent and docker sockets masked, a private /tmp; open = the root
+    WRITABLE (host_write), the credentials passed, the sockets reachable, the host /tmp; each
+    option changes its own part (home_read, home_write, extra_read, extra_write, credentials,
+    ssh_agent, docker_socket)."""
+    conf, ws = ph.conf, ph.workspace
     secrets = ws / "var" / "secrets"
-    tmp = private_dir(ph.run_dir / "tmp")
-    roots = [ph.cwd] + ([ph.out] if ph.out else []) + [tmp, *rw]
-    return jail.wrap(argv, rw=roots, hide=phase_hidden(ph), home=ws,
-                     expose=[secrets / t for t in phase_tokens(ph)],
-                     tmpfs=("/tmp",) if private_tmp(ws) else (), cwd=ph.cwd, net=True,
-                     ro_binds=[*ro_binds, *prompt_binds(ph)])
+    tmp = [private_dir(ph.run_dir / "tmp")] if tmpdir else []
+    roots = [ph.cwd] + ([ph.out] if ph.out else []) + tmp + list(rw)
+    if conf.home_write and not conf.host_write:
+        roots.append(Path(os.path.expanduser("~")))
+    roots += [Path(os.path.expanduser(p)) for p in conf.extra_write]
+    hide = phase_hidden(ph)
+    if not conf.home_read:
+        hide += home_masks([ws, ph.cwd, *roots])
+    return dict(rw=roots, hide=hide, home=ws, expose=[secrets / t for t in phase_tokens(ph)],
+                tmpfs=("/tmp",) if phase_private_tmp(ph) else (), cwd=ph.cwd, net=True,
+                ro_binds=[*ro_binds, *prompt_binds(ph)], root_rw=conf.host_write,
+                ro_dirs=factory_ro(ph),
+                late_ro=[os.path.expanduser(p) for p in conf.extra_read] + conf.cred_paths())
+
+
+def jailed(argv: list, ph: Phase, rw=(), ro_binds=()) -> list:
+    """The phase inside konstant.jail (jail_layout's shape for its confinement)."""
+    from konstant import jail
+    return jail.wrap(argv, **jail_layout(ph, rw, ro_binds))

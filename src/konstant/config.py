@@ -121,6 +121,11 @@ DEFAULTS: dict = {
     # ship-time owner decisions (docs/LEVEL5.md 5.4; owner decision Q4): jobs of these types are
     # filed `ship = decision` and never ship unattended
     "ship": {"decision_types": ["infra"]},
+    # what a phase may see and do (konstant/confinement.py, docs/CONCEPTS.md "Confinement
+    # profiles"): profile closed | open, integrity on | off, and per-capability options that
+    # override the profile (network, home_read, home_write, host_write, extra_read, extra_write,
+    # credentials, ssh_agent, docker_socket, host_agents); checked by confinement.parse
+    "confinement": {"profile": "closed", "integrity": "on"},
     "verify": {
         "rerun": True,
         "rerun_timeout_s": 900,
@@ -131,7 +136,8 @@ DEFAULTS: dict = {
 }
 
 # Tables whose keys are free-form (user data), not a schema.
-_FREE_TABLES = {("harness", "env"), ("harness", "types"), ("factory", "defaults")}
+_FREE_TABLES = {("harness", "env"), ("harness", "types"), ("factory", "defaults"),
+                ("confinement",)}
 HARNESS_NAMES = ("claude", "codex", "gemini", "dsh", "command")
 TYPE_OVERRIDE_KEYS = ("name", "model", "command")
 
@@ -172,6 +178,11 @@ class Config:
     def session_gate(self) -> dict:
         """[gate] plus `chat` ([notify] kind = "chat"): the dsh session plugin's settings."""
         return {**self.data["gate"], "chat": self.data["notify"]["kind"] == "chat"}
+
+    def confinement(self):
+        """The effective [confinement] (konstant/confinement.py)."""
+        from konstant import confinement
+        return confinement.parse(self.data["confinement"], self.home)
 
     def resolve(self, rel: str) -> Path:
         p = Path(rel)
@@ -223,6 +234,11 @@ def _validate(data: dict, path) -> None:
     check_harness(data["harness"], path)
     check_holdout(data["holdout"], path)
     check_factory(data, path)
+    from konstant import confinement
+    try:
+        confinement.parse(data["confinement"], Path(path).parent)
+    except confinement.ConfinementError as exc:
+        raise ConfigError(f"{path}: [confinement] {exc}") from None
 
 
 GOAL_ROLES = ("owner", "orchestrator")

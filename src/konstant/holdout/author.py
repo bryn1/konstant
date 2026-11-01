@@ -55,7 +55,7 @@ def writer_harness(cfg, cat, override: str | None = None):
         override = name or None          # an argv template (refused below) or the default
     hs = harness_mod.HarnessSet(hcfg, cfg.home, cat, cfg.data["permissions"]["allow"],
                                 override=override, jail=bool(cfg.data["gate"]["jail"]),
-                                factory=True)
+                                factory=True, conf=cfg.confinement())
     hv = hs.for_agent(ROLE)
     drv = hv.driver()
     if drv is None or not drv.relocatable_home or hv.command is not None:

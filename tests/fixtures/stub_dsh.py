@@ -16,7 +16,9 @@ dsh 0.2.1's own rules (apps/cli/src/dump-config.ts, packages/boot/app-boot/src/p
   1. "loads" the user layers the way dsh would run their plugins: every `# STUB-PAYLOAD: <python>`
      line in the profile's cordis.patch.yml under $DSH_HOME is executed (a planted plugin);
   2. runs the scripted actions of STUB_DSH_ACTIONS (`;`-separated, each `write:<path>`,
-     `plant:<path>` = write an insert layer whose payload is STUB_DSH_PAYLOAD, or `sleep:<s>`),
+     `plant:<path>` = write an insert layer whose payload is STUB_DSH_PAYLOAD, `sleep:<s>`, or
+     `run:<command>` = a shell command the session's model runs, logged with its exit code and
+     output: the host-agents tests, [confinement] host_agents),
      recording each outcome as a JSON line in $STUB_DSH_LOG (when set) with the env it saw;
   3. with STUB_DSH_THEN=fake, hands stdin to tests/fixtures/fake_harness.py (its modes act as the
      phase's tool calls); else prints `dsh started`.
@@ -142,6 +144,12 @@ def run(profile: str, patches: list, rest: list) -> int:
         try:
             if verb == "sleep":
                 time.sleep(float(target))
+                continue
+            if verb == "run":
+                import subprocess
+                r = subprocess.run(target, shell=True, capture_output=True, text=True,
+                                   timeout=60)
+                log({"act": act, "rc": r.returncode, "out": r.stdout, "err": r.stderr})
                 continue
             Path(target).parent.mkdir(parents=True, exist_ok=True)
             body = "x\n" if verb == "write" else (

@@ -49,7 +49,7 @@ def rows(cfg) -> list:
     else:
         out.append(("PASS", "factory harness", "; ".join(parts)))
     if "claude" in names:
-        out.append(claude_row(cfg.home))
+        out.append(claude_row(cfg.home, cfg.confinement().host_write))
     out.append(identities_row(cfg, IDENTITIES))
     return out
 
@@ -98,13 +98,15 @@ def intake_row(cfg) -> tuple:
             "goal_roles = [\"owner\", \"orchestrator\"] to make the dsh chat the intake")
 
 
-def claude_row(home=None) -> tuple:
+def claude_row(home=None, host_tmp: bool = False) -> tuple:
+    """`host_tmp`: the confinement shares the host /tmp with phases (host_write), so a phase has
+    no short private /tmp and Claude Code's sandbox cannot nest (docs/CONCEPTS.md)."""
     import sys
 
     from konstant import jail as jail_mod
     from konstant.harnesses.base import private_tmp
     from konstant.harnesses.claude import sandbox_nests
-    if sandbox_nests(home):
+    if sandbox_nests(home) and not host_tmp:
         return ("PASS", "claude sandbox", "factory mode: Claude Code's own Bash sandbox runs "
                 "nested inside konstant's jail" + ("" if sys.platform != "darwin" else
                                                    " (macOS: Seatbelt)"))
@@ -112,6 +114,8 @@ def claude_row(home=None) -> tuple:
     socat = "present" if shutil.which("socat") else "missing"
     tmp = "" if home is None or private_tmp(home) else ("; the workspace is under /tmp, so a "
                                                         "phase has no short private /tmp")
+    if host_tmp:
+        tmp += "; [confinement] host_write shares the host /tmp with phases"
     return ("INFO", "claude sandbox", f"factory mode: Claude Code's sandbox cannot run inside "
             f"konstant's jail here (a nested bubblewrap {nested} in the jail; socat {socat}"
             f"{tmp}): a "

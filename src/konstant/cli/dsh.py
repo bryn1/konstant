@@ -19,6 +19,14 @@ sets instead of starting dsh. The session is NOT jailed, so before it starts dsh
     session home, a launcher that forces its own DSH_HOME).
 No phase can write the session home: it is under var/harness/, which every adapter and the jail
 keep read-only for phases (konstant/machinery.py), and phases get a fresh dsh home each.
+
+Host agents ([confinement] host_agents, docs/CONCEPTS.md "Confinement profiles"): unless it is
+true, the session's PATH starts with `var/harness/dsh/session/bin/`, whose `dsh`, `claude`, `codex`
+and `gemini` refuse (exit 126, naming the program they shadow): a model in the session that runs
+`dsh ...` by name never reaches the host's own launcher, which would load the operator's personal
+agent home outside this workspace's composition. konstant itself (bin/konstant, the plugin's
+calls) drops that directory from its PATH (KONSTANT_SHIM_DIR), so `task run` still finds the real
+harness CLIs. The session is unjailed: a program named by its absolute path is not stopped.
 """
 from __future__ import annotations
 
@@ -34,7 +42,32 @@ from konstant.harnesses import dsh_session
 from konstant.harnesses.base import harness_home, private_dir
 
 
-def session_env(ws: Path, hcfg: dict) -> dict:
+AGENT_CLIS = ("dsh", "claude", "codex", "gemini")
+
+
+def shim_dir(ws: Path) -> Path:
+    return harness_home(ws, "dsh") / "session" / "bin"
+
+
+def write_shims(ws: Path, path: str) -> Path:
+    """The refusing launchers for the session's PATH (host_agents = false)."""
+    import shlex
+    d = private_dir(shim_dir(ws))
+    for name in AGENT_CLIS:
+        host = shutil.which(name, path=path) or "nothing else on PATH"
+        msg = (f"konstant: `{name}` is refused inside the orchestrator session ([confinement] "
+               f"host_agents = false; it shadows {host}): it would start an agent outside this "
+               "workspace's composition (your own launcher, its profiles and servers). Start work "
+               "with bin/konstant task run, or set [confinement] host_agents = true "
+               "(docs/CONCEPTS.md \"Confinement profiles\").")
+        p = d / name
+        p.write_text(f"#!/bin/sh\n# written by `konstant dsh` ([confinement] host_agents = false)\n"
+                     f"echo {shlex.quote(msg)} >&2\nexit 126\n", encoding="utf-8")
+        p.chmod(0o700)
+    return d
+
+
+def session_env(ws: Path, hcfg: dict, conf=None) -> dict:
     home = harness_home(ws, "dsh") / "session"
     env = {"DSH_HOME": str(home / "home"), "DSH_AGENTS_HOME": str(home / "agents"),
            "KONSTANT_HOME": str(ws)}
@@ -44,6 +77,10 @@ def session_env(ws: Path, hcfg: dict) -> dict:
     ep = hcfg.get("endpoint") or {}
     if ep.get("base_url") and not ep.get("api_key_env"):
         env[dsh_adapter.KEY_ENV] = "unused"
+    if conf is None or not conf.host_agents:
+        d = str(shim_dir(ws))
+        env["KONSTANT_SHIM_DIR"] = d
+        env["PATH"] = d + os.pathsep + os.environ.get("PATH", os.defpath)
     return env
 
 
@@ -67,7 +104,7 @@ def cmd_dsh(ctx) -> int:
     exe = shutil.which("dsh")
     argv = [exe or "dsh", "--profile", ctx.args.app, "--patch", str(ws / dsh_adapter.PATCH),
             "--patch", str(ws / dsh_session.SESSION_PATCH), *ctx.args.args]
-    extra = session_env(ws, ctx.cfg.data["harness"])
+    extra = session_env(ws, ctx.cfg.data["harness"], ctx.cfg.confinement())
     cwd = _cwd(ctx, ws)
     if ctx.args.dry_run:
         print(json.dumps({"argv": argv, "cwd": str(cwd), "env": extra}, indent=2))
@@ -77,6 +114,8 @@ def cmd_dsh(ctx) -> int:
         return 127
     for k in ("DSH_HOME", "DSH_AGENTS_HOME"):
         private_dir(Path(extra[k]))
+    if extra.get("KONSTANT_SHIM_DIR"):
+        write_shims(ws, os.environ.get("PATH", os.defpath))
     env = {k: v for k, v in os.environ.items()
            if k not in ("KONSTANT_IN_TASK", "KONSTANT_RUN", "KONSTANT_ROLE")}
     env.update(extra)
@@ -101,7 +140,8 @@ def refusal(ctx, ws: Path, extra: dict) -> str | None:
         cat = catalog_mod.load(catalog_mod.find_root(cfg.home, cfg.data["catalog"]["path"]),
                                check_files=True)
         drift = Generator(cat, cfg.home, cfg.data["permissions"], harness=cfg.data["harness"],
-                          gate=cfg.session_gate(), policy=cfg.data["board"]["policy"]).check("dsh")
+                          gate=cfg.session_gate(), policy=cfg.data["board"]["policy"],
+                          conf=cfg.confinement()).check("dsh")
     except (catalog_mod.CatalogError, GenerateError) as exc:
         return f"the generated dsh surfaces cannot be checked: {exc}"
     if drift:

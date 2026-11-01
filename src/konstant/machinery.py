@@ -58,6 +58,15 @@ CREDENTIALS = ("~/.ssh", "~/.aws", "~/.gnupg", "~/.config/gcloud", "~/.config/gh
                "~/.npmrc", "~/.cargo/credentials.toml", "~/.config/hub",
                "~/.claude", "~/.claude.json", "~/.codex", "~/.gemini", "~/.dsh",
                "~/.config/anthropic", "~/.config/openai")
+# credential environment variables a phase does not get unless [confinement] credentials passes
+# them (konstant/confinement.py; a harness's own API key, e.g. ANTHROPIC_API_KEY, is not here: the
+# harness needs it to reach its model)
+CREDENTIAL_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+                  "AZURE_CLIENT_SECRET", "GOOGLE_APPLICATION_CREDENTIALS", "GH_TOKEN",
+                  "GITHUB_TOKEN", "GITLAB_TOKEN", "HF_TOKEN", "NPM_TOKEN", "TWINE_PASSWORD",
+                  "VAULT_TOKEN", "KUBECONFIG", "DIGITALOCEAN_ACCESS_TOKEN", "CLOUDFLARE_API_TOKEN")
+# the docker daemon's usual sockets (root-equivalent: [confinement] docker_socket)
+DOCKER_SOCKETS = ("/var/run/docker.sock", "/run/docker.sock")
 # an agent CLI's own home may be relocated by an environment variable: masked as well
 HOME_ENV = ("DSH_HOME", "DSH_AGENTS_HOME", "CODEX_HOME", "GEMINI_CLI_HOME", "CLAUDE_CONFIG_DIR")
 # a harness whose own sandboxed commands need its home keeps it, minus its credential files

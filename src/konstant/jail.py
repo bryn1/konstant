@@ -65,9 +65,7 @@ def nests() -> bool:
 def hidden(home=None, env=None) -> list:
     """What a jail masks: the workspace's var/secrets/, the sealed holdout store
     (machinery.SEALED) and machinery.credentials()."""
-    out = [os.path.join(str(home), "var", "secrets")] if home else []
-    out += [str(p) for p in machinery.sealed(home)] if home else []
-    return out + [os.path.expanduser(c) for c in machinery.credentials(env=env)]
+    return hide_core(home) + [os.path.expanduser(c) for c in machinery.credentials(env=env)]
 
 
 def _inside(p: str, root: str) -> bool:
@@ -75,28 +73,34 @@ def _inside(p: str, root: str) -> bool:
 
 
 def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = True,
-         home=None, binds=(), ro_binds=()) -> list:
+         home=None, binds=(), ro_binds=(), root_rw: bool = False, ro_dirs=(),
+         late_ro=()) -> list:
     """The jailed argv (or argv unchanged when the jail is unavailable). `tmpfs`: directories
-    replaced by an empty private tmpfs first (e.g. /tmp); `rw`: directories bound writable;
-    `home`: the workspace, whose machinery stays read-only inside any writable bind (module
-    docstring); `hide`: directories masked by an empty tmpfs (files: by /dev/null), never one
-    that holds the workspace, a writable bind or the cwd; `expose`: files inside a hidden
-    directory bound back read-only (a phase's own role token); `binds`: (source, destination)
-    pairs bound writable at ANOTHER path (a holdout's materialised tree at the project's own
-    path, so the code under test sees the path the tests rule shows it); `ro_binds`:
-    (source file, destination) pairs bound READ-ONLY at another path, last (a harness's own
-    credential file inside the phase's relocated home: docs/LEVEL5.md 2.1)."""
+    replaced by an empty private tmpfs first (e.g. /tmp); `rw`: directories (or files) bound
+    writable; `home`: the workspace, whose machinery stays read-only inside any writable bind
+    (module docstring); `hide`: paths masked by an empty tmpfs (a directory) or /dev/null
+    (anything else: a file, a socket), never one that holds the workspace, a writable bind or the
+    cwd; `expose`: files inside a hidden directory bound back read-only (a phase's own role token);
+    `binds`: (source, destination) pairs bound writable at ANOTHER path (a holdout's materialised
+    tree at the project's own path, so the code under test sees the path the tests rule shows
+    it); `ro_binds`: (source file, destination) pairs bound READ-ONLY at another path, last (a
+    harness's own credential file inside the phase's relocated home: docs/LEVEL5.md 2.1).
+    The open confinement profile (konstant/confinement.py) uses three more: `root_rw` binds the
+    host root WRITABLE instead of read-only (the machinery of `home` and `ro_dirs` are then bound
+    read-only wherever they are); `ro_dirs`: directories bound read-only like machinery (a factory
+    phase's target and the other job clones); `late_ro`: paths bound back read-only after the
+    masks (a credential the profile passes through, an extra_read path under a mask)."""
     if not available():
         return list(argv)
-    a = [shutil.which("bwrap"), "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-         "--unshare-pid", "--die-with-parent"]
+    a = [shutil.which("bwrap"), "--bind" if root_rw else "--ro-bind", "/", "/", "--dev", "/dev",
+         "--proc", "/proc", "--unshare-pid", "--die-with-parent"]
     if not net:
         a.append("--unshare-net")
     for p in dict.fromkeys(os.path.realpath(str(x)) for x in tmpfs if x):
         if os.path.isdir(p):
             a += ["--tmpfs", p]
     roots = [p for p in dict.fromkeys(os.path.realpath(str(x)) for x in rw if x)
-             if os.path.isdir(p)]
+             if os.path.exists(p)]
     masked = [os.path.realpath(str(x)) for x in hide if x]
     # a writable dir INSIDE a masked one (the scenario writer's drafts and home in the sealed
     # store, docs/LEVEL5.md 3.4) is bound AFTER the mask: the rest of that dir stays masked
@@ -107,20 +111,25 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
     for src, dst in binds:
         a += ["--bind", os.path.realpath(str(src)), os.path.realpath(str(dst))]
     ro = []
-    if home:
-        guard = [os.path.realpath(str(x)) for x in machinery.jail_read_only(home)]
+    scope = roots + (["/"] if root_rw else [])
+    if home or ro_dirs:
+        guard = [os.path.realpath(str(x)) for x in machinery.jail_read_only(home)] if home else []
+        guard += [os.path.realpath(str(x)) for x in ro_dirs if x]
         repos = list(roots)
-        projects = os.path.join(str(home), "projects")
-        if os.path.isdir(projects):           # the workspace bound whole: every project's .git
+        projects = os.path.join(str(home), "projects") if home else ""
+        if projects and os.path.isdir(projects):    # the workspace bound whole: every .git
             repos += [os.path.join(projects, d) for d in sorted(os.listdir(projects))]
         guard += [os.path.realpath(str(g)) for r in repos for g in machinery.git_guards(r)]
         ro = [p for p in dict.fromkeys(guard) if os.path.exists(p)
-              and any(_inside(p, r) for r in roots)]
+              and any(_inside(p, r) for r in scope)]
         for p in ro:
             a += ["--ro-bind", p, p]
-        for p in roots:                       # a writable bind nested in a read-only one
-            if any(_inside(p, q) and p != q for q in ro):
-                a += ["--bind", p, p]
+        rebound = [p for p in roots if any(_inside(p, q) and p != q for q in ro)]
+        for p in rebound:                     # a writable bind nested in a read-only one
+            a += ["--bind", p, p]
+        for p in ro:                          # ... keeps the guards that lie inside it
+            if any(_inside(p, r) and p != r for r in rebound):
+                a += ["--ro-bind", p, p]
     keep = [os.path.realpath(str(x)) for x in (home, cwd) if x
             and os.path.realpath(str(x)) not in late] + roots + \
         [os.path.realpath(str(d)) for _s, d in binds]
@@ -129,10 +138,17 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
             continue                          # never mask the workspace, a writable bind, the cwd
         if os.path.isdir(p):
             a += ["--tmpfs", p]
-        elif os.path.isfile(p):
+        elif os.path.exists(p):
             a += ["--ro-bind", os.devnull, p]
     for p in late:
         a += ["--bind", p, p]
+        for q in ro:                          # machinery inside a late writable bind stays ro
+            if _inside(q, p) and q != p:
+                a += ["--ro-bind", q, q]
+    for p in dict.fromkeys(os.path.realpath(str(x)) for x in late_ro if x):
+        if os.path.exists(p) and any(_inside(p, m) for m in masked) and \
+                not any(_inside(p, os.path.realpath(str(h))) for h in hide_core(home)):
+            a += ["--ro-bind", p, p]
     for p in dict.fromkeys(os.path.realpath(str(x)) for x in expose if x):
         if os.path.isfile(p):
             a += ["--ro-bind", p, p]
@@ -142,6 +158,14 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
     if cwd:
         a += ["--chdir", os.path.realpath(str(cwd))]
     return a + ["--", *map(str, argv)]
+
+
+def hide_core(home) -> list:
+    """The masks no option lifts (the integrity core's read side): var/secrets/ and the sealed
+    holdout store of workspace `home`."""
+    if not home:
+        return []
+    return [os.path.join(str(home), "var", "secrets"), *map(str, machinery.sealed(home))]
 
 
 @contextmanager

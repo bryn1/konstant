@@ -33,8 +33,8 @@ import re
 from pathlib import Path
 
 from konstant.harnesses import dsh_session
-from konstant.harnesses.base import (Adapter, Phase, Reach, harness_home, phase_hidden,
-                                     phase_tokens, private_dir, prompt_binds)
+from konstant.harnesses.base import (Adapter, Phase, Reach, harness_home, jail_layout,
+                                     private_dir)
 
 PATCH = ".dsh/konstant.patch.yml"
 PHASES = "phases"                  # var/harness/dsh/phases/: one fresh home per phase
@@ -56,18 +56,29 @@ def models(hcfg: dict) -> list:
     return list(dict.fromkeys(out))
 
 
-def patch(ws, hcfg: dict, header: str) -> str:
+def sandbox_mode(conf=None) -> str:
+    """dsh's own sandbox mode for the confinement (konstant/confinement.py): workspace-write
+    (writes only under the session cwd) unless the profile lets a phase write outside its
+    project; then danger-full-access, and konstant's jail is the write boundary (a dsh phase
+    with such a profile never starts without the jail: Dsh.preflight)."""
+    return "danger-full-access" if conf is not None and conf.writes_outside else "workspace-write"
+
+
+def sandbox_lines(mode: str) -> list:
+    return ["- id: sandbox-policy", "  config:", f"    mode: {mode}",
+            "    workspaceRoot: !!js process.cwd()",
+            "- id: approval", "  config:", "    policy: never",
+            # the preset selector must name the (mode, never) bundle, or the
+            # permission plugin refuses to start (it matched no shipped preset; seen live)
+            "- id: permission", "  config:", "    presets:", "      workspace-write:",
+            "        sandbox: workspace-write", "        approval: ask", "      konstant:",
+            f"        sandbox: {mode}", "        approval: never",
+            "    defaultPreset: konstant"]
+
+
+def patch(ws, hcfg: dict, header: str, conf=None) -> str:
     lines = [f"# {header}", "# konstant's dsh layer: workspace-scoped reach for headless phases "
-             "(docs/HARNESSES.md)",
-             "- id: sandbox-policy", "  config:", "    mode: workspace-write",
-             "    workspaceRoot: !!js process.cwd()",
-             "- id: approval", "  config:", "    policy: never",
-             # the preset selector must name the (workspace-write, never) bundle, or the
-             # permission plugin refuses to start (it matched no shipped preset; seen live)
-             "- id: permission", "  config:", "    presets:", "      workspace-write:",
-             "        sandbox: workspace-write", "        approval: ask", "      konstant:",
-             "        sandbox: workspace-write", "        approval: never",
-             "    defaultPreset: konstant",
+             "(docs/HARNESSES.md)"] + sandbox_lines(sandbox_mode(conf)) + [
              "- id: agent-instructions", "  config:", "    maxBytes: 65536",
              "    projectRootMarkers: [konstant.toml]",
              "- id: skill-filesystem", "  config:", "    includeDefaultRoots: false",
@@ -120,7 +131,7 @@ class Dsh(Adapter):
     def env(self, ph: Phase) -> dict:
         root = self._root(ph)
         env = {"DSH_HOME": str(root / "home"), "DSH_AGENTS_HOME": str(root / "agents"),
-               "DSH_PERMISSION_MODE": "workspace-write"}
+               "DSH_PERMISSION_MODE": sandbox_mode(ph.wconf)}
         if ph.model:
             env["KONSTANT_MODEL"] = ph.model
         ep = ph.endpoint or {}
@@ -137,9 +148,10 @@ class Dsh(Adapter):
         if root is not None:
             shutil.rmtree(root, ignore_errors=True)
 
-    def preflight(self, workspace: Path) -> str | None:
+    def preflight(self, workspace: Path, conf=None) -> str | None:
         """A phase starts only on a composition konstant can read and that holds no layer from
-        outside it (G-02/G-05: fail closed)."""
+        outside it (G-02/G-05: fail closed). (gate/harness.py Harness.check also refuses a dsh
+        phase whose confinement needs the jail when the jail cannot wrap it.)"""
         error, foreign = compose_layers(Path(workspace))
         if error == "dsh not on PATH":
             return None                   # the start itself fails with 127 and says so
@@ -151,28 +163,24 @@ class Dsh(Adapter):
         return None
 
     def files(self, gen, hcfg: dict) -> dict:
-        return {PATCH: patch(gen.ws, hcfg, gen.header), **dsh_session.files(gen, hcfg)}
+        conf = getattr(gen, "conf", None)
+        return {PATCH: patch(gen.ws, hcfg, gen.header, conf), **dsh_session.files(gen, hcfg)}
 
     def confine(self, argv: list, ph: Phase) -> list:
         """The phase inside konstant.jail (dsh's sandbox does not confine reads). Writable:
-        the project, OUT and this phase's own dsh root; konstant's machinery stays read-only
-        inside them (jail.wrap with home=)."""
+        the project, OUT and this phase's own dsh root, plus what the confinement profile opens
+        (base.jail_layout); konstant's machinery stays read-only inside them (jail.wrap home=)."""
         from konstant import jail
-        if not (ph.jail and jail.available()):
+        if not self.jails(ph):
             return argv
-        ws = ph.workspace
-        secrets = ws / "var" / "secrets"
-        rw = [ph.cwd, self._root(ph)] + ([ph.out] if ph.out else [])
-        under_tmp = Path(os.path.realpath(ws)).parts[1:2] == ("tmp",)
-        return jail.wrap(argv, rw=rw, hide=phase_hidden(ph), home=ws,
-                         expose=[secrets / t for t in phase_tokens(ph)],
-                         tmpfs=() if under_tmp else ("/tmp",), cwd=ph.cwd, net=True,
-                         ro_binds=prompt_binds(ph))
+        return jail.wrap(argv, **jail_layout(ph, rw=[self._root(ph)], tmpdir=False))
 
-    def confines(self, jail: bool = True, factory: bool = False) -> bool:
-        """Every dsh phase, factory mode or not (dsh's sandbox does not confine reads)."""
+    def confines(self, jail: bool = True, factory: bool = False, conf=None) -> bool:
+        """Every dsh phase, factory mode or not (dsh's sandbox does not confine reads), unless
+        the owner turned the integrity core off (open profile, level 4: nothing is masked)."""
         from konstant import jail as jail_mod
-        return bool(jail) and jail_mod.available()
+        off = conf is not None and not conf.integrity and not factory
+        return bool(jail) and not off and jail_mod.available()
 
     def jail_env(self, ph: Phase) -> dict:
         return {}                      # dsh's own sandbox gives the phase a private /tmp

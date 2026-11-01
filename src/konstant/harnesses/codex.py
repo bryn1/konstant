@@ -58,30 +58,51 @@ def filesystem(ph: Phase) -> dict:
     """The `konstant` permission profile. Codex (bubblewrap) mounts each rule over an existing
     path and cannot create a mount point inside a read-only tree, so only existing paths are
     named and nothing is named twice: `var/` is read-only as a whole (the DB, run records, the
-    tokens), then the three privileged tokens are denied and the phase's OUT and TMPDIR opened."""
+    tokens), then the other identities' tokens and the holdout store are denied and the phase's
+    OUT and TMPDIR opened. The confinement (konstant/confinement.py) changes the root (host_write:
+    writable), opens $HOME (home_write) and extra_write paths, masks $HOME's other entries
+    (home_read = false) and leaves the credentials it passes through readable; the integrity core
+    (machinery read-only, tokens and holdouts denied) stays unless the owner turned it off."""
+    from konstant.harnesses.base import home_masks
+    conf = ph.conf
     ws, run = ph.workspace, ph.run_dir
-    fs = {":root": "read", str(ws): "write"}
-    for d in PROTECTED_DIR_LIST:
-        if not d.startswith("var") and (ws / d).is_dir():
-            fs[f"{ws / d}/**"] = "read"
-    for f in PROTECTED_FILE_LIST:
-        if not f.startswith("var/") and (ws / f).is_file():
-            fs[str(ws / f)] = "read"
-    if (ws / "var").is_dir():
-        fs[f"{ws / 'var'}/**"] = "read"
-    for d in machinery.sealed(ws):                 # the holdout store: unreadable (LEVEL5 3.3)
-        if d.is_dir():
-            fs[f"{d}/**"] = "deny"
-    for t in machinery.tokens_denied(ph.identity):  # privileged roles + other identities
-        if (ws / "var" / "secrets" / t).is_file():
-            fs[str(ws / "var" / "secrets" / t)] = "deny"
-    for g in git_guards(ws, ph.cwd):
-        fs[g] = "read"
+    fs = {":root": "write" if conf.host_write else "read", str(ws): "write"}
+    home = Path(os.path.expanduser("~"))
+    if conf.home_write and not conf.host_write and home.is_dir():
+        fs[str(home)] = "write"
+    if not conf.home_read:
+        for p in home_masks([ws, ph.cwd, run]):
+            fs[p] = "deny"
+    for p in conf.extra_write:
+        if Path(os.path.expanduser(p)).exists():
+            fs[os.path.expanduser(p)] = "write"
+    for p in conf.extra_read:
+        if Path(os.path.expanduser(p)).exists() and not conf.home_read:
+            fs[os.path.expanduser(p)] = "read"
+    if conf.integrity:
+        for d in PROTECTED_DIR_LIST:
+            if not d.startswith("var") and (ws / d).is_dir():
+                fs[f"{ws / d}/**"] = "read"
+        for f in PROTECTED_FILE_LIST:
+            if not f.startswith("var/") and (ws / f).is_file():
+                fs[str(ws / f)] = "read"
+        if (ws / "var").is_dir():
+            fs[f"{ws / 'var'}/**"] = "read"
+        for d in machinery.sealed(ws):             # the holdout store: unreadable (LEVEL5 3.3)
+            if d.is_dir():
+                fs[f"{d}/**"] = "deny"
+        for t in machinery.tokens_denied(ph.identity):  # privileged roles + other identities
+            if (ws / "var" / "secrets" / t).is_file():
+                fs[str(ws / "var" / "secrets" / t)] = "deny"
+        for g in git_guards(ws, ph.cwd):
+            fs[g] = "read"
     for d in (run / "out", run / "tmp"):
         if d.is_dir():
             fs[f"{d}/**"] = "write"
+    passed = set(conf.cred_paths())
     for c in machinery.credentials("codex"):       # its own ~/.codex minus auth.json stays
-        if Path(c).expanduser().exists():
+        if Path(c).expanduser().exists() and \
+                os.path.realpath(os.path.expanduser(c)) not in passed:
             fs[c] = "deny"
     return fs
 
@@ -107,7 +128,8 @@ class Codex(Adapter):
              "-c", 'approval_policy="never"',
              "-c", f'default_permissions="{PROFILE}"',
              "-c", f"permissions.{PROFILE}.filesystem={inline_table(filesystem(ph))}",
-             "-c", f"permissions.{PROFILE}.network.enabled=true",
+             "-c", f"permissions.{PROFILE}.network.enabled="
+             f"{'false' if ph.conf.network is False else 'true'}",
              "-c", 'project_root_markers=["konstant.toml"]',
              "-c", "history.persistence=\"none\""]
         ep = ph.endpoint or {}
@@ -128,13 +150,13 @@ class Codex(Adapter):
 
     def env(self, ph: Phase) -> dict:
         env = {"TMPDIR": str(ph.run_dir / "tmp")}
-        if self.confines(ph.jail, ph.factory):
+        if self.jails(ph):
             env["CODEX_HOME"] = str(phase_home(ph, "codex"))
         return env
 
     def prepare(self, ph: Phase) -> None:
         private_dir(ph.run_dir / "tmp")
-        if self.confines(ph.jail, ph.factory):
+        if self.jails(ph):
             phase_home(ph, "codex")
 
     def cleanup(self, ph: Phase) -> None:

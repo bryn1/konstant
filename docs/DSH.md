@@ -204,6 +204,14 @@ differ. A type check against dsh's own sources: point a tsconfig that extends th
   Claude Code test run with your rights) is not checked, and dsh hot-reloads a profile's
   `cordis.patch.yml` into a running web session.
 - dsh confines writes, not the network; there is no per-command allow list.
+- Agent launchers by name: unless `[confinement] host_agents = true`, the session's PATH starts
+  with `var/harness/dsh/session/bin/`, whose `dsh`, `claude`, `codex` and `gemini` refuse (exit
+  126) and name the program they shadow, so a model in the session that runs `dsh ...` never
+  reaches your own dsh launcher and its personal home (found in a live run). `bin/konstant`
+  itself drops that directory and finds the real CLIs. A program named by its absolute path is
+  not stopped. Under `[confinement] profile = "open"` the session keeps dsh's `workspace-write`
+  sandbox: the profile widens phases, not your session (docs/CONCEPTS.md, "Confinement
+  profiles").
 - The chat intake's confirmation is mechanical only as far as the session is: the plugin sends
   `chat turn` for your genuine messages, but the session itself is unjailed, so a model in it that
   ran `bin/konstant chat turn ... yes` on its own could confirm its own proposal. The one-line

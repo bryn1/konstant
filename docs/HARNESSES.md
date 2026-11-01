@@ -92,6 +92,31 @@ network is open; without the jail a `dsh` phase can read `var/secrets/` and act 
 with the orchestrator token. Treat "partial" as "role separation inside a phase is procedural"
 (docs/CONCEPTS.md, "Security model and limits").
 
+## Confinement profiles: closed and open
+
+The matrix above is the **closed** profile, the default. `[confinement] profile = "open"` gives a
+phase the host like your own shell (read and write anywhere you can, network, ssh and your ssh
+agent, the docker socket, your credential files and variables), and per-capability options
+override either profile ([CONCEPTS.md](CONCEPTS.md), "Confinement profiles", has the table with
+what each allows and risks). `bin/konstant confinement show` prints, for each configured harness,
+how each option is enforced at level 4 and in factory mode.
+
+| harness | how the profile and its options map |
+|---|---|
+| `claude` | generated `.claude/settings.json`: open adds `Bash`, `Read(//**)` and drops `blockReadsOutsideWorkingDirectories`; `host_write`/`home_write` -> `Edit(//**)`/`Edit(~/**)` + sandbox `allowWrite`; `extra_read`/`extra_write` -> Read/Edit rules + `additionalDirectories`; passed credentials leave the sandbox `denyRead`; `home_read = false` -> sandbox `denyRead ~/`; `network` -> `sandbox.network.allowedDomains`; `ssh_agent` -> `allowAllUnixSockets`; `docker_socket` -> `allowUnixSockets` (keys from Claude Code's settings schema; the open rendering was not run against a live Claude Code) |
+| `codex` | the `konstant` permission profile: `:root = write` (`host_write`), `$HOME = write`, deny rules for `home_read = false`, write/read rules for the extra paths, passed credentials not denied, `network.enabled` from `network`; sockets cannot be named (the jail handles them when it wraps the phase) |
+| `gemini` | the generated policy: open allows every shell command (priority 50, below every deny); `extra_*` -> `--include-directories`; its shell is otherwise only confined by konstant's jail |
+| `dsh` | the generated patch: `danger-full-access` (sandbox, preset, `DSH_PERMISSION_MODE`) when phases may write outside their project, konstant's jail being the boundary (a run refuses when the jail cannot wrap the phase); your own `konstant dsh` session stays `workspace-write` |
+| `command` | konstant's jail only |
+
+**Every profile keeps the integrity core**: the holdout store unreadable, only the phase's own
+identity token (and viewer's) readable, konstant's machinery (the list above) not writable, and
+in factory mode the target and the other job clones read-only. Under open, konstant therefore
+runs every phase of every harness in its jail at level 4 too, as a thin layer: the host root bound
+writable, masks and read-only binds over the core only. The rules each harness renders for the
+core (deny rules, profile denies, policy denies) stay as well. With `integrity = "off"` (open,
+level 4 only) none of that applies and `doctor` FAILs; factory mode refuses to start.
+
 ## Adapters
 
 Each default command below was checked against the installed tool's `--help` and its official

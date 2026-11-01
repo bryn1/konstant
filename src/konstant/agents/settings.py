@@ -34,6 +34,7 @@ sandboxing docs (DESIGN §9 names them).
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import sys
@@ -97,7 +98,10 @@ def _konstant_forms(workspace: Path, python: str) -> list:
             shlex.join([python, "-m", "konstant"])]
 
 
-def render(workspace: Path, perm: dict, python: str | None = None) -> str:
+def render(workspace: Path, perm: dict, python: str | None = None, conf=None) -> str:
+    """The settings for `conf` (konstant/confinement.py; None = closed, the 0.1.0 reach)."""
+    from konstant import confinement
+    conf = conf or confinement.CLOSED
     workspace = Path(workspace)
     python = python or sys.executable
     for rule in perm.get("allow", []):
@@ -109,38 +113,87 @@ def render(workspace: Path, perm: dict, python: str | None = None) -> str:
     allow += [f"Bash(git {verb} *)" for verb in GIT_ALLOW]
     allow += [f"Bash({workspace}/.venv/bin/python -m pytest *)"]
     allow += [r for r in perm.get("allow", []) if r not in allow]
-    deny = [f"Read({ws}/var/secrets/**)"]
-    deny += [f"Read({ws}/{d}/**)" for d in machinery.SEALED]      # the holdout store (LEVEL5 3.3)
-    deny += [f"Edit({ws}/{d}/**)" for d in PROTECTED_DIRS]
-    deny += [f"Edit({ws}/{f})" for f in PROTECTED_FILES]
-    deny += [f"Edit({ws}/var/runs/*/{r})" if "." in r else f"Edit({ws}/var/runs/*/{r}/**)"
-             for r in machinery.RUN_RECORDS]
-    deny += [f"Edit({ws}/**/.git/**)", f"Edit({ws}/.git/**)"]
+    allow += reach_allow(conf)
+    deny = []
+    if conf.integrity:
+        deny += [f"Read({ws}/var/secrets/**)"]
+        deny += [f"Read({ws}/{d}/**)" for d in machinery.SEALED]  # the holdout store (LEVEL5 3.3)
+        deny += [f"Edit({ws}/{d}/**)" for d in PROTECTED_DIRS]
+        deny += [f"Edit({ws}/{f})" for f in PROTECTED_FILES]
+        deny += [f"Edit({ws}/var/runs/*/{r})" if "." in r else f"Edit({ws}/var/runs/*/{r}/**)"
+                 for r in machinery.RUN_RECORDS]
+        deny += [f"Edit({ws}/**/.git/**)", f"Edit({ws}/.git/**)"]
     deny += [f"Bash({f} {verb} *)" for f in forms for verb in KONSTANT_DENY]
     deny += [f"Bash({f} *--as {r}*)" for f in forms for r in ("owner", "verifier")]
     deny += [f"Bash({f} *--as={r}*)" for f in forms for r in ("owner", "verifier")]
     deny = list(dict.fromkeys(deny))
-    data = {
-        "$schema": SCHEMA,
-        "permissions": {
-            "allow": allow,
-            "deny": deny,
-            "blockReadsOutsideWorkingDirectories": True,
-            "disableBypassPermissionsMode": "disable",
-        },
-    }
+    perms = {"allow": list(dict.fromkeys(allow)), "deny": deny,
+             "blockReadsOutsideWorkingDirectories": not conf.open,
+             "disableBypassPermissionsMode": "disable"}
+    extra = [abs_rule(Path(os.path.expanduser(p))) for p in
+             (*conf.extra_read, *conf.extra_write, *_cred_files(conf))]
+    if extra and not conf.open:
+        perms["additionalDirectories"] = list(dict.fromkeys(extra))
+    data = {"$schema": SCHEMA, "permissions": perms}
     if perm.get("sandbox", True):
-        data["sandbox"] = {
-            "enabled": True,
-            "autoAllowBashIfSandboxed": False,
-            "allowUnsandboxedCommands": False,
-            "failIfUnavailable": False,
-            "excludedCommands": [f"{f} {verb} *" for f in forms for verb in KONSTANT_ALLOW],
-            "filesystem": {
-                "allowWrite": [str(workspace)],
-                "denyWrite": [str(workspace / p) for p in PROTECTED_DIRS + PROTECTED_FILES],
-                "denyRead": [str(workspace / "var" / "secrets"),
-                             *(str(p) for p in machinery.sealed(workspace)), *CREDENTIALS],
-            },
-        }
+        data["sandbox"] = sandbox_block(workspace, forms, conf)
     return json.dumps(data, indent=2) + "\n"
+
+
+def _cred_files(conf) -> list:
+    return [c for c in conf.credentials if c != "*" and not c.startswith("$")]
+
+
+def reach_allow(conf) -> list:
+    """The allow rules the confinement adds (closed adds none)."""
+    out = []
+    if conf.open:
+        out += ["Bash", "Read(//**)"]
+    if conf.host_write:
+        out += ["Edit(//**)"]
+    elif conf.home_write:
+        out += ["Edit(~/**)"]
+    for p in (*conf.extra_read, *_cred_files(conf)):
+        out.append(f"Read({abs_rule(Path(os.path.expanduser(p)))}/**)")
+    for p in conf.extra_write:
+        r = abs_rule(Path(os.path.expanduser(p)))
+        out += [f"Read({r}/**)", f"Edit({r}/**)"]
+    return out
+
+
+def sandbox_block(workspace: Path, forms: list, conf) -> dict:
+    """Claude Code's Bash sandbox for `conf`: writes, reads, unix sockets and network."""
+    passed = {os.path.realpath(os.path.expanduser(c)) for c in conf.cred_paths(env={})}
+    deny_read = [str(workspace / "var" / "secrets"), *(str(p) for p in
+                                                       machinery.sealed(workspace))] \
+        if conf.integrity else []
+    deny_read += [c for c in CREDENTIALS
+                  if os.path.realpath(os.path.expanduser(c)) not in passed]
+    allow_read = []
+    if not conf.home_read:
+        deny_read.append("~/")
+        allow_read += [str(workspace), *conf.extra_read, *_cred_files(conf)]
+    write = [str(workspace)] + (["/"] if conf.host_write else ["~/"] if conf.home_write else [])
+    write += list(conf.extra_write)
+    fs = {"allowWrite": write,
+          "denyWrite": [str(workspace / p) for p in PROTECTED_DIRS + PROTECTED_FILES]
+          if conf.integrity else [],
+          "denyRead": deny_read}
+    if allow_read:
+        fs["allowRead"] = list(dict.fromkeys(allow_read))
+    box = {"enabled": True, "autoAllowBashIfSandboxed": False, "allowUnsandboxedCommands": False,
+           "failIfUnavailable": False,
+           "excludedCommands": [f"{f} {verb} *" for f in forms for verb in KONSTANT_ALLOW],
+           "filesystem": fs}
+    net = {}
+    if conf.network is True:
+        net.update(allowedDomains=["*"], allowLocalBinding=True)
+    elif conf.network is False:
+        net["allowedDomains"] = []
+    if conf.ssh_agent:          # SSH_AUTH_SOCK changes per login: a static file cannot name it
+        net["allowAllUnixSockets"] = True
+    elif conf.docker_socket:
+        net["allowUnixSockets"] = list(machinery.DOCKER_SOCKETS)
+    if net:
+        box["network"] = net
+    return box
