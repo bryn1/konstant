@@ -52,6 +52,13 @@ it**. The other terminal state works the same way: a review-type job is closed b
 from an identity that neither filed, claimed nor closed it (by default the owner or the verifier
 review the orchestrator's jobs).
 
+For the dark factory (level 5) `board init` also mints four **identities**: tokens with their own
+label - `planner`, `dod-reviewer` and `scenario` (role worker) and `factory` (role orchestrator).
+`--as LABEL` acts as one; `board tokens --rotate ROLE --label LABEL` replaces one. The board
+compares labels: a job's requester never approves its own DoD, and the identity that reviewed a
+job's DoD or sealed its holdouts never claims or closes it. One model may play every one of these
+roles: the separation is the identity, what each phase is shown, and the jail's file isolation.
+
 On one machine, role separation is procedural:
 
 - Harness phases run with `KONSTANT_IN_TASK=1` and act as `worker`; the CLI refuses every other
@@ -197,8 +204,15 @@ keeps only a hash of each file. The job is now `holdout_required`: it cannot be 
 sealed set.
 
 The store is masked inside konstant's jail and read-denied by every harness adapter, and a job
-with holdouts runs only when every phase is jailed (`task run --harness dsh` today; otherwise exit
-2 `holdouts need a confined phase`). The producer is told only that holdouts exist and how many.
+with holdouts runs in **factory mode**: every phase inside konstant's jail on any harness (claude,
+codex, gemini, dsh or your own command), reading only its own identity's token; without a working
+jail the run exits 2 `holdouts need a confined phase`. The first claim gives the job its own
+**clone** of the project, `projects/<slug>@<job>`, made from the project's current commit; the
+phases work and commit there, the verifier judges it (a DoD probe may say `{workdir}/file`), and
+the project itself (the target) stays read-only to every phase. Claude Code's own sandbox runs
+nested inside the jail when it can (bubblewrap, socat, a private `/tmp`); otherwise it is switched
+off for the phase and the jail is the boundary - `doctor` says which. The producer is told only
+that holdouts exist and how many.
 `konstant verify` then checks the store against the hashes, scans for a leaked canary or a copied
 expectation, materialises the exact commit the job closed with, and runs every scenario there
 without network. A failure shows only `holdout H1 failed (hint: ...)`; PASS needs everything a
@@ -284,6 +298,12 @@ loopback (a remote bind needs `[board] allow_remote = true`); request bodies cap
   denies its file tools; a job with holdouts runs only on jailed phases. A process you run
   yourself, unjailed and as the same OS user, can still read it: for stronger separation put
   `[holdout] store` outside the workspace, owned by the OS user that runs `konstant verify`.
+- **Factory mode** (a job with holdouts): every phase runs in the jail whatever the harness, with
+  `var/secrets/` masked except the token of the phase's own identity and the viewer token, writes
+  limited to its job clone, OUT, a private TMPDIR and a fresh per-phase harness home (claude,
+  codex and gemini keep only their own credential file there, read-only), and the target project
+  read-only. The network stays open (the harness needs its model), so a phase can still send what
+  it CAN read somewhere; it cannot read the store, the other tokens or your credential homes.
 - **konstant's machinery is read-only to every phase, whatever the harness**
   (`konstant/machinery.py`, one list read by the Claude settings, the codex profile, the gemini
   policy and the jail): `bin/`, `.venv/`, `src/`, `catalog/`, `tests/`, `install.sh`, `get.sh`,

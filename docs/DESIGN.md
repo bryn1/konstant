@@ -1,4 +1,4 @@
-# konstant — design (v0.1.0, pre-release; level-5 wave L5-1 landed)
+# konstant — design (v0.1.0, pre-release; level-5 waves L5-1 and L5-2 landed)
 
 konstant is a self-contained workspace for running coding agents with discipline: a local job
 board (**board**), a deterministic **task gate** that turns a task into phases run by one agent
@@ -9,7 +9,9 @@ DeepSeek Harness or any CLI agent; docs/HARNESSES.md).
 
 Level 5 (docs/LEVEL5.md) lands wave by wave; this document describes what exists. Wave L5-1 added
 sealed holdout scenarios (§7.1): black-box acceptance checks a producing phase cannot read, run
-only by the verifier.
+only by the verifier. Wave L5-2 added factory mode (§7.2): every phase of a holdout job confined
+in konstant's jail on any harness, per-identity tokens the board compares, and job clones with a
+read-only target.
 
 References of the form F-nn and G-nn name findings of the two independent security reviews of
 v0.1; docs/CONCEPTS.md "Security reviews" summarises them, and each has a test under `tests/review/`.
@@ -57,9 +59,10 @@ konstant-0.1.0/
     board/
       app.py                   # FastAPI app factory, static read-only UI
       api/                     # deps (auth deps, serialisation), projects, jobs (file/read),
-                               # lifecycle (claim..move), verify (verdict), trail, tokens routes,
+                               # lifecycle (claim..move, dod-review), verify (verdict), trail,
+                               # tokens routes,
                                # holdouts (seal + list commitments; the verdict's holdout hooks)
-      db.py  migrate.py  migrations/0001_init.sql  migrations/0002_holdouts.sql
+      db.py  migrate.py  migrations/0001_init.sql  0002_holdouts.sql  0003_workdir.sql
       dod.py                   # DoD extraction from a brief (required) + DoD row lint (warnings)
       policy.py                # role sets + switches from konstant.toml, fail-closed defaults
       transitions.py           # the job state machine (one table)
@@ -77,6 +80,7 @@ konstant-0.1.0/
     verify/   probe.py  shapes.py  native.py  procenv.py  rerun.py  verifier.py
               holdout.py                     # materialise the pinned commit, jailed no-net runs (§7.1)
     holdout/  lint.py  store.py  leak.py     # scenario format + lint, seal/check, leak scan (§7.1)
+    factory/  clone.py  doctor.py            # job clones, factory doctor rows (§7.2)
     harnesses/ base.py claude.py codex.py gemini.py dsh.py command.py   # adapters (§9)
                dsh_session.py dsh_gate/{index.ts,build.mjs,konstant-gate.mjs} # dsh session plugin (§6.6)
     jail.py                                  # bubblewrap jail for agent-written code
@@ -93,7 +97,7 @@ konstant-0.1.0/
     templates/CLAUDE.md.tmpl  AGENTS.md.tmpl  agent.md.tmpl  skill.md.tmpl
               operate.md.tmpl  # the "how to operate konstant" table both top docs include
   release/patterns.toml      # generic public-safety patterns (IPs, emails, token shapes, paths)
-  tests/  unit, board, cli, gate, verify, catalog, release, fixtures/,
+  tests/  unit, board, cli, gate, verify, catalog, release, holdout, factory, fixtures/,
           e2e/{fresh_install.sh, one_line.sh, dsh_session.sh}
   docs/   DESIGN.md  QUICKSTART.md  CLI.md  CONCEPTS.md  HARNESSES.md  DSH.md
   .github/workflows/ci.yml   # CI (export-ignore)
@@ -152,12 +156,12 @@ supported, but the generated surfaces only apply inside it (stated in QUICKSTART
 |---|---|---|
 | `schema_meta` | `version` | one row |
 | `projects` | `id, slug UNIQUE, name, path, root_job_id, status(active/archived), created_at` | `path` = project dir (default `projects/<slug>`) |
-| `jobs` | `id, project_id, parent_id, type, title, brief, acceptance, status, priority, requested_by, assignee, after_id, approval_required, verify_round, closed_by, evidence_json, result_summary, created_at, updated_at, holdout_required` | `acceptance` immutable after insert; `type` validated against `catalog/types.yaml` (root jobs have type `project`); `holdout_required` (v2): claimable only with sealed holdouts |
-| `trail` | `id, job_id, ts, actor, role, kind, body, payload_json` | append-only; kinds: `note status evidence verdict finding move approval review`, and since v2 the level-5 kinds `dod-review holdout ship rollback escalation budget` (only `holdout` is written yet) |
+| `jobs` | `id, project_id, parent_id, type, title, brief, acceptance, status, priority, requested_by, assignee, after_id, approval_required, verify_round, closed_by, evidence_json, result_summary, created_at, updated_at, holdout_required` | `acceptance` immutable after insert; `type` validated against `catalog/types.yaml` (root jobs have type `project`); `holdout_required` (v2): claimable only with sealed holdouts; `workdir`, `workdir_base` (v3): the job clone and the target commit it starts from, set by the first claim of a holdout job, then immutable |
+| `trail` | `id, job_id, ts, actor, role, kind, body, payload_json` | append-only; kinds: `note status evidence verdict finding move approval review`, and since v2 the level-5 kinds `dod-review holdout ship rollback escalation budget` (`holdout` and, since L5-2, `dod-review` are written) |
 | `verifications` | `id, job_id, round, actor, started_at, finished_at, verdict(PASS/FAIL/BLOCKED), probes_json, rerun_json, holdout_json` | the verifier's ledger; `holdout_json` (v2) holds scenario ids, pass/fail, timings, the commit and the commitment digest, never a command or an output |
 | `holdouts` (v2) | `id, job_id, hid, kind(proof/regression), sha256, author_label, sealed_at, trail_id, generation, state(sealed/burned/retired)` | a COMMITMENT per scenario (sha256 of the file; its canary is the salt), never content; no delete; commitment columns immutable; `state` only moves forward from `sealed` (DB triggers) |
 | `runs` | `id, job_id, run_dir, type, started_at, finished_at, result(MET/UNMET/BLOCKED/ERROR)` | links task runs to jobs; written by `task run --job` through `POST /api/jobs/{ref}/runs`; `GET /api/jobs/{ref}` returns the job's `verifications` and `runs` |
-| `tokens` | `id, role, label, sha256 UNIQUE, active, created_at` | `label` is the actor identity (e.g. `orchestrator`, `verifier`) |
+| `tokens` | `id, role, label, sha256 UNIQUE, active, created_at` | `label` is the actor identity (e.g. `orchestrator`, `verifier`; the factory identities `planner`, `dod-reviewer`, `scenario`, `factory`: §5) |
 
 Hierarchy: depth 0 = project root (auto-created by
 `project add`, never closes, no DoD), depth 1 = feature (carries the DoD), depth 2 = task. Depth > 2
@@ -221,6 +225,16 @@ stores only `sha256` in `tokens`. Every API call carries `Authorization: Bearer 
 maps it to `(label, role)`. Reads need any valid token (the web view asks for the viewer token once
 and keeps it in browser storage). No shared token, no password users, no open registration.
 `konstant board tokens --rotate <role>` (owner) replaces a token.
+
+Factory identities (level 5, docs/LEVEL5.md §2.2): `board init` also mints tokens with their own
+LABEL - `planner`, `dod-reviewer`, `scenario` (role worker) and `factory` (role orchestrator) -
+as `var/secrets/<label>.token` (`board/policy.py` `IDENTITIES`); `board tokens --rotate ROLE
+--label LABEL` replaces one, `--as LABEL` acts as one. The board compares labels: `approve` is
+refused to the job's requester (`the requester cannot approve its own DoD`), `claim` and `close`
+to a label that posted the job's `dod-review` (`POST /api/jobs/{id}/dod-review`, only the
+`dod-reviewer` identity, before any claim) or sealed its holdouts (the owner or the `scenario`
+identity seal). Under one OS user these labels stay apart because a factory phase runs in the
+jail and reads only its own identity's token (§7.2).
 
 The CLI picks a token by `--as <role>` (default `[client] default_role`, `orchestrator`). Role
 separation on one machine is procedural, and the design says so plainly:
@@ -413,11 +427,11 @@ The runner is the enforcing mode: konstant, not the model, drives the phases.
    `konstant verify` when `[gate] verify_after_close = true`; the run is linked to the job in the
    `runs` table. Exit: 0 MET (and verify PASS), 3 UNMET or verify FAIL, 4 BLOCKED, 5 check error.
 
-A job with sealed holdouts (§7.1) runs only when every phase is confined: the jail must work
-(`[gate] jail`, bubblewrap) and every harness of the run must jail its phases (`Adapter.confines`;
-until wave L5-2 only dsh does), else the run exits 2 `holdouts need a confined phase` before it
-claims anything; `task gate` refuses such a job the same way (an interactive session is not
-confined). Its phase prompts say only THAT holdouts exist and how many (`KONSTANT-HOLDOUTS: <n>`
+A job with sealed holdouts (§7.1) runs in factory mode (§7.2): every phase confined in the jail on
+any harness (`Adapter.confines` with `factory`), the job claimed, then its clone made and used as
+the run's project. Without a working jail (`[gate] jail`, bubblewrap) the run exits 2 `holdouts
+need a confined phase` before it claims anything; `task gate` refuses such a job the same way (an
+interactive session is not confined). Its phase prompts say only THAT holdouts exist and how many (`KONSTANT-HOLDOUTS: <n>`
 and a short "Holdouts" paragraph); the close evidence carries `COMMIT=`/`BASE=` (§4.3).
 
 Read-only types: the conditional opening architect never runs under the runner (nothing is known
@@ -592,6 +606,50 @@ closed with.
 - Limits (LEVEL5 §3.8): holdouts raise the cost of cheating, they do not prove correctness; under
   one OS user a process you run unjailed can read the store (`[holdout] store` outside the
   workspace for a second OS user; `doctor` reports which applies).
+
+### 7.2 Factory mode: confinement, identities, job clones (level 5; docs/LEVEL5.md §2)
+
+A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_run_factory`).
+
+- **Every phase confined, whatever the harness** (`harnesses/base.py` `Adapter.confine`,
+  `jailed`): claude, codex, gemini, dsh and an explicit command template (run as the `command`
+  adapter) all start inside konstant's jail: root read-only; writable only the job clone, OUT,
+  the phase TMPDIR (the jail's own empty `/tmp` unless the workspace lies under `/tmp`) and the
+  harness's per-phase home; every machinery path read-only inside those; `var/secrets/` masked
+  except the phase identity's token and the read-only viewer token; `var/holdout/`, the
+  credential and agent homes masked. claude, codex and gemini get a FRESH home per phase
+  (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_CLI_HOME` under `var/harness/<name>/phases/`,
+  removed after the phase: `Adapter.relocatable_home`), into which only their own credential
+  file (`~/.claude/.credentials.json`, `~/.codex/auth.json`) is bound read-only. dsh confines
+  every phase anyway. Without a working jail a factory run exits 2 `holdouts need a confined
+  phase`, and `Harness.run` refuses a factory phase it could not confine. `task gate` (an
+  interactive session) still refuses a holdout job.
+- **Claude Code's sandbox nested** (live-checked in L5-2): it runs inside the jail when a nested
+  bubblewrap starts there (`jail.nests`), socat is installed and the phase has the jail's short
+  private `/tmp` (its bridges are unix sockets under `TMPDIR`; a long `TMPDIR` fails them).
+  Otherwise the phase gets the generated settings minus the `sandbox` block (Claude Code's sandbox
+  off, the jail the boundary; `harnesses/claude.py` `without_sandbox`): a sandbox that cannot
+  start would otherwise deny every Bash call (`allowUnsandboxedCommands = false`). `doctor` row
+  `claude sandbox` says which applies.
+- **Identities**: each phase acts as one identity (`KONSTANT_IDENTITY`, default `worker`; §5); the
+  in-task client uses that identity's token for worker requests; codex's profile denies every
+  other token file.
+- **Job clones** (`factory/clone.py`, migration `0003_workdir.sql`): the job's first claim makes
+  the board record `jobs.workdir = <project path>@<job id>` and `jobs.workdir_base` = the target's
+  `HEAD` commit (computed by the board with plumbing, recorded once: trigger
+  `jobs_workdir_once`); a holdout job whose project is no git repository cannot be claimed. The
+  runner then builds the clone with plumbing only (`git init --template=`, the target's object
+  store as an alternate, `update-ref`, the tree written from `ls-tree`/`cat-file`, `read-tree`),
+  refuses a tree path into `.git`, keeps an existing clone of the same job and base on a re-claim,
+  and makes it the run's project (record `project`, `git_base` = the clone base, OUT under it, the
+  one-run lock on it). The target is read-only in every phase jail (a `self-ship` producer's
+  `git update-ref` in it is denied).
+- **Verifier**: `verifier.job_dir` = the clone when recorded (re-run, holdouts, leak scan); a DoD
+  `PROBE:` may name `{workdir}/...`, substituted with the clone (workspace-relative) BEFORE shape
+  matching, so the allowlist and path roots judge the resolved path; `job lint` checks such a path
+  as a project path. The negative control of a re-sealed set runs on `workdir_base`.
+- **doctor** rows `factory jail`, `factory harness` (per harness: home relocation), `claude
+  sandbox`, `identities`.
 
 ## 8. Catalog, generator and generated surfaces
 
@@ -993,7 +1051,7 @@ test_cmd = "auto"
 cleanup = "warn"               # warn | fail
 verify_after_close = true
 hygiene = { target = 250, hard = 400, tests = 600, grown = 600 }
-jail = true                    # run agent-written tests, verifier re-runs and dsh phases in bubblewrap
+jail = true                    # run agent-written tests, verifier re-runs, dsh phases and every phase of a holdout job in bubblewrap
 file_job = false               # a gated dsh session files + claims a job for a typed task naming none
 
 [holdout]                      # level-5 holdouts (§7.1); each default is one key

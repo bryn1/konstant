@@ -17,8 +17,16 @@ from konstant.board import db
 from konstant.board.api.deps import Actor, add_trail, load_job, reader, writer
 
 router = APIRouter()
-# who may seal: the owner; L5-2/L5-3 add the `scenario` identity (docs/LEVEL5.md 2.2, 3.4)
+# who may seal: the owner, and the `scenario` identity (a worker-role token labelled scenario;
+# docs/LEVEL5.md 2.2, 3.4) - never another worker label
 HOLDOUT_ROLES = ("owner",)
+HOLDOUT_LABELS = ("scenario",)
+
+
+def may_seal(actor: Actor) -> bool:
+    from konstant.board.policy import role_of
+    return actor.role in HOLDOUT_ROLES or (actor.label in HOLDOUT_LABELS
+                                           and role_of(actor.label) == actor.role)
 SEAL_STATES = ("queued", "waiting_approval")
 _HID = re.compile(r"^H[1-9][0-9]{0,5}$")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -49,9 +57,10 @@ def sealed_count(conn, job_id: int) -> int:
 
 @router.post("/api/jobs/{ref}/holdouts")
 def seal(ref: str, body: SealIn, request: Request, actor: Actor = Depends(writer)):
-    if actor.role not in HOLDOUT_ROLES:
-        raise HTTPException(403, f"sealing holdouts requires role {', '.join(HOLDOUT_ROLES)} "
-                                 f"(this token is {actor.role})")
+    if not may_seal(actor):
+        raise HTTPException(403, f"sealing holdouts requires role {', '.join(HOLDOUT_ROLES)} or "
+                                 f"the {', '.join(HOLDOUT_LABELS)} identity (this token is "
+                                 f"{actor.label}, role {actor.role})")
     if not body.holdouts:
         raise HTTPException(422, "no holdout to seal")
     for h in body.holdouts:

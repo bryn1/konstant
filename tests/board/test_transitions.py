@@ -94,10 +94,11 @@ def test_table_matches_spec():
 
 
 def _job_in(board, state, role, verb=""):
-    """The job is the acting role's own (close needs that), except for review: a review comes
-    from another identity than the requester/assignee/closer (its own guard, tests/review)."""
+    """The job is the acting role's own (close needs that), except for review and approve: a
+    review comes from another identity than the requester/assignee/closer (its own guard,
+    tests/review), and the requester never approves its own DoD (docs/LEVEL5.md 2.2, L5-2)."""
     feature = board.insert_job("queued", title="feature")
-    mine = "someone-else" if verb == "review" else role
+    mine = "someone-else" if verb in ("review", "approve") else role
     return board.insert_job(state, parent=feature, requested_by=mine, assignee=mine,
                             closed_by="someone-else")
 

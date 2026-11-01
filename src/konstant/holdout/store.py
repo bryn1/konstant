@@ -2,11 +2,12 @@
 both end in `seal()`.
 
 1. lint (holdout/lint.py) of every new file and of the set (sealed + new);
-2. the negative control: every new scenario runs once on the base - the project's current HEAD,
-   which the producer will start from - the way the verifier runs it (verify/holdout.py): a
+2. the negative control: every new scenario runs once on the base - the project's current HEAD
+   (or, once claimed, the target commit the job clone started from), which the producer starts
+   from - the way the verifier runs it (verify/holdout.py): a
    proof that already passes checks nothing (VACUOUS), a regression that fails is refused;
 3. the commitment: the board stores sha256(file bytes) per scenario (POST
-   /api/jobs/{id}/holdouts, owner); the file becomes 0400 in a 0700 directory
+   /api/jobs/{id}/holdouts, owner or the scenario identity); the file becomes 0400 in a 0700 directory
    <store>/<job id>/H<n>.scenario. The SOURCE file is moved, never copied, and a source inside
    the workspace is refused (phases read the workspace).
 No route serves scenario content: `holdout show` reads the store directly and is refused inside a
@@ -137,8 +138,8 @@ def seal(cfg, client, ref: str, sources: list) -> list:
     sealed = rows(client, job["id"])["holdouts"]
     new = prepare(cfg, job, sealed, [Path(s) for s in sources])
     project = project_of(cfg, client, job)
-    try:
-        base = runner.resolve(project, "HEAD")
+    try:   # the base: the target commit the job clone starts from (LEVEL5 3.2 step 2, 2.4)
+        base = runner.resolve(project, job.get("workdir_base") or "HEAD")
         control = runner.negative_control(cfg, [sc for _s, sc in new], project, base)
     except runner.HoldoutError as exc:
         raise SealRefused([str(exc)], 2)

@@ -25,6 +25,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from konstant.board.policy import LABELS, PHASE_IDENTITIES
+
 # workspace-relative directories no phase may write
 DIRS = ("bin", ".venv", "src", "catalog", "tests",
         ".claude", ".agents", ".dsh", ".gemini",
@@ -41,6 +43,10 @@ GIT_GUARDS = (".git/config", ".git/hooks")
 RUN_RECORDS = ("record.json", "phases", "prompts", "profiles", "evidence.md")
 # role tokens a phase must never read (it acts as worker; viewer is read-only)
 PRIVILEGED_TOKENS = ("owner.token", "orchestrator.token", "verifier.token")
+# every token file of the workspace: the five roles and the factory identities (board/policy.py
+# IDENTITIES; docs/LEVEL5.md 2.2). A phase reads only its own identity's token and the read-only
+# viewer token (tokens_readable); the jail masks the rest, the codex profile denies them.
+ALL_TOKENS = tuple(f"{label}.token" for label in LABELS)
 
 # credential and agent-CLI homes under $HOME a phase never needs (the jail masks them, the codex
 # profile denies them, the Claude sandbox read-denies them; docs/CONCEPTS.md lists the same set)
@@ -54,6 +60,21 @@ HOME_ENV = ("DSH_HOME", "DSH_AGENTS_HOME", "CODEX_HOME", "GEMINI_CLI_HOME", "CLA
 # a harness whose own sandboxed commands need its home keeps it, minus its credential files
 SELF_HOME = {"claude": ("~/.claude", ("~/.claude/.credentials.json",)),
              "codex": ("~/.codex", ("~/.codex/auth.json",))}
+
+
+def tokens_readable(identity: str = "worker") -> tuple:
+    """The token files a phase acting as `identity` reads: its own and the read-only viewer's."""
+    if identity not in PHASE_IDENTITIES:
+        raise ValueError(f"{identity!r} is not an identity a phase acts as "
+                         f"({', '.join(PHASE_IDENTITIES)})")
+    return (f"{identity}.token", "viewer.token")
+
+
+def tokens_denied(identity: str = "worker") -> tuple:
+    """Every other token file: what that phase must never read (the privileged roles AND the
+    other worker identities: the board's label guards rely on it, docs/LEVEL5.md 2.2)."""
+    keep = tokens_readable(identity)
+    return tuple(t for t in ALL_TOKENS if t not in keep)
 
 
 def dirs(ws) -> list:

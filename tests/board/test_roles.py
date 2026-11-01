@@ -90,7 +90,7 @@ def test_trail_kinds_other_than_note_and_finding_are_reserved(board):
 def test_token_admin_is_owner_only_and_never_shows_values(board):
     assert board.call("orchestrator", "GET", "/api/tokens").status_code == 403
     rows = board.call("owner", "GET", "/api/tokens").json()["tokens"]
-    assert len(rows) == 5 and all("sha256" not in r and "token" not in r for r in rows)
+    assert len(rows) == 9 and all("sha256" not in r and "token" not in r for r in rows)
     old = board.tokens["worker"]
     res = board.call("owner", "POST", "/api/tokens/rotate", {"role": "worker"})
     assert res.status_code == 200

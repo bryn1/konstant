@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from konstant import config
 from konstant.board import auth, db, migrate
 from konstant.board.app import create_app
-from konstant.board.policy import ROLES
+from konstant.board.policy import LABELS, ROLES
 
 
 class Board:
@@ -23,7 +23,8 @@ class Board:
         migrate.migrate(self.cfg.db_path)
         with db.transaction(self.cfg.db_path) as conn:
             auth.mint_missing(conn, self.cfg.secrets_dir)
-        self.tokens = {r: auth.read_token(self.cfg.secrets_dir, r) for r in ROLES}
+        # every token: the five roles and the factory identities (docs/LEVEL5.md 2.2)
+        self.tokens = {r: auth.read_token(self.cfg.secrets_dir, r) for r in LABELS}
         self.client = TestClient(create_app(self.cfg))
         self.root = self.call("owner", "POST", "/api/projects", {"slug": "demo"}).json()["root_job_id"]
 

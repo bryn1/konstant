@@ -44,6 +44,24 @@ def available() -> bool:
     return r.returncode == 0
 
 
+@functools.lru_cache(maxsize=None)
+def nests() -> bool:
+    """Whether a bubblewrap sandbox starts INSIDE konstant's jail (its own pid namespace and
+    /proc, as Claude Code's and dsh's Linux sandboxes start one): the outer jail's shape with a
+    private /tmp, and a second bwrap that unshares pid and network inside it."""
+    if not available():
+        return False
+    exe = shutil.which("bwrap")
+    inner = [exe, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid",
+             "--unshare-net", "--die-with-parent", "true"]
+    try:
+        r = subprocess.run(wrap(inner, tmpfs=("/tmp",)), capture_output=True, timeout=15,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
 def hidden(home=None, env=None) -> list:
     """What a jail masks: the workspace's var/secrets/, the sealed holdout store
     (machinery.SEALED) and machinery.credentials()."""
@@ -57,7 +75,7 @@ def _inside(p: str, root: str) -> bool:
 
 
 def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = True,
-         home=None, binds=()) -> list:
+         home=None, binds=(), ro_binds=()) -> list:
     """The jailed argv (or argv unchanged when the jail is unavailable). `tmpfs`: directories
     replaced by an empty private tmpfs first (e.g. /tmp); `rw`: directories bound writable;
     `home`: the workspace, whose machinery stays read-only inside any writable bind (module
@@ -65,7 +83,9 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
     that holds the workspace, a writable bind or the cwd; `expose`: files inside a hidden
     directory bound back read-only (a phase's own role token); `binds`: (source, destination)
     pairs bound writable at ANOTHER path (a holdout's materialised tree at the project's own
-    path, so the code under test sees the path the tests rule shows it)."""
+    path, so the code under test sees the path the tests rule shows it); `ro_binds`:
+    (source file, destination) pairs bound READ-ONLY at another path, last (a harness's own
+    credential file inside the phase's relocated home: docs/LEVEL5.md 2.1)."""
     if not available():
         return list(argv)
     a = [shutil.which("bwrap"), "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
@@ -108,6 +128,9 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
     for p in dict.fromkeys(os.path.realpath(str(x)) for x in expose if x):
         if os.path.isfile(p):
             a += ["--ro-bind", p, p]
+    for src, dst in ro_binds:
+        if os.path.isfile(str(src)):
+            a += ["--ro-bind", os.path.realpath(str(src)), os.path.realpath(str(dst))]
     if cwd:
         a += ["--chdir", os.path.realpath(str(cwd))]
     return a + ["--", *map(str, argv)]

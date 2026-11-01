@@ -17,6 +17,21 @@ from dataclasses import dataclass
 
 ROLES = ("owner", "orchestrator", "worker", "verifier", "viewer")
 WRITE_ROLES = ("owner", "orchestrator", "worker", "verifier")
+# factory identities (docs/LEVEL5.md 2.2): extra tokens with their own LABEL, minted by `board
+# init` as var/secrets/<label>.token. The board's guards compare labels, so each identity is a
+# separate actor even where it shares a role: label -> role.
+IDENTITIES = {"planner": "worker", "dod-reviewer": "worker", "scenario": "worker",
+              "factory": "orchestrator"}
+# every token label (= its file stem): the five role tokens (label = role) plus the identities
+LABELS = ROLES + tuple(IDENTITIES)
+# the labels a phase may act as (role worker): the producer/verifying phases' `worker` and the
+# factory's worker identities; each phase reads only its own token (docs/LEVEL5.md 2.1)
+PHASE_IDENTITIES = ("worker",) + tuple(k for k, v in IDENTITIES.items() if v == "worker")
+
+
+def role_of(label: str) -> str | None:
+    """The role of a token label (a role name is its own label), None for an unknown label."""
+    return label if label in ROLES else IDENTITIES.get(label)
 MODES = ("off", "warn", "strict")
 
 DEFAULT_ROLE_SETS = {

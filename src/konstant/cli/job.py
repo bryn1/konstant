@@ -180,8 +180,8 @@ def probe_refusals(ctx, brief: str) -> list:
             projects = [{"path": str(cfg.home / "projects")}]
         roots = build_roots(cfg, projects)
     out = []
-    for line in probe.probe_lines(brief):
-        why = probe.check_line(line, roots)
+    for line in probe.probe_lines(brief):           # `{workdir}`: checked as a project path
+        why = probe.check_line(probe.with_workdir(line, probe.LINT_WORKDIR), roots)
         if why:
             out.append((line, why))
     return out

@@ -1,8 +1,15 @@
-"""Lifecycle verbs on one job: claim, block, close, review, reopen, cancel, move, approve.
+"""Lifecycle verbs on one job: claim, block, close, review, reopen, cancel, move, approve, and
+the factory's dod-review.
 
 Each route runs inside one transaction: load the job, ask transitions.decide() (role, then
 state), check the verb's own guard, write the row and ONE trail entry. Any refusal rolls the
 whole write back.
+
+Identity pairs (docs/LEVEL5.md 2.2): the board compares token LABELS. The requester never
+approves its own DoD; the identity that posted a job's dod-review or sealed its holdouts never
+claims or closes it; the closer never verifies or reviews it (verify.py, review below). Under one
+OS user these labels stay apart because every factory phase runs in konstant's jail and reads only
+its own identity's token (harnesses/base.py confine).
 """
 from __future__ import annotations
 
@@ -54,6 +61,44 @@ class MoveIn(BaseModel):
     reason: str = ""
 
 
+class DodReviewIn(BaseModel):
+    verdict: str = ""
+    reason: str = ""
+
+
+DOD_REVIEWER = "dod-reviewer"
+DOD_REVIEW_STATES = ("waiting_approval", "queued")
+
+
+def identity_guard(conn, job, actor: Actor, verb: str) -> None:
+    """docs/LEVEL5.md 2.2: the identities that prepared a job (its DoD review, its holdouts) never
+    do or close its work: a claimant that wrote the scenarios could write code for them."""
+    rows = conn.execute("SELECT DISTINCT actor FROM trail WHERE job_id=? AND kind='dod-review'",
+                        (job["id"],)).fetchall()
+    if actor.label in {r[0] for r in rows}:
+        raise Refused(403, f"the DoD reviewer of a job cannot {verb} it: {actor.label} posted "
+                           f"the dod-review of job {job['id']}")
+    rows = conn.execute("SELECT DISTINCT author_label FROM holdouts WHERE job_id=?",
+                        (job["id"],)).fetchall()
+    if actor.label in {r[0] for r in rows}:
+        raise Refused(403, f"the scenario writer of a job cannot {verb} it: {actor.label} "
+                           f"sealed holdouts of job {job['id']}")
+
+
+def clone_fields(request: Request, conn, job) -> dict:
+    """A holdout job's first claim records its clone and the target commit it starts from
+    (docs/LEVEL5.md 2.4); computed here, by the board, never taken from the caller."""
+    if not job["holdout_required"] or job["workdir"]:
+        return {}
+    from konstant.factory import clone
+    proj = conn.execute("SELECT path FROM projects WHERE id=?", (job["project_id"],)).fetchone()
+    try:
+        base = clone.target_tip(request.app.state.cfg.resolve(proj["path"]))
+    except clone.CloneError as exc:
+        raise Refused(409, str(exc)) from None
+    return {"workdir": clone.workdir_of(proj["path"], job["id"]), "workdir_base": base}
+
+
 def run(request: Request, ref: str, verb: str, actor: Actor, apply) -> dict:
     """Shared frame: transaction, root refusal, decide(), the verb's apply(conn, job) -> extra."""
     with db.transaction(request.app.state.db_path) as conn:
@@ -82,6 +127,7 @@ def _need_reason(text: str, verb: str) -> str:
 @router.post("/api/jobs/{ref}/claim")
 def claim(ref: str, request: Request, actor: Actor = Depends(writer)):
     def apply(conn, job):
+        identity_guard(conn, job, actor, "claim")
         if job["after_id"] is not None:
             dep = conn.execute("SELECT status FROM jobs WHERE id=?", (job["after_id"],)).fetchone()
             if dep is None or dep["status"] not in transitions.TERMINAL:
@@ -96,8 +142,11 @@ def claim(ref: str, request: Request, actor: Actor = Depends(writer)):
                 raise Refused(409, f"no holdout sealed: job {job['id']} needs {need} sealed "
                                    f"holdout scenario(s) before a claim and has {have} "
                                    "(`konstant holdout add`)")
-        set_status(conn, job["id"], "claimed", assignee=actor.label)
-        add_trail(conn, job["id"], actor, "status", f"claimed by {actor.label}")
+        fields = clone_fields(request, conn, job)
+        set_status(conn, job["id"], "claimed", assignee=actor.label, **fields)
+        add_trail(conn, job["id"], actor, "status", f"claimed by {actor.label}"
+                  + (f"; job clone {fields['workdir']} at {fields['workdir_base'][:12]}"
+                     if fields else ""), fields or None)
     return run(request, ref, "claim", actor, apply)
 
 
@@ -115,6 +164,7 @@ def close(ref: str, body: CloseIn, request: Request, actor: Actor = Depends(writ
     policy = request.app.state.policy
 
     def apply(conn, job):
+        identity_guard(conn, job, actor, "close")
         if actor.role != "owner" and actor.label not in (job["requested_by"], job["assignee"]):
             raise Refused(403, f"only the requester ({job['requested_by']}), the assignee "
                                f"({job['assignee'] or 'none'}) or an owner may close job "
@@ -185,6 +235,9 @@ def cancel(ref: str, body: Reason, request: Request, actor: Actor = Depends(writ
 @router.post("/api/jobs/{ref}/approve")
 def approve(ref: str, request: Request, actor: Actor = Depends(writer)):
     def apply(conn, job):
+        if actor.label == job["requested_by"]:
+            raise Refused(403, f"the requester cannot approve its own DoD: {actor.label} filed "
+                               f"job {job['id']}; another identity approves it")
         set_status(conn, job["id"], "queued")
         add_trail(conn, job["id"], actor, "approval", f"approved by {actor.label}")
     return run(request, ref, "approve", actor, apply)
@@ -212,3 +265,32 @@ def move(ref: str, body: MoveIn, request: Request, actor: Actor = Depends(writer
                    "shifted": shifted})
         return {"noop": False, "shifted": shifted}
     return run(request, ref, "move", actor, apply)
+
+
+@router.post("/api/jobs/{ref}/dod-review")
+def dod_review(ref: str, body: DodReviewIn, request: Request, actor: Actor = Depends(writer)):
+    """The DoD review of a job, before any claim (docs/LEVEL5.md 2.2, 4.2): only the
+    `dod-reviewer` identity posts it, never on a job it filed; it writes one `dod-review` trail
+    row (SHIP or FIX). The poster can then never claim or close the job (identity_guard)."""
+    if actor.label != DOD_REVIEWER:
+        raise HTTPException(403, f"a dod-review comes from the {DOD_REVIEWER} identity (this "
+                                 f"token is {actor.label}, role {actor.role})")
+    word = (body.verdict or "").strip().upper()
+    if word not in ("SHIP", "FIX"):
+        raise HTTPException(422, "a dod-review verdict is SHIP or FIX")
+    with db.transaction(request.app.state.db_path) as conn:
+        job = load_job(conn, ref)
+        if job["parent_id"] is None:
+            raise HTTPException(409, f"job {job['id']} is a project root")
+        if job["status"] not in DOD_REVIEW_STATES:
+            raise HTTPException(409, f"job {job['id']} is {job['status']}: a DoD is reviewed "
+                                     "before any claim (waiting_approval or queued)")
+        if actor.label == job["requested_by"]:
+            raise HTTPException(403, f"the requester cannot review its own DoD: {actor.label} "
+                                     f"filed job {job['id']}")
+        reason = redact((body.reason or "").strip())[:2000]
+        add_trail(conn, job["id"], actor, "dod-review", f"dod-review {word}"
+                  + (f": {reason}" if reason else ""), {"verdict": word})
+        out = serialize(conn, conn.execute("SELECT * FROM jobs WHERE id=?",
+                                           (job["id"],)).fetchone())
+    return out

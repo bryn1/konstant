@@ -1,10 +1,12 @@
 """Stdlib HTTP client for the board (urllib only, so `bin/konstant job ...` starts fast).
 
-Token choice is by role (`--as ROLE`, default [client] default_role). Under a task run
-(KONSTANT_IN_TASK=1) a phase acts as `worker` (its default; KONSTANT_ROLE is honoured only when
-it names worker or viewer) and every other token is refused: a phase agent must not verify its
-own work, act as the owner, or act as the orchestrator that filed and claimed its job (DESIGN §5,
-REVIEW F-12).
+Token choice is by role or factory identity (`--as LABEL`, default [client] default_role): the
+token file is var/secrets/<label>.token. Under a task run (KONSTANT_IN_TASK=1) a phase acts as
+`worker` (its default; KONSTANT_ROLE is honoured only when it names worker or viewer) and every
+other token is refused: a phase agent must not verify its own work, act as the owner, or act as
+the orchestrator that filed and claimed its job (DESIGN §5, REVIEW F-12). The worker token a
+phase uses is the one of its IDENTITY (KONSTANT_IDENTITY: worker, or a factory identity such as
+scenario; docs/LEVEL5.md 2.2), the only worker-role token its jail lets it read.
 """
 from __future__ import annotations
 
@@ -42,18 +44,32 @@ class ClientError(Exception):
         self.exit_code = exit_code          # overrides the CLI's 1/2 mapping when set
 
 
+def identity() -> str:
+    """The identity of the phase this process runs in (worker unless the runner named another
+    worker identity)."""
+    from konstant.board.policy import PHASE_IDENTITIES
+    ident = os.environ.get("KONSTANT_IDENTITY", "worker")
+    return ident if ident in PHASE_IDENTITIES else "worker"
+
+
 def token_for(cfg: Config, role: str) -> str:
-    if in_task() and role not in IN_TASK_ROLES:
-        raise ClientError(f"refused: --as {role} is not available inside a task run "
-                          "(KONSTANT_IN_TASK=1): a phase acts as worker (or viewer); "
-                          "verification, owner and orchestrator actions happen outside it")
-    path = cfg.secrets_dir / f"{role}.token"
+    """The token of `role` (a role, or a factory identity's label)."""
+    label = role
+    if in_task():
+        if role in ("worker", identity()):
+            label = identity()                    # the phase's own identity token
+        elif role != "viewer":
+            raise ClientError(f"refused: --as {role} is not available inside a task run "
+                              "(KONSTANT_IN_TASK=1): a phase acts as its own identity "
+                              f"({identity()}, role worker) or viewer; verification, owner and "
+                              "orchestrator actions happen outside it")
+    path = cfg.secrets_dir / f"{label}.token"
     try:
         value = path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
-        raise ClientError(f"no token for role {role!r} at {path} (run `konstant board init`)")
+        raise ClientError(f"no token for {label!r} at {path} (run `konstant board init`)")
     except PermissionError:
-        raise ClientError(f"cannot read {path}: this OS user has no access to the {role} token")
+        raise ClientError(f"cannot read {path}: this OS user has no access to the {label} token")
     if not value:
         raise ClientError(f"token file {path} is empty")
     return value

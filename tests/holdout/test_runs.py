@@ -158,14 +158,18 @@ def test_A12_no_jail_no_holdout_run(hws):
 
 
 @needs_jail
-def test_holdout_job_refused_on_an_unconfined_harness_and_in_a_session(hws):
+def test_holdout_job_runs_confined_on_a_command_template_and_is_refused_in_a_session(hws):
+    """L5-2 lifted L5-1's "only dsh" restriction: in factory mode an explicit command template
+    runs inside konstant's jail too (tests/factory covers every harness). An interactive session
+    (`task gate`) is still not confined and is still refused."""
     jid = sealed(hws)
+    gate = hws.run("task", "gate", TASK, "--job", jid)
+    assert gate.returncode == 2 and "an interactive session is not confined" in gate.stderr
+    assert hws.json("job", "show", jid)["status"] == "queued"
     fake = f"{sys.executable} {REPO / 'tests' / 'fixtures' / 'fake_harness.py'} {{prompt_file}}"
     import subprocess
     res = subprocess.run([sys.executable, "-m", "konstant", "task", "run", TASK, "--job",
                           str(jid), "--harness", fake], capture_output=True, text=True,
-                         env=hws.henv(), timeout=120, cwd=str(hws.home))
-    assert res.returncode == 2 and "do not run their phases in konstant's jail" in res.stderr
-    gate = hws.run("task", "gate", TASK, "--job", jid)
-    assert gate.returncode == 2 and "an interactive session is not confined" in gate.stderr
-    assert hws.json("job", "show", jid)["status"] == "queued"
+                         env=hws.henv(), timeout=600, cwd=str(hws.home))
+    assert res.returncode == 0 and "factory mode: every phase jailed" in res.stderr, res.stderr
+    assert hws.json("job", "show", jid)["status"] == "verified"

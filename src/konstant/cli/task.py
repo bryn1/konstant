@@ -107,6 +107,11 @@ def prepare(ctx, task: str, mode: str):
                                   "harness konstant jails", exit_code=EXIT_USAGE)
             # the producer is told THAT holdouts exist and how many, nothing else (LEVEL5 3.1)
             rec["holdouts"] = ctx.client("viewer").get(f"/api/jobs/{job['id']}/holdouts")["sealed"]
+            # factory mode: the run's project becomes the job clone after the claim (task_run
+            # bind_clone, LEVEL5 2.4); nothing is written into the target before that
+            rec["target"] = rec["project"]
+            rec["out_given"] = bool(a.out)
+            return cat, t, why, rec, run_dir
     record_mod.write(run_dir, rec)
     return cat, t, why, rec, run_dir
 

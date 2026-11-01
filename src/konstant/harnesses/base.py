@@ -10,12 +10,23 @@ to the harness. An adapter says, for one agent CLI:
 Every adapter keeps konstant's own guarantees, which do not depend on the harness: a phase acts as
 `worker` (KONSTANT_ROLE, the CLI refuses other tokens), the runner reaps what a phase leaves running
 (gate/reaper.py), and `task check` / `verify` run agent-written code in konstant.jail.
+
+Factory mode (docs/LEVEL5.md 2.1): a phase of a job with sealed holdouts runs inside konstant.jail
+WHATEVER the harness (`confine`): the root read-only, writable only the project (in factory mode
+the job's clone), OUT, the phase's private TMPDIR and the harness's own per-phase home; every
+machinery path read-only even inside those; var/secrets/ masked except the token of the phase's
+own identity and the read-only viewer token; the sealed holdout store, the credential and agent
+homes masked. The harness's own sandbox runs nested inside it. A harness that needs its own
+credential file to reach its model gets exactly that file, bound read-only into its relocated
+per-phase home (`jail_ro_binds`). dsh confines every phase, factory mode or not.
 """
 from __future__ import annotations
 
 import os
 import re
 import shlex
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,6 +94,8 @@ class Phase:
     allow: list = field(default_factory=list)      # [permissions] allow (Claude rule syntax)
     jail: bool = True                               # [gate] jail: konstant may confine the phase
     scratch: dict = field(default_factory=dict)     # per-phase state of the adapter (dsh's home)
+    factory: bool = False       # a phase of a job with sealed holdouts: always jailed (LEVEL5 2.1)
+    identity: str = "worker"    # whose token the phase reads (LEVEL5 2.2)
 
     @property
     def workspace(self) -> Path:
@@ -112,6 +125,11 @@ class Adapter:
     local_models = ""                  # how it reaches a local OpenAI-compatible endpoint (docs)
     surfaces_doc = ""                  # what it reads (docs)
     uses_endpoint = False
+    # whether a phase's session transcripts and state can live in a fresh per-phase home that is
+    # deleted afterwards (docs/LEVEL5.md 3.4: only such a harness may run the scenario writer,
+    # else a later producer on the same harness could read its transcript)
+    relocatable_home = False
+    home_doc = "the tool's own user-level home (konstant cannot relocate it)"
 
     def argv(self, ph: Phase) -> list:
         raise NotImplementedError
@@ -131,15 +149,33 @@ class Adapter:
         return None
 
     def confine(self, argv: list, ph: Phase) -> list:
-        """The argv konstant actually starts: an adapter whose harness cannot confine reads wraps
-        itself in konstant.jail here (dsh); the default is the argv unchanged."""
-        return argv
+        """The argv konstant actually starts: in factory mode (or always, for an adapter whose
+        harness cannot confine reads: dsh) the phase inside konstant.jail; else unchanged."""
+        if not self.confines(ph.jail, ph.factory):
+            return argv
+        return jailed(argv, ph, rw=self.jail_rw(ph), ro_binds=self.jail_ro_binds(ph))
 
-    def confines(self, jail: bool = True) -> bool:
-        """Whether confine() puts the phase inside konstant.jail ([gate] jail = `jail`). A job
-        with sealed holdouts runs only on harnesses that do (docs/LEVEL5.md 2.1); before L5-2
-        only dsh does."""
-        return False
+    def confines(self, jail: bool = True, factory: bool = False) -> bool:
+        """Whether confine() puts the phase inside konstant.jail ([gate] jail = `jail`): every
+        adapter does in factory mode (a job with sealed holdouts, docs/LEVEL5.md 2.1)."""
+        from konstant import jail as jail_mod
+        return bool(jail) and bool(factory) and jail_mod.available()
+
+    def jail_rw(self, ph: Phase) -> list:
+        """Directories the harness itself must write inside the jail (its per-phase home)."""
+        return []
+
+    def jail_ro_binds(self, ph: Phase) -> list:
+        """(source, destination) files bound read-only: the harness's own credential file inside
+        its relocated home (the jail masks the original with the rest of its home)."""
+        return []
+
+    def jail_env(self, ph: Phase) -> dict:
+        """Environment of a jailed phase: a private TMPDIR - the jail's own empty /tmp when it
+        has one (a short path: unix sockets, such as Claude Code's sandbox bridges, need one
+        under ~100 bytes), else the run's tmp/ (a workspace under /tmp keeps the host /tmp,
+        read-only)."""
+        return {"TMPDIR": "/tmp" if private_tmp(ph.workspace) else str(ph.run_dir / "tmp")}
 
     def files(self, gen, hcfg: dict) -> dict:
         """{workspace-relative path: content} this harness reads beyond AGENTS.md and the shared
@@ -174,3 +210,43 @@ def harness_home(workspace: Path, name: str) -> Path:
     """A per-harness home inside the workspace (var/ is 0700): user-level settings, memory,
     skills and MCP servers of the operator do not load into a phase."""
     return Path(workspace) / "var" / "harness" / name
+
+
+def phase_home(ph: Phase, name: str) -> Path:
+    """A FRESH home for this phase only (var/harness/<name>/phases/<label>-XXXX, 0700), removed
+    by drop_home() when the phase ends: nothing a phase writes there (session transcripts, state)
+    reaches a later phase (docs/LEVEL5.md 3.4)."""
+    key = f"{name}_home"
+    if key not in ph.scratch:
+        base = private_dir(harness_home(ph.workspace, name) / "phases")
+        label = Path(str(ph.values.get("prompt_file") or "phase")).stem or "phase"
+        ph.scratch[key] = Path(tempfile.mkdtemp(prefix=f"{label[:40]}-", dir=base))
+    return ph.scratch[key]
+
+
+def drop_home(ph: Phase, name: str) -> None:
+    home = ph.scratch.pop(f"{name}_home", None)
+    if home is not None:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def private_tmp(workspace) -> bool:
+    """Whether a phase jail gets its own empty tmpfs on /tmp: always, unless the workspace
+    itself lies under /tmp (masking /tmp would hide it)."""
+    return Path(os.path.realpath(workspace)).parts[1:2] != ("tmp",)
+
+
+def jailed(argv: list, ph: Phase, rw=(), ro_binds=()) -> list:
+    """The phase inside konstant.jail (the module docstring's shape). Writable: the project dir
+    (the job clone in factory mode), OUT, the phase TMPDIR and `rw`; every machinery path stays
+    read-only inside them (jail.wrap with home=); the tokens readable are the phase identity's and
+    viewer's (machinery.tokens_readable)."""
+    from konstant import jail
+    ws = ph.workspace
+    secrets = ws / "var" / "secrets"
+    tmp = private_dir(ph.run_dir / "tmp")
+    roots = [ph.cwd] + ([ph.out] if ph.out else []) + [tmp, *rw]
+    return jail.wrap(argv, rw=roots, hide=jail.hidden(ws), home=ws,
+                     expose=[secrets / t for t in machinery.tokens_readable(ph.identity)],
+                     tmpfs=("/tmp",) if private_tmp(ws) else (), cwd=ph.cwd, net=True,
+                     ro_binds=ro_binds)

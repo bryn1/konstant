@@ -132,7 +132,7 @@ def test_install_twice_is_idempotent_then_upgrade_with_from(tmp_path):
     assert first.returncode == 0, first.stdout + first.stderr
     assert "0 FAIL" in first.stdout and os.access(old / "bin" / "konstant", os.X_OK)
     before = _hashes(old)
-    assert len(before) == 6
+    assert len(before) == 10        # 9 tokens (5 roles + 4 factory identities, LEVEL5 2.2) + konstant.toml
     second = sh(old, "--yes", env=env)
     assert second.returncode == 0, second.stdout + second.stderr
     assert "kept existing konstant.toml" in second.stdout and "token owner: kept" in second.stdout

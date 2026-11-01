@@ -30,7 +30,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -61,7 +62,8 @@ usage: konstant board init [-h] [--as ROLE] [--json] [--config PATH]
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -73,7 +75,8 @@ usage: konstant board serve [-h] [--as ROLE] [--json] [--config PATH] [--host HO
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
   --host HOST
@@ -87,7 +90,8 @@ usage: konstant board start [-h] [--as ROLE] [--json] [--config PATH]
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -99,7 +103,8 @@ usage: konstant board stop [-h] [--as ROLE] [--json] [--config PATH]
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -111,7 +116,8 @@ usage: konstant board status [-h] [--as ROLE] [--json] [--config PATH]
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -120,13 +126,17 @@ options:
 
 ```
 usage: konstant board tokens [-h] [--as ROLE] [--json] [--config PATH] [--rotate ROLE]
+                             [--label LABEL]
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
   --rotate ROLE  replace this role's token (owner only)
+  --label LABEL  with --rotate: the factory identity of that role to replace (planner, dod-reviewer,
+                 scenario: worker; factory: orchestrator); default the role's own token
 ```
 
 ## `konstant board backup`
@@ -136,7 +146,8 @@ usage: konstant board backup [-h] [--as ROLE] [--json] [--config PATH] [--to PAT
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
   --to PATH      write the copy here instead
@@ -168,7 +179,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
   --name NAME
@@ -183,7 +195,8 @@ usage: konstant project list [-h] [--as ROLE] [--json] [--config PATH]
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -228,7 +241,8 @@ positional arguments:
 
 options:
   -h, --help              show this help message and exit
-  --as ROLE               act with this role's token (default [client] default_role)
+  --as ROLE               act with this role's token, or a factory identity's (planner, dod-
+                          reviewer, scenario, factory) (default [client] default_role)
   --json                  print JSON
   --config PATH           konstant.toml to use
   --project PROJECT
@@ -249,7 +263,8 @@ usage: konstant job list [-h] [--as ROLE] [--json] [--config PATH] [--status STA
 
 options:
   -h, --help         show this help message and exit
-  --as ROLE          act with this role's token (default [client] default_role)
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
   --json             print JSON
   --config PATH      konstant.toml to use
   --status STATUS    comma-separated states
@@ -270,7 +285,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
   --trail
@@ -287,7 +303,8 @@ positional arguments:
 
 options:
   -h, --help         show this help message and exit
-  --as ROLE          act with this role's token (default [client] default_role)
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
   --json             print JSON
   --config PATH      konstant.toml to use
   --open             only jobs that are not finished
@@ -304,7 +321,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -320,7 +338,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -336,7 +355,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -352,7 +372,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -369,7 +390,8 @@ positional arguments:
 
 options:
   -h, --help             show this help message and exit
-  --as ROLE              act with this role's token (default [client] default_role)
+  --as ROLE              act with this role's token, or a factory identity's (planner, dod-reviewer,
+                         scenario, factory) (default [client] default_role)
   --json                 print JSON
   --config PATH          konstant.toml to use
   --kind {note,finding}
@@ -385,7 +407,8 @@ positional arguments:
 
 options:
   -h, --help       show this help message and exit
-  --as ROLE        act with this role's token (default [client] default_role)
+  --as ROLE        act with this role's token, or a factory identity's (planner, dod-reviewer,
+                   scenario, factory) (default [client] default_role)
   --json           print JSON
   --config PATH    konstant.toml to use
   --evidence FILE
@@ -401,7 +424,8 @@ positional arguments:
 
 options:
   -h, --help      show this help message and exit
-  --as ROLE       act with this role's token (default [client] default_role)
+  --as ROLE       act with this role's token, or a factory identity's (planner, dod-reviewer,
+                  scenario, factory) (default [client] default_role)
   --json          print JSON
   --config PATH   konstant.toml to use
   --verdict FILE
@@ -421,7 +445,8 @@ positional arguments:
 
 options:
   -h, --help           show this help message and exit
-  --as ROLE            act with this role's token (default [client] default_role)
+  --as ROLE            act with this role's token, or a factory identity's (planner, dod-reviewer,
+                       scenario, factory) (default [client] default_role)
   --json               print JSON
   --config PATH        konstant.toml to use
 ```
@@ -437,7 +462,8 @@ positional arguments:
 
 options:
   -h, --help       show this help message and exit
-  --as ROLE        act with this role's token (default [client] default_role)
+  --as ROLE        act with this role's token, or a factory identity's (planner, dod-reviewer,
+                   scenario, factory) (default [client] default_role)
   --json           print JSON
   --config PATH    konstant.toml to use
   --parent PARENT
@@ -454,7 +480,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -469,7 +496,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -502,7 +530,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -520,7 +549,8 @@ positional arguments:
 
 options:
   -h, --help         show this help message and exit
-  --as ROLE          act with this role's token (default [client] default_role)
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
   --json             print JSON
   --config PATH      konstant.toml to use
   --job JOB          the board job this run works on
@@ -550,7 +580,8 @@ positional arguments:
 
 options:
   -h, --help                 show this help message and exit
-  --as ROLE                  act with this role's token (default [client] default_role)
+  --as ROLE                  act with this role's token, or a factory identity's (planner, dod-
+                             reviewer, scenario, factory) (default [client] default_role)
   --json                     print JSON
   --config PATH              konstant.toml to use
   --job JOB                  the board job this run works on
@@ -579,7 +610,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
   --offline      no board reads (rule verified skipped)
@@ -595,7 +627,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -608,7 +641,8 @@ usage: konstant task judge [-h] [--as ROLE] [--json] [--config PATH] [--run RUN]
 
 options:
   -h, --help         show this help message and exit
-  --as ROLE          act with this role's token (default [client] default_role)
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
   --json             print JSON
   --config PATH      konstant.toml to use
   --run RUN          run dir (reads OUT, project and base from its record)
@@ -629,7 +663,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
   --pending      verify every completed_unverified job
@@ -663,7 +698,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
   --file FILE    a scenario file outside the workspace (repeat for a set)
@@ -679,7 +715,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -694,7 +731,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
   --control      also re-run the negative control on the project's HEAD
@@ -711,7 +749,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -739,7 +778,8 @@ usage: konstant agents sync [-h] [--as ROLE] [--json] [--config PATH] [--check]
 
 options:
   -h, --help                    show this help message and exit
-  --as ROLE                     act with this role's token (default [client] default_role)
+  --as ROLE                     act with this role's token, or a factory identity's (planner, dod-
+                                reviewer, scenario, factory) (default [client] default_role)
   --json                        print JSON
   --config PATH                 konstant.toml to use
   --check                       exit 1 naming every drifted file
@@ -754,7 +794,8 @@ usage: konstant agents list [-h] [--as ROLE] [--json] [--config PATH]
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -771,7 +812,8 @@ positional arguments:
 
 options:
   -h, --help         show this help message and exit
-  --as ROLE          act with this role's token (default [client] default_role)
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
   --json             print JSON
   --config PATH      konstant.toml to use
   --project PROJECT  run the session in this project's directory
@@ -785,7 +827,8 @@ usage: konstant doctor [-h] [--as ROLE] [--json] [--config PATH]
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```
@@ -797,7 +840,8 @@ usage: konstant version [-h] [--as ROLE] [--json] [--config PATH]
 
 options:
   -h, --help     show this help message and exit
-  --as ROLE      act with this role's token (default [client] default_role)
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
 ```

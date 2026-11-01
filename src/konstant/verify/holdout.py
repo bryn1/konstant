@@ -94,6 +94,8 @@ def materialise(project, commit: str, dest: Path) -> None:
     for mode, oid, rel in entries:
         if rel.startswith("/") or ".." in rel.split("/"):
             raise HoldoutError(f"tree path {rel!r} leaves the tree")
+        if ".git" in (p.lower() for p in rel.split("/")):
+            raise HoldoutError(f"tree path {rel!r} writes into a .git directory")
         target = os.path.join(root, rel)
         parent = os.path.dirname(target)
         os.makedirs(parent, exist_ok=True)
@@ -208,7 +210,7 @@ def evaluate(client, cfg, job: dict, projects: list) -> dict | None:
     rows (id, kind, pass/fail, commit, net, timings), failed [(hid, hint)], leak, suspect,
     integrity (commitment mismatch / LEAK: BLOCKED first), blocked (unrunnable: BLOCKED)."""
     from konstant.holdout import leak, store
-    from konstant.verify.verifier import project_dir
+    from konstant.verify.verifier import job_dir
     if not job.get("holdout_required"):         # sealing marks the job; level 4 is unchanged
         return None
     all_rows = store.rows(client, job["id"])["holdouts"]
@@ -243,7 +245,7 @@ def evaluate(client, cfg, job: dict, projects: list) -> dict | None:
         return res
     ev = job.get("evidence") or {}
     commit = (ev.get("commit") or "").strip()
-    project = project_dir(cfg, projects, job["project"])
+    project = job_dir(cfg, projects, job)       # the job clone when the board recorded one
     trail = client.get(f"/api/jobs/{job['id']}/trail")["trail"]
     runs = [r.get("run_dir") for r in job.get("runs") or [] if r.get("run_dir")]
     if project is None or not (Path(project) / ".git").exists():

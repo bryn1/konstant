@@ -32,12 +32,14 @@ class NotVerifiable(Exception):
     """The job cannot be verified now (wrong state); the CLI exits 2."""
 
 
-def collect(job: dict) -> list:
-    """[(line, source)]: the acceptance's lines ("dod"), then the closer's stored ones ("closer")."""
-    dod = probe_mod.probe_lines(job.get("acceptance") or "")
+def collect(job: dict, workdir: str | None = None) -> list:
+    """[(line, source)]: the acceptance's lines ("dod"), then the closer's stored ones ("closer").
+    `{workdir}` in a line becomes `workdir` (the job's clone, or its project: docs/LEVEL5.md 2.4)
+    BEFORE any shape matching, so the allowlist and the path roots judge the resolved path."""
+    dod = probe_mod.probe_lines(probe_mod.with_workdir(job.get("acceptance") or "", workdir))
     closer = []
     for raw in (job.get("evidence") or {}).get("probes") or []:
-        closer += probe_mod.probe_lines(str(raw))
+        closer += probe_mod.probe_lines(probe_mod.with_workdir(str(raw), workdir))
     seen = set(dod)
     out = [(ln, "dod") for ln in dod]
     for ln in closer:
@@ -126,6 +128,25 @@ def project_dir(cfg, projects: list, slug: str):
     return None
 
 
+def job_dir(cfg, projects: list, job: dict):
+    """Where the job's result lives: its clone when the board recorded one (a factory job,
+    docs/LEVEL5.md 2.4), else its project. The re-run, the holdouts and `{workdir}` use it."""
+    if job.get("workdir"):
+        path = Path(job["workdir"])
+        return path if path.is_absolute() else cfg.home / path
+    return project_dir(cfg, projects, job.get("project"))
+
+
+def workdir_text(cfg, path) -> str | None:
+    """`{workdir}` as a probe operand: workspace-relative when inside the workspace."""
+    if path is None:
+        return None
+    try:
+        return str(Path(path).relative_to(cfg.home))
+    except ValueError:
+        return str(path)
+
+
 _DOD_CMD = re.compile(r"(?m)^[ \t>*-]*VERIFY_CMD:\s*(.+?)\s*$")
 CLOSER_ROLES = ("orchestrator", "worker")
 
@@ -166,16 +187,16 @@ def verify_job(client, cfg, ref, *, dry_run: bool, rerun: bool = True, projects=
         projects = client.get("/api/projects")["projects"]
     vcfg = cfg.section("verify")
     roots = build_roots(cfg, projects)
+    where = job_dir(cfg, projects, job)
     rows = [probe_mod.run_line(ln, roots, src, vcfg["probe_timeout_s"])
-            for ln, src in collect(job)]
+            for ln, src in collect(job, workdir_text(cfg, where))]
     res = None
     if rerun and vcfg["rerun"]:
         cmd, source, skipped = rerun_command(job, separation(cfg))
         if cmd is None:
             res = rerun_mod.skipped(skipped, source)
         else:
-            res = rerun_mod.rerun({**(job.get("evidence") or {}), "verify_cmd": cmd},
-                                  project_dir(cfg, projects, job["project"]),
+            res = rerun_mod.rerun({**(job.get("evidence") or {}), "verify_cmd": cmd}, where,
                                   vcfg["rerun_timeout_s"], source=source, home=cfg.home,
                                   jail=cfg.data["gate"]["jail"])
     hres = holdout_mod.evaluate(client, cfg, job, projects)

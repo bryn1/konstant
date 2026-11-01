@@ -103,7 +103,20 @@ def test_claim_guard_red_no_holdout_sealed(board):
     assert board.call("worker", "POST", f"/api/jobs/{jid}/claim").status_code == 409
 
 
+def git_project(b: Board):
+    """The project as a git repository with one commit: a holdout job's first claim records
+    its job clone from the target's commit (docs/LEVEL5.md 2.4, L5-2)."""
+    import subprocess
+    d = b.cfg.home / "projects" / "demo"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "README.md").write_text("demo\n")
+    for args in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c",
+                                                  "user.email=t@example.com", "commit", "-qm", "b"]):
+        subprocess.run(["git", "-C", str(d), *args], check=True, capture_output=True)
+
+
 def test_claim_guard_green(board):
+    git_project(board)
     jid = job(board)
     seal(board, jid)
     assert board.call("worker", "POST", f"/api/jobs/{jid}/claim").status_code == 200
@@ -189,7 +202,7 @@ def test_migration_from_v1_keeps_the_trail_and_its_guards(tmp_path):
                      "VALUES (1, 'code', 't', 'queued', 'x')")
         conn.execute("INSERT INTO trail (job_id, actor, role, kind, body) VALUES "
                      "(1, 'x', 'owner', 'note', 'kept')")
-    assert migrate.migrate(path) == [2]
+    assert migrate.migrate(path) == [2, 3]
     with db.transaction(path) as conn:
         assert conn.execute("SELECT body FROM trail").fetchone()[0] == "kept"
         assert conn.execute("SELECT holdout_required FROM jobs").fetchone()[0] == 0
@@ -199,4 +212,4 @@ def test_migration_from_v1_keeps_the_trail_and_its_guards(tmp_path):
         with pytest.raises(sqlite3.DatabaseError, match="append-only"):
             with db.transaction(path) as conn:
                 conn.execute(sql)
-    assert json.dumps(migrate.current_version(path)) == "2"
+    assert json.dumps(migrate.current_version(path)) == "3"

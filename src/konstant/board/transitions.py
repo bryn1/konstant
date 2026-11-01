@@ -28,12 +28,15 @@ class Rule:
 TABLE = (
     Rule("add", (), "queued", ("owner", "orchestrator", "worker"),
          "acceptance with a DoD line; type known; depth <= 2; --approval -> waiting_approval"),
-    Rule("approve", ("waiting_approval",), "queued", "approve_roles", "-"),
+    Rule("approve", ("waiting_approval",), "queued", "approve_roles",
+         "not the requester's own label"),
     Rule("claim", ("queued", "blocked"), "claimed", ("orchestrator", "worker"),
-         "after_id, if set, is verified or reviewed"),
+         "not the job's DoD reviewer or scenario writer; after_id, if set, is verified or "
+         "reviewed; a holdout job: enough sealed holdouts, and the first claim records its clone"),
     Rule("block", ("claimed",), "blocked", ("owner", "orchestrator", "worker"), "reason required"),
     Rule("close", ("claimed",), "completed_unverified", ("owner", "orchestrator", "worker"),
-         "requester or assignee (or owner); the evidence contract"),
+         "not the job's DoD reviewer or scenario writer; requester or assignee (or owner); the "
+         "evidence contract"),
     Rule("review", ("claimed", "completed_unverified"), "reviewed", "review_roles",
          "type in review_types; not the requester, assignee or closer; a SHIP/PASS verdict and "
          "a DONE.md"),

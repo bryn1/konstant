@@ -17,8 +17,9 @@ dsh's own sandbox confines writes only (its documented limit: reads are not conf
 runs every dsh PHASE inside konstant.jail (bubblewrap): the root read-only, writes only to the
 project dir, OUT, the phase's own fresh dsh home and a private /tmp, every konstant machinery path
 read-only even inside those (konstant/machinery.py: the generated surfaces, var/, the operator's
-session home), `var/secrets/` masked except the worker and viewer tokens, the credential and agent
-homes masked. dsh's own sandbox runs nested inside it.
+session home), `var/secrets/` masked except the phase identity's token (worker, or a factory
+identity: docs/LEVEL5.md 2.2) and the viewer token, the credential and agent homes masked. dsh's
+own sandbox runs nested inside it.
 Without a working bwrap (or with [gate] jail = false) the phase runs unjailed and `doctor` says
 reads are not confined. The network stays open and there is no per-command allow list.
 The session surfaces (the konstant-gate plugin, its patch, the agent profiles) are in
@@ -31,6 +32,7 @@ import os
 import re
 from pathlib import Path
 
+from konstant import machinery
 from konstant.harnesses import dsh_session
 from konstant.harnesses.base import (Adapter, Phase, Reach, harness_home, private_dir)
 
@@ -96,6 +98,8 @@ class Dsh(Adapter):
     surfaces_doc = ("AGENTS.md (root marker konstant.toml), .agents/skills/*/SKILL.md (the only "
                     "skill root), .dsh/konstant.patch.yml (passed with --patch)")
     uses_endpoint = True
+    relocatable_home = True
+    home_doc = "DSH_HOME + DSH_AGENTS_HOME: a fresh directory per phase, removed after it"
 
     def argv(self, ph: Phase) -> list:
         return [self.binary, "--profile", "headless", "--patch", str(ph.workspace / PATCH), "-"]
@@ -160,12 +164,16 @@ class Dsh(Adapter):
         rw = [ph.cwd, self._root(ph)] + ([ph.out] if ph.out else [])
         under_tmp = Path(os.path.realpath(ws)).parts[1:2] == ("tmp",)
         return jail.wrap(argv, rw=rw, hide=jail.hidden(ws), home=ws,
-                         expose=[secrets / "worker.token", secrets / "viewer.token"],
+                         expose=[secrets / t for t in machinery.tokens_readable(ph.identity)],
                          tmpfs=() if under_tmp else ("/tmp",), cwd=ph.cwd, net=True)
 
-    def confines(self, jail: bool = True) -> bool:
+    def confines(self, jail: bool = True, factory: bool = False) -> bool:
+        """Every dsh phase, factory mode or not (dsh's sandbox does not confine reads)."""
         from konstant import jail as jail_mod
         return bool(jail) and jail_mod.available()
+
+    def jail_env(self, ph: Phase) -> dict:
+        return {}                      # dsh's own sandbox gives the phase a private /tmp
 
     def reach(self, hcfg: dict, perm: dict, jail: bool = True) -> Reach:
         from konstant import jail as jail_mod

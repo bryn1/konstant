@@ -10,6 +10,9 @@ phase's own OUT and TMPDIR writable; `/tmp` is NOT writable. `approval_policy = 
 call is returned to the model, never escalated. Commands are not allow-listed (Codex has no
 per-command allow list in exec mode): anything may run, inside that file boundary. Network is on
 for commands, because the konstant CLI talks to the loopback board.
+Factory mode (docs/LEVEL5.md 2.1): the phase runs inside konstant.jail with CODEX_HOME set to a
+fresh per-phase home (removed after the phase) into which only ~/.codex/auth.json is bound,
+read-only; `--ephemeral` keeps session files out of it anyway. Codex's own sandbox runs nested.
 Local models: `[harness.endpoint] base_url` -> a custom `model_providers.konstant` entry; Codex
 speaks only the Responses API (`wire_api = "responses"`), which vLLM, Ollama and recent llama.cpp
 servers offer at /v1/responses.
@@ -21,8 +24,8 @@ import os
 from pathlib import Path
 
 from konstant import machinery
-from konstant.harnesses.base import (PRIVILEGED_TOKENS, PROTECTED_DIR_LIST,
-                                     PROTECTED_FILE_LIST, Adapter, HarnessError, Phase, Reach,
+from konstant.harnesses.base import (PROTECTED_DIR_LIST, PROTECTED_FILE_LIST, Adapter,
+                                     HarnessError, Phase, Reach, drop_home, phase_home,
                                      private_dir)
 
 PROFILE = "konstant"
@@ -69,7 +72,7 @@ def filesystem(ph: Phase) -> dict:
     for d in machinery.sealed(ws):                 # the holdout store: unreadable (LEVEL5 3.3)
         if d.is_dir():
             fs[f"{d}/**"] = "deny"
-    for t in PRIVILEGED_TOKENS:
+    for t in machinery.tokens_denied(ph.identity):  # privileged roles + other identities
         if (ws / "var" / "secrets" / t).is_file():
             fs[str(ws / "var" / "secrets" / t)] = "deny"
     for g in git_guards(ws, ph.cwd):
@@ -119,11 +122,30 @@ class Codex(Adapter):
             a += ["-m", ph.model]
         return a + ["-"]
 
+    relocatable_home = True
+    home_doc = ("--ephemeral: no session files; factory mode: CODEX_HOME = a fresh directory per "
+                "phase, removed after it; only auth.json bound in, read-only")
+
     def env(self, ph: Phase) -> dict:
-        return {"TMPDIR": str(ph.run_dir / "tmp")}
+        env = {"TMPDIR": str(ph.run_dir / "tmp")}
+        if self.confines(ph.jail, ph.factory):
+            env["CODEX_HOME"] = str(phase_home(ph, "codex"))
+        return env
 
     def prepare(self, ph: Phase) -> None:
         private_dir(ph.run_dir / "tmp")
+        if self.confines(ph.jail, ph.factory):
+            phase_home(ph, "codex")
+
+    def cleanup(self, ph: Phase) -> None:
+        drop_home(ph, "codex")
+
+    def jail_rw(self, ph: Phase) -> list:
+        return [phase_home(ph, "codex")]
+
+    def jail_ro_binds(self, ph: Phase) -> list:
+        own = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+        return [(own / "auth.json", phase_home(ph, "codex") / "auth.json")]
 
     def reach(self, hcfg: dict, perm: dict, jail: bool = True) -> Reach:
         return Reach(

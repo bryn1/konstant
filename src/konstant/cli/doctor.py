@@ -332,8 +332,8 @@ def check_jail(rep: Report, cfg) -> None:
         rep.add("INFO", "jail", "off ([gate] jail = false): task check and the verifier's re-run "
                 "execute agent-written code with your full rights")
     elif jail.available():
-        rep.add("PASS", "jail", "bubblewrap works: agent-written tests, verifier re-runs and dsh "
-                "phases run with var/secrets/ and the credential and agent homes konstant lists "
+        rep.add("PASS", "jail", "bubblewrap works: agent-written tests, verifier re-runs, dsh "
+                "phases and every phase of a holdout job run with var/secrets/ and the credential and agent homes konstant lists "
                 "masked (~/.ssh, ~/.dsh, ~/.codex, ~/.claude, ...: docs/CONCEPTS.md; other files "
                 "in your home stay readable), writes confined, konstant's machinery read-only, "
                 "no network for tests")
@@ -360,6 +360,9 @@ def cmd_doctor(ctx) -> int:
         check_jail(rep, cfg)
         from konstant.holdout.store import doctor_row
         rep.add(*doctor_row(cfg))
+        from konstant.factory.doctor import rows as factory_rows
+        for row in factory_rows(cfg):
+            rep.add(*row)
     counts = {s: sum(r["status"] == s for r in rep.rows) for s in ("PASS", "WARN", "FAIL", "INFO")}
     summary = (f"doctor: {counts['PASS']} PASS, {counts['WARN']} WARN, {counts['FAIL']} FAIL, "
                f"{counts['INFO']} INFO")

@@ -39,7 +39,7 @@ def cmd_init(ctx) -> int:
             "migrations_applied": applied, "tokens": minted, "secrets": str(cfg.secrets_dir)}
     lines = [f"board DB {cfg.db_path} at schema {data['schema']}"
              + (f" (applied {applied})" if applied else " (up to date)")]
-    lines += [f"token {role}: {state}" for role, state in minted.items()]
+    lines += [f"token {label}: {state}" for label, state in minted.items()]
     lines.append(f"tokens in {cfg.secrets_dir} (0600; only sha256 in the DB)")
     ctx.out(data, "\n".join(lines))
     return EXIT_OK
@@ -190,12 +190,17 @@ def cmd_status(ctx) -> int:
 
 def cmd_tokens(ctx) -> int:
     client = ctx.client(ctx.args.as_role or "owner")      # token administration is the owner's
+    if ctx.args.label and not ctx.args.rotate:
+        print("konstant: --label goes with --rotate ROLE", file=sys.stderr)
+        return EXIT_FAIL
     if ctx.args.rotate:
-        res = client.post("/api/tokens/rotate", {"role": ctx.args.rotate})
-        auth.write_token(ctx.cfg.secrets_dir, res["role"], res["token"])
-        ctx.out({"role": res["role"], "rotated": True},
-                f"token {res['role']} rotated; new value in "
-                f"{ctx.cfg.secrets_dir / (res['role'] + '.token')}")
+        res = client.post("/api/tokens/rotate", {"role": ctx.args.rotate,
+                                                 "label": ctx.args.label or ""})
+        label = res.get("label") or res["role"]
+        auth.write_token(ctx.cfg.secrets_dir, label, res["token"])
+        ctx.out({"role": res["role"], "label": label, "rotated": True},
+                f"token {label} ({res['role']}) rotated; new value in "
+                f"{ctx.cfg.secrets_dir / (label + '.token')}")
         return EXIT_OK
     rows = client.get("/api/tokens")["tokens"]
     ctx.out(rows, "\n".join(f"{r['role']:<13} label={r['label']:<14} "
@@ -258,6 +263,9 @@ def register(sub, leaf) -> None:
     t = bs.add_parser("tokens", parents=[leaf], help="list roles/labels; rotate one (acts as "
                       "owner unless --as says otherwise)")
     t.add_argument("--rotate", metavar="ROLE", help="replace this role's token (owner only)")
+    t.add_argument("--label", metavar="LABEL", help="with --rotate: the factory identity of that "
+                   "role to replace (planner, dod-reviewer, scenario: worker; factory: "
+                   "orchestrator); default the role's own token")
     t.set_defaults(func=cmd_tokens)
     k = bs.add_parser("backup", parents=[leaf], help="online backup of the board DB "
                       "(default var/backups/board-<utc>.db)")

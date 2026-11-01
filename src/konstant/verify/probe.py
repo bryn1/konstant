@@ -37,6 +37,16 @@ def trivial_expect(expect: str) -> bool:
     return any(rx.search(c) is not None for c in TRIVIAL_CANARIES)
 
 
+WORKDIR = "{workdir}"
+LINT_WORKDIR = "projects/WORKDIR"          # what `job lint` checks a `{workdir}` path as
+
+
+def with_workdir(text: str, workdir: str | None) -> str:
+    """`{workdir}` -> the job's result dir (docs/LEVEL5.md 2.4: the clone before ship, the target
+    after it). Left as is when there is none: the brace then fails the shape check (refused)."""
+    return text.replace(WORKDIR, workdir) if workdir and WORKDIR in (text or "") else text
+
+
 def _one(tag: str, body: str) -> str:
     return f"{TAG_PROBE if tag == 'PROBE' else TAG_REFUSED} {body}"
 

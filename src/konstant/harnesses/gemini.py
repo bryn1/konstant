@@ -14,6 +14,8 @@ store var/holdout/; in
 non-interactive mode every other call (`ask_user`) is denied. GEMINI_CLI_HOME points into
 `var/harness/gemini/`, so the operator's settings, GEMINI.md memory, policies, extensions and MCP
 servers never load; the generated `.gemini/settings.json` is copied in as that home's settings.
+Factory mode (docs/LEVEL5.md 2.1): the phase runs inside konstant.jail (shell commands included)
+with GEMINI_CLI_HOME set to a fresh per-phase home, removed after the phase.
 Auth: GEMINI_API_KEY (or Vertex variables) in the environment; an OAuth login in ~/.gemini is not
 visible to a phase. An allowed test runner runs agent code unconfined unless `--sandbox` (Docker or
 Podman) is added through [harness] command.
@@ -27,7 +29,7 @@ import shutil
 from konstant import machinery
 from konstant.agents.settings import GIT_ALLOW, KONSTANT_ALLOW, KONSTANT_DENY
 from konstant.harnesses.base import (PROTECTED_DIR_LIST, PROTECTED_FILE_LIST, Adapter, Phase,
-                                     Reach, harness_home, private_dir)
+                                     Reach, drop_home, harness_home, phase_home, private_dir)
 
 POLICY = ".gemini/konstant-policy.toml"
 READ_TOOLS = ["read_file", "read_many_files", "glob", "search_file_content"]
@@ -112,14 +114,29 @@ class Gemini(Adapter):
             a += ["-m", ph.model]
         return a + ["-p", "Carry out the konstant phase given above."]
 
+    relocatable_home = True
+    home_doc = ("GEMINI_CLI_HOME relocated into var/harness/gemini; factory mode: a fresh "
+                "directory per phase, removed after it")
+
+    def _home(self, ph: Phase):
+        if self.confines(ph.jail, ph.factory):
+            return phase_home(ph, "gemini")
+        return harness_home(ph.workspace, "gemini")
+
     def env(self, ph: Phase) -> dict:
-        return {"GEMINI_CLI_HOME": str(harness_home(ph.workspace, "gemini"))}
+        return {"GEMINI_CLI_HOME": str(self._home(ph))}
 
     def prepare(self, ph: Phase) -> None:
-        d = private_dir(harness_home(ph.workspace, "gemini") / ".gemini")
+        d = private_dir(self._home(ph) / ".gemini")
         src = ph.workspace / SETTINGS
         if src.is_file():
             shutil.copyfile(src, d / "settings.json")
+
+    def cleanup(self, ph: Phase) -> None:
+        drop_home(ph, "gemini")
+
+    def jail_rw(self, ph: Phase) -> list:
+        return [phase_home(ph, "gemini")]
 
     def files(self, gen, hcfg: dict) -> dict:
         return {SETTINGS: settings_json(), POLICY: policy(gen.ws, gen.perm.get("allow", []),

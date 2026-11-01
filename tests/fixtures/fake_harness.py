@@ -27,6 +27,10 @@ with the docstring the holdout regression reads, instead of greet.py):
                           `peek: ...` line per attempt into its phase log; then it is honest
   leak                    honest, but the coder writes FAKE_HARNESS_CANARY (handed to it through
                           its environment: a leak path nobody found) into its code
+  self-ship               (docs/LEVEL5.md C9) the coder first tries to move the TARGET itself: the
+                          project its job clone `<target>@<job>` was made from gets
+                          `git update-ref refs/heads/main HEAD`, a new ref and a new file; one
+                          `self-ship: WROTE|DENIED ...` line per attempt; then it is honest
 FAKE_PLANTED_PASS=1 (set by a plugin a planted dsh layer runs, tests/fixtures/stub_dsh.py): every
 verifying phase writes PASS whatever it found - the layer controls the verifier's phase.
 The close-out writes one `DoD-<n>` row per KONSTANT-DOD-ROW header (the job's DoD rows).
@@ -119,6 +123,21 @@ def peek(job: str) -> None:
           f"peek: READ via holdout show: {r.stdout[:120]!r}")
 
 
+def self_ship(project: Path) -> None:
+    """The producer that ships itself: every write into the target it can think of, logged."""
+    target = Path(re.sub(r"@[0-9]+$", "", str(project)))
+    for what, argv in (("update-ref main", ["update-ref", "refs/heads/main", "HEAD"]),
+                       ("new ref", ["update-ref", "refs/heads/self-shipped", "HEAD"])):
+        r = subprocess.run(["git", "-C", str(target), *argv], capture_output=True, text=True)
+        print(f"self-ship: {'WROTE' if r.returncode == 0 else 'DENIED'} {what} in {target} "
+              f"(rc {r.returncode}{': ' + r.stderr.strip()[-80:] if r.returncode else ''})")
+    try:
+        (target / "SELF-SHIPPED").write_text("shipped by the producer\n")
+        print(f"self-ship: WROTE file in {target}")
+    except OSError as exc:
+        print(f"self-ship: DENIED file in {target} ({type(exc).__name__})")
+
+
 def module_body() -> str:
     if MODE in BROKEN_MODES:
         return 'def greet(name="world"):\n    return "BROKEN"\n'
@@ -134,6 +153,8 @@ def produce(agent: str, out: Path, project, judge_cmd: str = "", job: str = "") 
     if agent in ("coder", "frontend", "infra") and project:
         if MODE == "peek":
             peek(job)
+        if MODE == "self-ship":
+            self_ship(project)
         (project / f"{MODULE}.py").write_text(module_body())
         check = "assert greet()" if MODE in VACUOUS_MODES else "assert greet() == 'hello world'"
         (out / "test_greet.py").write_text(

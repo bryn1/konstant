@@ -13,7 +13,7 @@ import sys
 
 from konstant import __version__
 from konstant import config as config_mod
-from konstant.board.policy import ROLES
+from konstant.board.policy import LABELS
 from konstant.client import Client, ClientError, default_role, token_for
 
 EXIT_OK, EXIT_FAIL, EXIT_USAGE = 0, 1, 2
@@ -51,8 +51,9 @@ def warn(msg: str) -> None:
 def common_flags(suppress: bool) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(add_help=False)
     d = {"default": argparse.SUPPRESS} if suppress else {}
-    p.add_argument("--as", dest="as_role", choices=ROLES, metavar="ROLE",
-                   help="act with this role's token (default [client] default_role)",
+    p.add_argument("--as", dest="as_role", choices=LABELS, metavar="ROLE",
+                   help="act with this role's token, or a factory identity's (planner, "
+                   "dod-reviewer, scenario, factory) (default [client] default_role)",
                    **({"default": None} if not suppress else d))
     p.add_argument("--json", action="store_true", help="print JSON", **d)
     p.add_argument("--config", metavar="PATH", help="konstant.toml to use",

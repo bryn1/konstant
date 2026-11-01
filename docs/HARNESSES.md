@@ -76,8 +76,15 @@ The sealed holdout store `var/holdout/` (`machinery.SEALED`; [CONCEPTS.md](CONCE
 "Holdouts") is denied for READS the same way: Claude Code `Read` deny + sandbox `denyRead`, codex
 `deny`, a gemini policy rule denying `read_file`, `read_many_files`, `glob` and
 `search_file_content` under it, and an empty tmpfs over it in konstant's jail. Commands are only
-covered by the jail, so a job with holdouts runs only on harnesses whose phases konstant jails
-(today `dsh`; the others from level-5 wave L5-2).
+covered by the jail, so a job with holdouts runs in **factory mode**: konstant jails every phase
+of it on every harness (claude, codex, gemini, dsh and a `command` template), with only the
+phase identity's token and the viewer token readable, writes limited to the job's clone, OUT, a
+private TMPDIR and a fresh per-phase harness home (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+`GEMINI_CLI_HOME`; only the CLI's own credential file is bound in, read-only), and the project
+itself read-only. The harness's own sandbox runs nested inside; for Claude Code that needs a nested
+bubblewrap, socat and the jail's private `/tmp` (else its sandbox is switched off for the phase
+and the jail is the boundary; `doctor` row `claude sandbox`). Without a working jail such a job
+refuses to start (exit 2).
 
 Read "none" and "partial" literally. With `codex` and with `dsh` (inside konstant's jail) a phase
 cannot read the privileged tokens, but any command may run inside the file boundary and the

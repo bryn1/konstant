@@ -4,6 +4,11 @@ A small task runs in the project dir when one is given and refuses a `--job` (a 
 closed by an ungated run; force a type with --type; REVIEW F-26). One run per project at a time:
 a run holds `var/locks/<project>.lock` (flock) for its whole life, a second run on the same
 project exits 2 (REVIEW F-28: runs on one project would pin each other's drift).
+
+Factory mode (a job with sealed holdouts, docs/LEVEL5.md 2.1, 2.4): every phase runs in konstant's
+jail on any harness (exit 2 `holdouts need a confined phase` when it cannot), the claim records
+the job clone `<project>@<job>` on the board, and the run works in that clone (made here by
+factory/clone.py from the target commit the board recorded); the target stays read-only.
 """
 from __future__ import annotations
 
@@ -17,6 +22,7 @@ import time
 from pathlib import Path
 
 from konstant.cli.main import EXIT_USAGE
+from konstant.client import ClientError
 from konstant.gate import check as check_mod
 from konstant.gate import harness as harness_mod
 from konstant.gate import loop
@@ -40,15 +46,17 @@ def cli_template(template: str) -> str:
     return shlex.join(out)
 
 
-def _harness(ctx, cat=None) -> harness_mod.HarnessSet:
+def _harness(ctx, cat=None, factory: bool = False) -> harness_mod.HarnessSet:
     """The phase harnesses from [harness] (docs/HARNESSES.md); `--harness NAME` (an adapter:
-    claude, codex, gemini, dsh) or `--harness CMD` (an argv template) replaces them all."""
+    claude, codex, gemini, dsh) or `--harness CMD` (an argv template) replaces them all.
+    `factory`: every phase confined in konstant's jail (docs/LEVEL5.md 2.1)."""
     from konstant import harnesses
     h = ctx.cfg.data["harness"]
     a = ctx.args.harness
     over = (a if a in harnesses.ADAPTERS else cli_template(a)) if a else None
     return harness_mod.HarnessSet(h, ctx.cfg.home, cat, ctx.cfg.data["permissions"]["allow"],
-                                  override=over, jail=bool(ctx.cfg.data["gate"]["jail"]))
+                                  override=over, jail=bool(ctx.cfg.data["gate"]["jail"]),
+                                  factory=factory)
 
 
 def _small(ctx, task: str, why: str) -> int:
@@ -73,11 +81,32 @@ def holdout_confinement(ctx, cat) -> str | None:
     why = confined(ctx.cfg)
     if why:
         return why
-    loose = _harness(ctx, cat).unconfined()
+    loose = _harness(ctx, cat, factory=True).unconfined()
     if loose:
-        return (f"{UNCONFINED}: the harness(es) {', '.join(loose)} do not run their phases in "
-                "konstant's jail (before L5-2 only dsh does): run this job with --harness dsh")
+        return (f"{UNCONFINED}: the harness(es) {', '.join(loose)} would not run their phases "
+                "in konstant's jail")
     return None
+
+
+def bind_clone(ctx, rec: dict, run_dir: Path) -> None:
+    """Factory mode, after the claim: make (or keep) the job clone the board recorded and make it
+    the run's project (docs/LEVEL5.md 2.4). The record's git base is the target commit the clone
+    started from, so every round's diff, leak scan and evidence BASE= cover all of the job's work."""
+    from konstant.factory import clone
+    from konstant.gate import record as record_mod
+    job = ctx.client("viewer").get(f"/api/jobs/{rec['job']}")
+    if not job.get("workdir") or not job.get("workdir_base"):
+        raise clone.CloneError(f"job {rec['job']} is claimed but the board recorded no job clone "
+                               "(claimed before konstant L5-2): `job reopen` it, then run it again")
+    path = ctx.cfg.resolve(job["workdir"])
+    how = clone.create(rec["target"], path, job["workdir_base"])
+    err(f"konstant task: job clone {path} ({how}, base {job['workdir_base'][:12]}); the target "
+        f"{rec['target']} is read-only to every phase")
+    rec.update(project=str(path.resolve()), git_top=str(path.resolve()),
+               git_base=job["workdir_base"], workdir=job["workdir"])
+    if not rec.pop("out_given", False):           # record.default_out, in the clone
+        rec["out"] = str((path / ".audits" / Path(run_dir).name / "out").resolve())
+    record_mod.write(run_dir, rec)
 
 
 def project_lock(home: Path, project):
@@ -115,12 +144,14 @@ def _run(ctx, task: str, prepare) -> int:
     cat, t, why, rec, run_dir = prepare(ctx, task, "runner")
     if t is None:
         return _small(ctx, task, why)
-    if "holdouts" in rec:
-        why = holdout_confinement(ctx, cat)
-        if why:
+    factory = "holdouts" in rec
+    if factory:
+        refusal = holdout_confinement(ctx, cat)
+        if refusal:
             shutil.rmtree(run_dir, ignore_errors=True)
-            err(f"konstant task: {why}")
+            err(f"konstant task: {refusal}")
             return EXIT_USAGE
+        return _run_factory(ctx, task, cat, t, why, rec, run_dir)
     lock = project_lock(cfg.home, rec.get("project"))
     if lock is None:
         shutil.rmtree(run_dir, ignore_errors=True)
@@ -128,18 +159,53 @@ def _run(ctx, task: str, prepare) -> int:
             "project at a time (a later run would change the state an earlier one pinned)")
         return EXIT_USAGE
     ctx._project_lock = lock          # held until this process exits
-    gate = cfg.data["gate"]
-    max_cycles = a.max_cycles or gate["max_cycles"]
-    max_resumes = a.max_resumes if a.max_resumes is not None else gate["max_resumes"]
     harness = _harness(ctx, cat)
     harness.check()                                                          # fail fast
     err(f"konstant task: [type:{t}] ({why}) run {run_dir}")
     client = ctx.client() if rec.get("job") else None
     if client is not None:
-        job = client.get(f"/api/jobs/{rec['job']}")
-        if job["status"] in ("queued", "blocked"):
-            client.post(f"/api/jobs/{rec['job']}/claim")
-            err(f"konstant task: claimed job {rec['job']}")
+        _claim(client, rec)
+    return _phases(ctx, cat, t, rec, run_dir, harness, client)
+
+
+def _claim(client, rec: dict) -> None:
+    job = client.get(f"/api/jobs/{rec['job']}")
+    if job["status"] in ("queued", "blocked"):
+        client.post(f"/api/jobs/{rec['job']}/claim")
+        err(f"konstant task: claimed job {rec['job']}")
+
+
+def _run_factory(ctx, task: str, cat, t: str, why: str, rec: dict, run_dir) -> int:
+    """A holdout job: every phase jailed, claim first (the board records the clone), then the
+    clone becomes the run's project and its one-run lock (docs/LEVEL5.md 2.1, 2.4)."""
+    from konstant.factory.clone import CloneError
+    harness = _harness(ctx, cat, factory=True)
+    harness.check()                                                          # fail fast
+    client = ctx.client()
+    try:
+        _claim(client, rec)
+        bind_clone(ctx, rec, Path(run_dir))
+    except ClientError:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        raise
+    except CloneError as exc:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        err(f"konstant task: {exc}")
+        return EXIT_USAGE
+    lock = project_lock(ctx.cfg.home, rec["project"])
+    if lock is None:
+        err(f"konstant task: another task run is active on the job clone {rec['project']}")
+        return EXIT_USAGE
+    ctx._project_lock = lock
+    err(f"konstant task: [type:{t}] ({why}) run {run_dir} (factory mode: every phase jailed)")
+    return _phases(ctx, cat, t, rec, run_dir, harness, client)
+
+
+def _phases(ctx, cat, t: str, rec: dict, run_dir, harness, client) -> int:
+    cfg, a = ctx.cfg, ctx.args
+    gate = cfg.data["gate"]
+    max_cycles = a.max_cycles or gate["max_cycles"]
+    max_resumes = a.max_resumes if a.max_resumes is not None else gate["max_resumes"]
     pr = PhaseRunner(rec, cat, harness, run_dir=Path(run_dir),
                      max_parallel=cfg.data["harness"]["max_parallel"],
                      acceptance=rec.get("acceptance", ""), log=err, isolate=True)

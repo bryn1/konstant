@@ -1,17 +1,19 @@
 # konstant level 5: the dark factory
 
-Status: **plan, being built**. Wave L5-1 (pillar A, sealed holdouts: section 3) has landed and is
-described as built in DESIGN.md §7.1; "L5-1 as built" in section 8 lists where it differs from the
-text below. Everything else on this page is still the plan that the next releases build in the
-waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as each part lands, and
-this page stays the roadmap until level 5 is reached.
+Status: **plan, being built**. Wave L5-1 (pillar A, sealed holdouts: section 3) and wave L5-2
+(factory confinement, identities, job clones: section 2) have landed and are described as built in
+DESIGN.md §7.1 and §7.2; "L5-1 as built" and "L5-2 as built" in section 8 list where they differ
+from the text below. The owner answered the open questions on 2026-11-01 (section 9); the
+sections they change say so. Everything else on this page is still the plan that the next
+releases build in the waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as
+each part lands, and this page stays the roadmap until level 5 is reached.
 
 ## 0. Levels
 
 | level | who writes what | what konstant does | where the owner looks |
 |---|---|---|---|
 | **4** (0.1.0, shipped) | the owner writes each job and its Definition of Done (DoD) | gate -> phases -> DoD loop -> independent verify, unattended | outcomes: `verified`, or a stop with the reason written down |
-| **5** (this plan) | the owner writes **goals and limits** | goal -> jobs with generated DoD -> held-out acceptance scenarios -> phases -> verify -> **ship** -> post-ship checks -> rollback on failure, inside budgets | only BLOCKED, owner decisions and budget stops; no human writes or reads code |
+| **5** (this plan) | the owner **says what he wants to his orchestrator, in chat, as today**; the orchestrator turns it into goals and limits (section 4.0) | goal -> jobs with generated DoD -> held-out acceptance scenarios -> phases -> verify -> **ship** -> post-ship checks -> rollback on failure, inside budgets | the same chat: only BLOCKED, owner decisions and budget stops are raised there; no human writes or reads code |
 
 Level 5 is called a dark factory because nobody needs to watch it. It is only acceptable if a
 model still cannot declare its own work done. Level 4 already ensures that for a job a person
@@ -51,21 +53,26 @@ invariants:
 ### 2.1 Factory mode means every phase is confined
 
 A job that carries holdouts, and every phase the factory starts, runs inside konstant's
-bubblewrap jail (`jail.py` `wrap`/`session`), **whatever the harness**. Today only dsh confines
-itself (`harnesses/dsh.py` `Dsh.confine`). Level 5 generalises `Adapter.confine`
+bubblewrap jail (`jail.py` `wrap`/`session`), **whatever the harness**. Before L5-2 only dsh
+confined itself (`harnesses/dsh.py` `Dsh.confine`). L5-2 generalised `Adapter.confine`
 (`harnesses/base.py`) so claude, codex, gemini and `command` phases run inside the same jail when
-factory mode is on. Each harness keeps its own sandbox nested inside, as dsh's does today.
+factory mode is on. Each harness keeps its own sandbox nested inside, as dsh's does.
 
 - Without a working jail (`jail.available()` false, `[gate] jail = false`, macOS), `factory run`,
   `intake` and a `task run` of a job with sealed holdouts exit 2 with `holdouts need a confined
   phase`. Nothing falls back to "procedural".
-- Inside the jail a phase can read exactly one role token, the token of its own identity
-  (2.2), through `expose=`, the mechanism dsh phases already use for `worker.token`.
+- Inside the jail a phase can read exactly one write token, the token of its own identity
+  (2.2), through `expose=`, the mechanism dsh phases already use for `worker.token`, plus the
+  read-only `viewer` token (L5-2: a viewer token writes nothing, and the in-task read paths and
+  the existing dsh tests use it).
 - A harness needs its own credential file to reach its model. For a jailed claude or codex phase
   the jail exposes only that file, as `machinery.SELF_HOME` already does for their sandboxes.
-- Open point, verified in wave L5-2: Claude Code's own Bash sandbox nested inside konstant's jail.
-  If it does not nest, a claude phase in factory mode runs with Claude Code's sandbox off and
-  konstant's jail as the boundary. `doctor` says which.
+- Verified in wave L5-2: Claude Code's own Bash sandbox DOES nest inside konstant's jail when a
+  nested bubblewrap starts there, socat is installed and the phase has the jail's own short
+  `/tmp` (its sandbox bridges are unix sockets under TMPDIR; a long TMPDIR fails them, even
+  unjailed). Where it cannot, a claude phase in factory mode runs with Claude Code's sandbox off
+  and konstant's jail as the boundary (the plan's fallback; without it every Bash call would be
+  denied, because the generated settings forbid unsandboxed commands). `doctor` says which.
 
 ### 2.2 Identities
 
@@ -85,7 +92,9 @@ additional tokens of role `worker` with distinct labels, one per factory identit
 already takes a label, and `board tokens --rotate ROLE` gains `--label`). The board's guards
 compare labels: `board/api/lifecycle.py` refuses `approve` when the actor label equals the job's
 `requested_by`, refuses `claim` and `close` to a label that posted the job's `dod-review` or
-sealed its holdouts, and the existing closer rule (`verdict`, `review`) stays. Under one OS user this separation holds because
+sealed its holdouts, and the existing closer rule (`verdict`, `review`) stays. The `dod-review`
+row comes from `POST /api/jobs/{id}/dod-review` (only the `dod-reviewer` label, before any claim,
+never on a job it filed; L5-2). Under one OS user this separation holds because
 of the jail: a confined phase cannot read another identity's token. Without the jail it would
 only be procedural, which is why 2.1 makes the jail mandatory.
 
@@ -114,11 +123,15 @@ is extended to `SEALED`.
 
 ### 2.4 Job clones and the target
 
-In factory mode a job's phases never touch the target repository. When a job is claimed,
-konstant creates `projects/<slug>@<job>/` from the target's current tip. konstant writes the tree
+In factory mode a job's phases never touch the target repository. When a job is first claimed,
+the board records `jobs.workdir` = `<project path>@<job id>` and `jobs.workdir_base` = the target's
+current tip (computed by the board itself, recorded once), and the runner creates
+`projects/<slug>@<job>/` from that commit. konstant writes the tree
 itself from `ls-tree`/`cat-file` (the raw-blob way `gate/rules/common.py` already reads trees), so
-no checkout, filter or hook runs. The run record's `project` is the clone, and the existing
-one-run-per-project lock (`cli/task_run.py` `project_lock`) applies to it. The board records the
+no checkout, filter or hook runs. The clone borrows the target's object
+store as a git alternate (read-only, nothing copied). The run record's `project` is the clone,
+its `git_base` the clone's base (so every round's diff covers all of the job's work), and the
+existing one-run-per-project lock (`cli/task_run.py` `project_lock`) applies to it. The board records the
 clone on the job (`jobs.workdir`), and `verify/verifier.py` `project_dir` uses it for that job,
 so the re-run and the DoD probes judge the job's own result. A DoD written for a factory job
 names paths of the result as `{workdir}/...`; the verifier substitutes the clone before shape
@@ -151,7 +164,9 @@ level-5 trail kind (one rebuild of `trail` for all of them); the other tables co
 | `budget_ledger` | `id, goal_id, job_id, run_id, kind (wall_s/task_runs/phases/tokens/cost/rollbacks), amount, at` | append-only (trigger, like `trail_no_update`) |
 | `escalations` | `id, goal_id, job_id, kind, reason, delivered_at, acked_by, created_at` | append-only except `delivered_at`/`acked_by` |
 
-`jobs` gains `goal_id`, `holdout_required`, `workdir` (the job clone) and `budget_json`.
+`jobs` gains `goal_id`, `holdout_required`, `workdir` (the job clone) and `budget_json`
+(`workdir` with `workdir_base`, the target commit the clone starts from, shipped in L5-2's
+`0003_workdir.sql`).
 `verifications` gains `holdout_json` (scenario ids, pass/fail, the commit and the commitment
 digest, never a command or an output).
 `trail` kinds gain `dod-review holdout ship rollback escalation budget`.
@@ -272,9 +287,17 @@ gemini) and asserts each one is denied. It goes red when `SEALED` loses its entr
   - then `seal()` (3.2) runs lint and the negative control on every draft. A refused draft goes
     back to the writer once with the lint reasons. Another refusal escalates the job as
     `holdout-authoring BLOCKED`.
-- **Independence beyond identity**: `[holdout] writer_harness` / `writer_model` may name another
-  harness or model than the producer's (`[harness.types]` already lets types differ). `doctor`
-  WARNs when the scenario writer and the producer resolve to the same model (owner question Q1).
+- **Independence comes from identity, context and file isolation, not from a second model**
+  (owner decision Q1, section 9: one local model plays every role, the scenario writer
+  included). The scenario writer is a different identity (the board refuses it the claim and the
+  close), sees a different context (the goal, the brief and DoD, a read-only target; never a job
+  clone, a producer's output or a verdict), and writes where no producer can read (the jail).
+  Its scenarios must still FAIL on the base (the negative control) and stay out of the brief (the
+  held-out lint), which a scenario that merely restates the producer's own reading of the brief
+  cannot pass. `[holdout] writer_harness` / `writer_model` stay available to name another harness
+  or model; `doctor` reports a single-model setup as INFO ("supported; separation by identity,
+  context and isolation"), never as a WARN or a refusal. Nothing in the design requires a second
+  model.
 
 ### 3.5 Leak detection
 
@@ -358,7 +381,7 @@ re-run:
 - Under one OS user, a process the owner runs unjailed can read the store. Strongest mode: the
   store is owned by a second OS user who runs the verifier (`[holdout] store` outside the
   workspace, readable only by that user), the existing "OS-separation mode" of `verify`
-  (`verifier.separation`). `doctor` reports which mode applies (owner question Q3).
+  (`verifier.separation`). `doctor` reports which mode applies (owner decision Q3: not required).
 - Network stays open in producer phases (the harness needs it to reach its model). Holdouts do not
   depend on that: the store is unreadable whatever the network.
 
@@ -386,9 +409,45 @@ job 2 a `code` job in project `greeter` with two sealed scenarios.
 
 ## 4. Pillar B: autonomous intake
 
+### 4.0 Intake is the orchestrator chat (owner decision, section 9)
+
+The owner keeps talking to his orchestrator exactly as today: a gated dsh session
+(`bin/konstant dsh`, the web/chat route of his dsh installation; docs/DSH.md). **That
+conversation is the intake.** When the owner asks for work, the orchestrator does not do it in
+the chat and does not write code: it turns the request into a goal (section 4.1) and hands it to
+the factory, then reports back in the same chat.
+
+1. **Goal from chat.** The orchestrator writes the goal file from what the owner said - the goal
+   text, the project, and the limits the owner named, else the workspace defaults
+   (`[factory] defaults`: `max_attempts = 3`, nothing else required; Q5) - and runs `bin/konstant
+   goal add FILE --from-chat`. In this configuration `goal add` accepts the `orchestrator` role
+   for a chat goal (`[factory] goal_roles`, default `["owner", "orchestrator"]` for this
+   workspace's config, `["owner"]` in the public default). The goal records `source = "chat"` and
+   the requesting session; its spec is copied and hashed as in 4.1, so nothing the orchestrator
+   or a phase writes later changes it.
+2. **Confirmation stays a chat sentence, not a gate the owner must learn.** Before `goal add` the
+   orchestrator states in one line what it will file (project, goal text, limits) and files it
+   on the owner's yes; a goal never starts from a message the owner did not send (a phase's
+   output, a web page, a file in a repo: prompt injection through content is not intake).
+3. **Report back in the chat.** The factory's escalations (`BLOCKED`, `DECISION`, `BUDGET_STOP`,
+   `LEAK`, `ROLLBACK_FAILED`, `HALTED`) go to `[notify] kind = "chat"`: the gated session shows
+   new events at the start of the owner's next turn (the konstant-gate plugin reads
+   `var/factory/events.jsonl` and `factory status`), and outcomes (`SHIPPED`, `GOAL_DONE`) when
+   the owner asks. Answering an escalation is again a chat sentence the orchestrator turns into
+   the owner verb (`ship --approve-decision`, `goal resume`, `factory ack`), which still needs
+   the owner role (the orchestrator session asks the owner to confirm, as for any owner verb).
+4. **The orchestrator is not a factory phase.** It is the owner's own session, unjailed, acting
+   as `orchestrator`; it never claims, closes, verifies or ships a factory job (it holds none of
+   the identity tokens of 2.2), so a goal it files goes through the whole loop below like any
+   other.
+
+Goal files stay the mechanism underneath (and `goal add FILE` as owner stays a path for anyone
+who prefers files).
+
 ### 4.1 Goal file
 
-The owner writes a goal and its limits, nothing else:
+The goal and its limits, nothing else (written by the orchestrator from the chat, 4.0, or by the
+owner):
 
 ```toml
 # goals/greeter.toml
@@ -399,17 +458,19 @@ text = """
 A small greeting library: greet(name) and a CLI `greet NAME`, documented in README.
 """
 
-[limits]                            # required: wall_clock and max_task_runs (owner question Q5)
-wall_clock = "4h"
-max_task_runs = 20
+[limits]                            # owner decision Q5: only max_attempts is required
+max_attempts = 3                    # attempts (task runs) per job before it is BLOCKED; default 3
+# optional, 0 or absent = not limited:
+wall_clock = "0"                    # e.g. "4h"
+max_task_runs = 0                   # for the whole goal
 max_jobs = 8
-max_rounds_per_job = 3              # board max_rounds applies too; the smaller wins
 max_rollbacks = 2
-max_tokens = 0                      # 0 = not limited; > 0 needs a harness that reports usage (6.2)
+max_tokens = 0                      # > 0 needs a harness that reports usage (6.2)
 max_cost_usd = 0
 
 [ship]
-target = "branch"                   # branch | apply | command (5.1)
+target = "github"                   # github | branch | apply | command (5.1); github is this
+                                    # owner's default (Q2), the public default stays branch
 branch = "main"
 post_probes = ["PROBE: test -f projects/greeter/README.md => ^ok$"]
 
@@ -418,7 +479,7 @@ author = "agent"                    # agent | owner (owner: jobs wait for `holdo
 min_per_job = 2
 ```
 
-`konstant goal add FILE` (owner role) validates the file (`factory/goal.py`), copies it into
+`konstant goal add FILE` (owner role; `--from-chat` also orchestrator, 4.0) validates the file (`factory/goal.py`), copies it into
 `var/factory/goals/<id>.toml` (machinery: no phase writes it) and records `spec_sha256` in
 `goals`. The factory reads only that copy, so editing the source file later changes nothing.
 `goal list|show|pause|resume|cancel` complete the verbs.
@@ -442,7 +503,7 @@ min_per_job = 2
      describes live state carries a PROBE, and no PROBE is refused;
    - every job has at least one PROBE (otherwise it could only end BLOCKED: F-02);
    - every type is a known type, and `infra`/`security` jobs are marked `ship = decision`
-     (owner question Q4);
+     (owner decision Q4: only `infra`; `security` jobs ship unattended like code);
    - the backlog fits `max_jobs`, and every `after:` points at an earlier row (no cycles);
    - then each job is filed under the goal's project root with `approval_required`, `goal_id`
      and `budget_json` (its share of the goal's limits), as identity `planner`. A brief that fails
@@ -462,7 +523,8 @@ comes from a different identity.
 | attack | what stops it |
 |---|---|
 | a planner writes a trivially satisfiable DoD | lint without warnings, at least one PROBE per job, DoD review by another identity, and holdouts by a third identity that must fail on the base (3.2) |
-| a planner and producer collude (same model) | distinct labels enforced by the board; distinct harness/model configurable with a doctor WARN (Q1); holdouts are the independent check |
+| a planner and producer collude (same model, the owner's default: Q1) | distinct labels enforced by the board; distinct contexts (the producer never sees the DoD review or the scenarios, the scenario writer never sees the producer's work); holdouts must fail on the base and stay out of the brief; another harness/model optional |
+| an injected text in a phase output, repo file or web page poses as the owner in the chat intake | a goal starts only from a message the owner sent in the session, confirmed in one line (4.0 step 2); the orchestrator holds no identity token; every filed job still passes lint, DoD review, holdouts and the verifier |
 | a brief changed after the review | `JUDGED` pin over the backlog and briefs; the board stores the acceptance immutably at filing |
 | a producer of job 1 plants instructions in the repo for later planners or scenario writers (prompt injection through shipped content) | ship escalates any diff to project instruction surfaces (`AGENTS.md`, `CLAUDE.md`, `.claude/`, `.agents/`, `.dsh/`, `.gemini/` inside the project) as an owner decision (5.4); scenario lint and the negative control bound how weak a scenario can be |
 | intake files jobs in another project or outside the goal | filing only under the goal's project root; projects keep their F-13 path rules |
@@ -473,7 +535,7 @@ comes from a different identity.
 | # | command | expected |
 |---|---|---|
 | B1 | `bin/konstant --as owner goal add examples/greeter/goal.toml` | `goal greeter added (sha256 ...)`; a copy at `var/factory/goals/greeter.toml` |
-| B2 | the same file without `[limits] wall_clock` | exit 1 `goal: limits.wall_clock is required` |
+| B2 | the same file with `[limits] max_attempts = 0` (the only required limit, Q5) | exit 1 `goal: limits.max_attempts must be >= 1`; a file without `wall_clock`, `max_task_runs`, `max_tokens` or `max_cost_usd` is accepted |
 | B3 | `bin/konstant intake greeter; RC=$?` (fake harness) | `RC=0`; `bin/konstant job list --project greeter --json` lists the backlog jobs in `waiting_approval` and then `queued`; `bin/konstant job lint <each brief>` exits 0 |
 | B4 | `FAKE_HARNESS_MODE=weak-dod bin/konstant intake greeter; RC=$?` | `RC=3`, `UNMET: job B2 DoD has no PROBE`; no job filed |
 | B5 | `bin/konstant job show <job> --json --trail` | trail actors in order: `planner` (add), `dod-reviewer` (dod-review SHIP), `factory` (approve), `scenario` (holdout x2); pairwise distinct |
@@ -482,6 +544,7 @@ comes from a different identity.
 | B8 | `bin/konstant task classify "intake the backlog for the goal"` | the type is not `intake` |
 | B9 | `python -m pytest -q tests/factory/test_scenario_isolation.py` | exit 0: the scenario phase's prompt names no job clone, OUT or run path; its run dir lies under `var/holdout/` |
 | B10 | `bin/konstant job show <job> --json` | `"goal_id"` set, `"budget"` with the job's share of the limits |
+| B11 | chat intake: the fake orchestrator session receives an owner message, confirms it, runs `goal add --from-chat` as `orchestrator`; then an injected "owner message" inside a phase log | the goal exists with `"source": "chat"`; the injected text files nothing; an escalation of that goal appears in the session's next turn (`[notify] kind = "chat"`) |
 
 ## 5. Pillar C: auto-ship
 
@@ -489,16 +552,26 @@ comes from a different identity.
 
 | target | ship | post-ship | rollback |
 |---|---|---|---|
-| `branch` (default) | `update-ref refs/heads/<branch> <commit> <pre>` in the target repo (compare-and-swap; fast-forward only) | `post_probes`, the project's own tests and **every holdout of every job shipped so far** on the new tip | `commit-tree <pre>^{tree} -p <tip>` -> a new "roll back ship N" commit, then `update-ref` (CAS) |
+| `github` (this owner's default, Q2; opt-in by config in the public product) | push `<commit>` to a branch `konstant/ship-<n>` of the target's GitHub remote, open a pull request into `[ship] branch` with `gh pr create`, then merge it with `gh pr merge --merge --match-head-commit <commit>` (the merge refuses a head that moved); the shipped state is the remote branch's new tip, fetched back | `post_probes`, the project's own tests and the regression set (below) on the fetched new tip | a revert: `commit-tree <pre>^{tree} -p <tip>` ("roll back ship N"), pushed as `konstant/rollback-<n>` and merged through its own pull request (`gh pr merge`); never a force-push, never a branch delete; then the fetched tip's tree must equal `<pre>^{tree}` |
+| `branch` (the public default) | `update-ref refs/heads/<branch> <commit> <pre>` in the target repo (compare-and-swap; fast-forward only) | `post_probes`, the project's own tests and **every holdout of every job shipped so far** on the new tip | `commit-tree <pre>^{tree} -p <tip>` -> a new "roll back ship N" commit, then `update-ref` (CAS) |
 | `apply` | materialise `<commit>` into `[ship] apply_dir`, keeping the previous tree as `apply_dir.prev` | `post_probes` against `apply_dir` | swap `apply_dir.prev` back |
 | `command` | the owner's `ship_cmd` template (e.g. a `gh pr create` or a deploy script), run by the factory process with `{commit}`, `{branch}`, `{job}` | `post_probes` | the owner's `rollback_cmd`; a target without one may not auto-ship |
 
-The branch target never rewrites history. A rollback adds a commit whose tree equals the
-pre-ship tree, so the shipped commit stays an ancestor and the record stays readable. A target
+The branch and github targets never rewrite history. A rollback adds a commit whose tree equals
+the pre-ship tree, so the shipped commit stays an ancestor and the record stays readable. A target
 branch that is checked out in a non-bare worktree is refused (`update-ref` would leave that
-worktree stale); `apply` is the target for a working directory. Network push is never done by
-the built-in targets (owner question Q2): a `command` target that pushes runs outside every
-phase, with credentials no phase can read (`machinery.CREDENTIALS` stay masked in phases).
+worktree stale); `apply` is the target for a working directory.
+
+The `github` target (owner decision Q2) is the only built-in target that uses the network. It runs
+in the factory process, outside every phase, with the owner's own git and `gh` credentials, which
+no phase can read (`~/.config/gh`, `~/.git-credentials` and the rest of `machinery.CREDENTIALS`
+stay masked in every phase jail). Before any push the factory runs the release scanner's patterns
+(`release/patterns.toml` plus the maintainer denylist when present) over the diff `pre..commit`
+and refuses the ship with a `DECISION` on a finding: a dark factory must not publish a token or an
+address a producer pasted. The push and the merge use the pinned git environment for konstant's
+own git calls; `gh` is called with an explicit `--repo` from `[ship] github_repo`, never inferred
+from a repo's config. Branch protection on the remote is respected, not bypassed: a merge the
+remote refuses is a ship failure (`target refused: ...`), an owner decision.
 
 ### 5.2 The ship guard (board-side and code-side)
 
@@ -511,7 +584,8 @@ board checks the same conditions again on `POST /api/jobs/{ref}/ships`:
    without a matched holdout**;
 3. the commit those holdouts ran on equals the evidence `COMMIT=` and the commit about to be
    shipped;
-4. the target tip still equals the job clone's base (`pre`). With jobs serial per project only
+4. the target tip (for `github`: the remote branch's tip, fetched) still equals the job clone's
+   base (`pre`, `jobs.workdir_base` since L5-2). With jobs serial per project only
    something outside the factory can move it, so a mismatch is `target moved`, an owner decision
    (5.4), never a silent rebase;
 5. the job's type and diff are not an owner decision (5.4);
@@ -551,7 +625,8 @@ goes out. Nothing is retried, forced or reset.
 The factory ships nothing that needs judgement beyond the checks. These stop as an owner decision
 (escalation `DECISION`, job kept `verified`, not shipped):
 
-- a job type in `[ship] decision_types` (default `infra`, `security`; Q4);
+- a job type in `[ship] decision_types` (owner decision Q4: default `["infra"]`; `security`
+  jobs ship without the owner, see the threat row in 5.5);
 - a diff that adds or changes project instruction surfaces (`AGENTS.md`, `CLAUDE.md`, `.claude/`,
   `.agents/`, `.dsh/`, `.gemini/`, `.github/workflows/`), import hooks (`sitecustomize.py`,
   `usercustomize.py`, `*.pth`) or `conftest.py` outside test dirs;
@@ -574,6 +649,9 @@ does not have to read the code to decide: the escalation names the rule that sto
 | two ships racing | one ship at a time; CAS fails closed (`target moved`) |
 | rollback hides a broken state | tree-equality check; a failed rollback halts all shipping and escalates |
 | shipped content steers later phases | instruction-surface diffs are owner decisions (5.4) |
+| a `security` job ships unattended (Q4) and weakens the product's security | the same gates as every type: generated DoD with PROBEs reviewed by another identity, holdouts that must fail on the base, the verifier, post-ship checks with the regression set, automatic rollback; diffs to instruction surfaces, import hooks, CI workflows and `conftest.py` stay owner decisions whatever the type; the secret scan before a `github` push |
+| the github push publishes a secret or a private address | the release scanner's patterns (and the denylist) run over the diff before every push; a finding is a `DECISION`, nothing is pushed |
+| a producer plants a GitHub Actions workflow that runs on the merge with the repository's secrets | `.github/workflows/` diffs are owner decisions (5.4); the factory never merges them unattended |
 
 ### 5.6 Acceptance (pillar C)
 
@@ -591,6 +669,8 @@ does not have to read the code to decide: the escalation names the rule that sto
 | C8 | a `command` target whose `rollback_cmd` fails, after a post-ship failure | `"state": "rollback_failed"`; `bin/konstant factory status --json` `"shipping": "halted"`; the notifier gets `ROLLBACK_FAILED` |
 | C9 | `FAKE_HARNESS_MODE=self-ship` (the producer runs `git -C $T update-ref refs/heads/main HEAD`) | the phase log shows the write denied; `git -C $T rev-parse main` unchanged |
 | C10 | a verified job whose diff adds `AGENTS.md` to the project | not shipped; escalation `DECISION: instruction surface changed (AGENTS.md)` |
+| C11 | `[ship] target = "github"` against a local bare repository as the remote and a `gh` stand-in on PATH (no network), then `ship-break` | the remote `main` moves to `$C` through a recorded PR create + merge; the rollback is a new commit merged through a second PR whose tree equals the pre-ship tree; no force-push in the stand-in's log |
+| C12 | a verified job whose diff adds a token-shaped string, `github` target | not pushed; escalation `DECISION: secret scan finding in <path>`; the remote unchanged |
 
 ## 6. Pillar D: escalation only, budgets, and the factory loop
 
@@ -622,13 +702,16 @@ shipping. The loop never needs the owner token, and a test proves it (6.6, D8).
 
 ### 6.2 Budgets
 
-Limits come from the goal (`[limits]`) and are recorded per job (`budget_json`). Spending is
-written to `budget_ledger` by code:
+Limits come from the goal (`[limits]`) and are recorded per job (`budget_json`). Owner decision
+Q5: **`max_attempts` (default 3, task runs per job) is the only required limit**; wall clock,
+total task runs, tokens and cost are optional and unlimited when absent or 0. A job that used its
+`max_attempts` without reaching `verified` is BLOCKED and escalated (one chat notification), the
+goal continues with its other jobs. Spending is written to `budget_ledger` by code:
 
 | kind | measured from | always available |
 |---|---|---|
 | `wall_s` | phase manifests (`phases/*.json` `duration`) and the loop's own clock | yes |
-| `task_runs`, `phases` | the runner's records | yes |
+| `attempts` (per job), `task_runs`, `phases` | the runner's records | yes |
 | `rollbacks` | `ships` | yes |
 | `tokens`, `cost` | `Adapter.usage(log)` (returns the usage or `None`), a new adapter hook that reads the harness's own usage report from the phase log (for example Claude Code's JSON result) | **only for adapters that implement it** |
 
@@ -685,7 +768,8 @@ reports the same as a WARN.
 
 | # | command | expected |
 |---|---|---|
-| D1 | goal with `max_task_runs = 1`, `FAKE_HARNESS_MODE=tester-fails-3x`, `bin/konstant factory run greeter --until-idle; RC=$?` | `RC=4`; `$WS/var/factory/notify.log` has one line starting `BUDGET_STOP greeter`; `bin/konstant goal show greeter --json` `"status": "paused"` |
+| D1 | goal with `max_task_runs = 1` (an optional limit, set), `FAKE_HARNESS_MODE=tester-fails-3x`, `bin/konstant factory run greeter --until-idle; RC=$?` | `RC=4`; `$WS/var/factory/notify.log` has one line starting `BUDGET_STOP greeter`; `bin/konstant goal show greeter --json` `"status": "paused"` |
+| D1b | goal with only `max_attempts = 3` (Q5), `FAKE_HARNESS_MODE=tester-fails-3x` | the job is BLOCKED after its 3rd attempt with one `BLOCKED` notification; no `BUDGET_STOP`; `RC=4` |
 | D2 | goal with `max_cost_usd = 5` on the `command` harness | `RC=2`, `budget max_cost_usd cannot be measured on harness command` |
 | D3 | an honest goal run to completion | `RC=0`; `notify.log` has 0 lines; `events.jsonl` has `SHIPPED` rows |
 | D4 | `bin/konstant notify test --kind webhook` against a local test server | the server receives JSON with `event` and `reason`, and without `brief`, `acceptance` or `evidence` keys |
@@ -697,10 +781,11 @@ reports the same as a WARN.
 
 ## 7. Proof of level 5
 
-One command, a goal file and a sample project, no human input, run offline with the fake harness:
+One command, a sample project and a scripted owner chat, no human input, run offline with the
+fake harness:
 
 ```sh
-bash tests/e2e/factory.sh        # builds the tarball, installs it fresh, runs the five legs below
+bash tests/e2e/factory.sh        # builds the tarball, installs it fresh, runs the legs below
 ```
 
 The sample lives in the release: `examples/greeter/` (a tiny Python project with a README and one
@@ -712,19 +797,23 @@ is `/dev/null` and `owner.token` is unreadable for the factory's whole run.
 
 | leg | setup | expected |
 |---|---|---|
+| P0 chat intake | a fake orchestrator session is handed one scripted owner message ("make greeter greet by name, with a CLI and a README"), confirms it and runs `goal add --from-chat` (4.0) | the goal exists with `"source": "chat"` and `max_attempts = 3` as its only limit; the legs below run from that goal; every escalation of the run shows up in the session's next turn, the outcomes on request |
 | P1 honest | default fake harness | `factory run greeter --until-idle` exit 0; every backlog job `verified`; `ship list --json` all `shipped`; `git -C projects/greeter log main` has one fast-forward per job; `notify.log` empty |
 | P2 cheating producer | `FAKE_HARNESS_MODE=overfit` (the visible DoD passes, held-out inputs fail) | verify FAIL `holdout H1 failed`, max rounds -> BLOCKED; **no ship**: the target tip unchanged; `notify.log` one `BLOCKED` line; exit 4 |
 | P3 reader | `FAKE_HARNESS_MODE=peek` | every read of the store denied (phase log); no canary in the diff; then the same leg with `[gate] jail = false`: `factory run` exit 2 before any phase |
 | P4 post-ship failure | `FAKE_HARNESS_MODE=ship-break` | ship, post-ship probe FAIL, automatic rollback: the target tree equals the pre-ship tree, the shipped commit still an ancestor, a follow-up job filed; after `max_rollbacks` BLOCKED + one notification; exit 4 |
-| P5 budget | `max_task_runs = 2` with `tester-fails-3x` | `BUDGET_STOP` notification, goal paused, exit 4 |
+| P5 budget | `max_attempts = 3` (the default) with `tester-fails-3x`; and once with the optional `max_task_runs = 2` | the job BLOCKED after 3 attempts, one notification; with `max_task_runs = 2`: `BUDGET_STOP`, goal paused; exit 4 both times |
+| P6 github target | `[ship] target = "github"` against a local bare repository as the remote and the `gh` stand-in (no network) | P1's ships arrive on the remote's `main` through recorded pull requests; P4's rollback is a revert commit merged through its own pull request; the stand-in never saw a force-push |
 
 The e2e prints `E2E-FACTORY: PASS` only when every leg met its row, and each leg's checks read
 artifacts (the git refs, `ship list --json`, `job show --json`, the notifier file), never the
 loop's own summary.
 
-**Optional live run** (`tests/e2e/factory_live.sh`, not part of CI): the same P1 leg with a real
-model through dsh and a local OpenAI-compatible endpoint (the address only in the environment of
-that run), plus P2 with a prompt that asks the producer to special-case the visible example. It
+**Optional live run** (`tests/e2e/factory_live.sh`, not part of CI): the same P0 + P1 legs with a
+real model through dsh and a local OpenAI-compatible endpoint (the address only in the environment
+of that run) playing EVERY role, scenario writer included (the owner's setup, Q1), plus P2 with a
+prompt that asks the producer to special-case the visible example, and P6 against a private
+GitHub test repository named only in that run's environment. It
 reports `E2E-FACTORY-LIVE: PASS` or the leg that failed. A model choosing to cheat on its own
 cannot be forced, so the live run proves the plumbing on a real harness, and the fake harness
 proves the guards.
@@ -739,13 +828,13 @@ for what it lands.
 | wave | delivers | extends (existing code) | depends on | acceptance |
 |---|---|---|---|---|
 | **L5-1** sealed holdouts (**done**; see "L5-1 as built" below) (before L5-2 only dsh phases are confined, so the adversarial modes run through the real dsh adapter with `tests/fixtures/stub_dsh.py`, as the second review's fixes did) | scenario format, `holdout add/list/check/show`, `holdout/store.py` + `lint.py` + `leak.py`, `verify/holdout.py` (pinned materialisation, jailed no-network runs, redacted findings), settle extension, `0002` tables `holdouts` + `verifications.holdout_json`, `machinery.SEALED` in jail + all adapters, DECLINED cannot excuse holdouts, the claim guard, `jobs.holdout_required`, fake modes `overfit`, `peek`, `leak` | `machinery.py`, `jail.py` `hidden`, `verify/verifier.py` `settle`/`verify_job`, `verify/rerun.py`, `agents/settings.py` `render`, `harnesses/codex.py` `filesystem`, `harnesses/gemini.py`, `gate/rules/done.py`, `board/migrate.py` | v0.1.0 | A1-A3, A5-A13 (through the dsh adapter) |
-| **L5-2** confinement + identities | generalised `Adapter.confine` for every harness in factory mode, one exposed identity token per phase, labelled worker tokens, board label guards, job clones + target read-only, `jobs.workdir` and the `{workdir}` probe substitution (`verify/probe.py`, `verifier.project_dir`), `Adapter.relocatable_home`, doctor `factory` rows, live smoke of a jailed claude phase (records whether Claude's sandbox nests) | `harnesses/base.py`, `claude.py`, `codex.py`, `gemini.py`, `command.py`, `board/auth.py`, `board/api/lifecycle.py`, `board/transitions.py`, `cli/task_run.py`, `cli/doctor.py` | L5-1 | A4 on every adapter, B6, B7, C9 |
-| **L5-3** intake + scenario writer | goal files (`goal add/list/show/pause/resume/cancel`), type `intake` + agent `planner`, `DOD-verdict.md`, deterministic filing, approval rule, role agent `scenario-writer`, `holdout/author.py` with the run dir in the store, fake planner / reviewer / scenario modes incl. `weak-dod` | `catalog/types.yaml`, `catalog.py` `ROLE_AGENTS`, `board/dod.py` `lint`, `gate/runner.py`, `gate/rules/authorship.py`, `gate/rules/judged.py`, `agents/generate.py` | L5-2 | B1-B5, B8-B10 |
+| **L5-2** confinement + identities (**done**; see "L5-2 as built" below) | generalised `Adapter.confine` for every harness in factory mode, one exposed identity token per phase, labelled worker tokens, board label guards, job clones + target read-only, `jobs.workdir` and the `{workdir}` probe substitution (`verify/probe.py`, `verifier.project_dir`), `Adapter.relocatable_home`, doctor `factory` rows, live smoke of a jailed claude phase (records whether Claude's sandbox nests) | `harnesses/base.py`, `claude.py`, `codex.py`, `gemini.py`, `command.py`, `board/auth.py`, `board/api/lifecycle.py`, `board/transitions.py`, `cli/task_run.py`, `cli/doctor.py` | L5-1 | A4 on every adapter, B6, B7, C9 |
+| **L5-3** intake + scenario writer | intake from the orchestrator chat (4.0: `goal add --from-chat`, `[factory] goal_roles`, `[factory] defaults`), goal files (`goal add/list/show/pause/resume/cancel`), type `intake` + agent `planner`, `DOD-verdict.md`, deterministic filing, approval rule, role agent `scenario-writer`, `holdout/author.py` with the run dir in the store, fake planner / reviewer / scenario modes incl. `weak-dod` | `catalog/types.yaml`, `catalog.py` `ROLE_AGENTS`, `board/dod.py` `lint`, `gate/runner.py`, `gate/rules/authorship.py`, `gate/rules/judged.py`, `agents/generate.py` | L5-2 | B1-B5, B8-B11 |
 | **L5-R1** independent review 1 | review only, by someone who built none of L5-1..3: try to reach `verified` past holdouts, read the store from every harness, leak through feedback, transcripts, the board or run records, forge identities, weaken a generated DoD; one reproduction per finding | the adversarial fake harness, as the first two reviews did | L5-3 | report with severity per finding |
 | **L5-F1** fixes 1 | one red-then-green test per finding under `tests/review/` (`test_H<nn>_...`); zero open P0/P1 | — | L5-R1 | all A and B rows green again |
-| **L5-4** ship + rollback | `ship`, `ship list`, targets `branch`/`apply`/`command`, the guard on both sides, plumbing-only ref moves, post-ship checks with the regression set, rollback + tree check, the follow-up job after a rollback, halt on a failed rollback, decision rules (5.4), table `ships`, fake modes `ship-break`, `self-ship` | `gate/rules/common.py` git plumbing, `verify/probe.py` `run_line`, `verify/holdout.py`, `board/api/` | L5-F1 | C1-C10 |
-| **L5-5** factory loop + budgets + notifier + view | `factory run/start/stop/status/ack/resume-shipping`, `budget_ledger`, `Adapter.usage`, unmeasurable-budget refusal, `notify` (stdout/file/webhook), `escalations`, `board/api/factory.py`, the Factory tab | `gate/loop.py`, `cli/task_run.py`, `cli/board.py` (pid handling), `board/redact.py`, `board/static/` | L5-4 | D1-D9 |
-| **L5-6** proof of level 5 | `examples/greeter/`, `tests/e2e/factory.sh` (P1-P5), CI job, QUICKSTART "level 5" section, the optional live run recorded | `tests/e2e/fresh_install.sh`, `tests/fixtures/fake_harness.py` | L5-5 | `E2E-FACTORY: PASS`; full `pytest`; release build CLEAN |
+| **L5-4** ship + rollback | `ship`, `ship list`, targets `github` (push + PR create/merge, revert-PR rollback, the secret scan before a push, a `gh` stand-in for tests; Q2) / `branch` / `apply` / `command`, `[ship] decision_types = ["infra"]` (Q4), the guard on both sides, plumbing-only ref moves, post-ship checks with the regression set, rollback + tree check, the follow-up job after a rollback, halt on a failed rollback, decision rules (5.4), table `ships`, fake modes `ship-break`, `self-ship` | `gate/rules/common.py` git plumbing, `verify/probe.py` `run_line`, `verify/holdout.py`, `board/api/` | L5-F1 | C1-C12 |
+| **L5-5** factory loop + budgets + notifier + view | `factory run/start/stop/status/ack/resume-shipping`, `max_attempts` as the one required limit (Q5), `[notify] kind = "chat"` (4.0), `budget_ledger`, `Adapter.usage`, unmeasurable-budget refusal, `notify` (stdout/file/webhook), `escalations`, `board/api/factory.py`, the Factory tab | `gate/loop.py`, `cli/task_run.py`, `cli/board.py` (pid handling), `board/redact.py`, `board/static/` | L5-4 | D1, D1b, D2-D9 |
+| **L5-6** proof of level 5 | `examples/greeter/`, `tests/e2e/factory.sh` (P0-P6), CI job, QUICKSTART "level 5" section, the optional live run recorded | `tests/e2e/fresh_install.sh`, `tests/fixtures/fake_harness.py` | L5-5 | `E2E-FACTORY: PASS`; full `pytest`; release build CLEAN |
 | **L5-R2** independent review 2 | review of the whole factory (ship, rollback, budgets, loop, notifier, view) plus a regression run of F-01..F-35, G-01..G-07 and the L5-R1 findings, on a tarball installed the documented way | — | L5-6 | report |
 | **L5-F2** fixes 2 + release | red-then-green tests per finding, zero open P0/P1, CHANGELOG, a release build; tagging and publication are the owner's step | — | L5-R2 | full `pytest`, `E2E-FACTORY: PASS`, `RESULT: CLEAN` |
 
@@ -776,30 +865,107 @@ Landed as DESIGN.md §7.1 describes. Where it differs from sections 2-3 above, a
 - The scenario runs see the host `/tmp` read-only (the same jail shape as the tests rule, 3.6
   step 2) and write only to the materialised tree and a private `TMPDIR`, both deleted.
 
+### L5-2 as built
+
+Landed as DESIGN.md §7.2 describes (and §5 for the identities). Where it differs from section 2
+above, and why (section 2's text is already corrected where it was wrong):
+
+- **Factory mode = a run of a job with sealed holdouts** (`cli/task_run.py` `_run_factory`); the
+  factory loop of L5-5 will start its phases the same way. Every adapter confines in factory mode
+  (`Adapter.confines(jail, factory)`), an explicit command template is confined as the `command`
+  adapter, and `Harness.run` refuses to start a factory phase it could not confine. L5-1's
+  "holdout jobs only on dsh" restriction is gone; `task gate` still refuses a holdout job.
+- **Exposed tokens**: the phase identity's token AND the read-only `viewer` token (2.1 corrected).
+  Each phase carries `KONSTANT_IDENTITY` (default `worker`); in L5-2 every phase is `worker` (the
+  planner, DoD-reviewer and scenario phases arrive with L5-3); the in-task client maps worker
+  requests to the identity's token and refuses every other label.
+- **Per-phase homes**: claude (`CLAUDE_CONFIG_DIR`), codex (`CODEX_HOME`) and gemini
+  (`GEMINI_CLI_HOME`) get a fresh home per factory phase under `var/harness/<name>/phases/`, removed
+  afterwards; only `~/.claude/.credentials.json` / `~/.codex/auth.json` are bound in, read-only
+  (`jail.wrap` `ro_binds`). `Adapter.relocatable_home`: claude, codex, gemini, dsh yes; `command`
+  no (refused for the scenario role in L5-3; `doctor` names it).
+- **Claude Code's sandbox in the jail, live check**: one cheap haiku run of a jailed claude phase
+  through the real adapter, in a workspace under `/tmp`: Claude Code's sandbox did NOT start
+  ("Failed to create bridge sockets"), and every Bash call was then denied (fail closed but
+  useless). Diagnosed without further model calls (a dead loopback endpoint, then a loopback
+  stand-in for the Messages API that scripts Bash tool calls): the cause is the long TMPDIR (the
+  bridges are unix sockets; it fails unjailed too). With the jail's own `/tmp` as TMPDIR and socat
+  on PATH, a scripted Bash call inside the jail saw only the `lo` network interface (Claude Code's
+  sandbox nested and active); with the fallback (its sandbox off) it saw the host interfaces, the
+  store still empty and only its own token readable. Built: TMPDIR = the jail's `/tmp` when the
+  jail has a private one; `claude.sandbox_nests(workspace)` = nested bubblewrap starts AND socat
+  present AND private `/tmp`; otherwise `without_sandbox` passes the same settings minus
+  `sandbox`. On the build host socat is not installed, so its `doctor` reports the fallback.
+- **Job clones**: the board, not the runner, computes `workdir` and `workdir_base` at the first
+  claim (git plumbing in the board process) and records them once (trigger); the extra column
+  `workdir_base` gives ship (L5-4) its `pre` and the leak scan its base for every round. A holdout
+  job on a project that is not a git repository (or has no commit) cannot be claimed (409, fail
+  closed: its holdouts could not run). The clone uses the target's object store as an alternate;
+  a tree path into `.git` is refused (also when the verifier materialises a commit). The record is
+  written only after the claim, so nothing (not even OUT) is created in the target.
+- **`dod-review` route** (`POST /api/jobs/{id}/dod-review`): added now so the B7 guard is
+  reachable through the API; L5-3's intake drives it.
+- **Guards apply at level 4 too**: the requester-cannot-approve rule holds for every job (an
+  owner who files a job with `--approval` needs another identity to approve it), and the owner who
+  sealed a job's holdouts cannot claim or close that job.
+- **Fake modes / stand-ins**: `self-ship` (C9) added now (planned for L5-4) because C9 is an L5-2
+  row; `tests/fixtures/stub_cli.py` plays `claude`, `codex` and `gemini` with the fake harness, so
+  A4 runs through every real adapter. codex and gemini were not run as real CLIs (no codex model
+  call; gemini is not installed on the build host).
+- **Owner decisions (section 9)**: none of L5-2's configuration keys is changed by them; the
+  `identities` doctor row states that one model may play every role (Q1).
+- The cosmetic `[type:code] (None)` reason print of a holdout run is fixed (the refusal check no
+  longer overwrites the classification reason).
+
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
 
-## 9. Open questions for the owner
+## 9. Owner decisions (2026-11-01; were the open questions)
 
-Each has a default the build proceeds on until the owner answers. None of them is hard to change
-later.
+The owner answered the five questions on 2026-11-01, verbatim (typos kept; the name of his local
+model, an OpenAI-compatible model he serves himself, is withheld from this public page):
 
-1. **Who writes holdouts by default?** Default: the `scenario-writer` agent per job, on another
-   harness or model than the producer when one is configured (`doctor` WARNs when they are the
-   same), and the owner may add scenarios to any job before it is claimed. Alternative: owner-only
-   holdouts (`author = "owner"`), which is stronger and also means the owner is contacted for every
-   job.
-2. **What does the default ship target touch?** Default: a local branch only (fast-forward of
-   the project's branch, never a network push); pushing, pull requests and deploys are opt-in per
-   goal through the `command` target with an explicit `rollback_cmd`.
-3. **Is a second OS user required for unattended runs?** Default: no. The jail is required (fail
-   closed), and the second-user mode (store and verifier under another user) is recommended,
-   documented and reported by `doctor`. Requiring it makes setup harder on every install.
-4. **Which job types may ship without the owner?** Default: `code`, `frontend`, `test`, `docs`;
-   `infra` and `security` jobs always stop as an owner decision before ship.
-5. **Must every goal name its budgets?** Default: yes for `wall_clock` and `max_task_runs`
-   (always measurable); `max_tokens` and `max_cost_usd` stay optional because not every harness
-   reports usage, and a set one is refused on a harness that cannot measure it.
+> "1. for me, local [model name withheld] will do everything. 2 guthub. 3. no. 4. all except
+> infrastructure. 5. mac attempts 3. no time limit, no token or cost limit. the goal is fir me to
+> talk to my orchestrator the same way i fo now but the system becomes a dark factory ibstead of
+> the level 4 that us v.0.1.0"
+
+How the plan reads them. Each decision is one configuration key, so a later change of mind is a
+config change, not a rewrite; the public product keeps conservative defaults where the owner's
+choice is specific to his setup.
+
+1. **One model plays every role** (was: the scenario writer on another harness or model when one
+   is configured, with a `doctor` WARN when the same). One local OpenAI-compatible model is the
+   producer, the planner, the DoD reviewer, the verifying phases AND the scenario writer.
+   Independence therefore comes from identity (the board refuses the forbidden pairs, 2.2),
+   context (each phase is shown only what its role needs; the scenario writer never sees a job
+   clone or a producer's output, 3.4) and file isolation (the jail, 2.1, 3.3), plus the mechanical
+   checks a same-model scenario must still pass (negative control, held-out lint, 3.2). Nothing in
+   the design assumes a second model; `[holdout] writer_harness` / `writer_model` stay optional;
+   `doctor` reports a single-model setup as supported (INFO), and the L5-2 `identities` row says
+   so. Keys: `[harness]` (one model), `[holdout] writer_model` (empty = the same).
+2. **Ship to GitHub** (was: a local branch only; pushes through `command`). The `github` target
+   (5.1) pushes a branch, opens a pull request and merges it through `gh`; rollback is a revert
+   commit merged through its own pull request; never a force-push. It is the documented default
+   for the owner's configuration (`[ship] target = "github"` in his goals and `[factory]
+   defaults`); the public product's default stays `branch` and `github` is opt-in by config. The
+   local `branch` target stays available. Key: `[ship] target`.
+3. **No second OS user** (unchanged default). The jail is required (fail closed); the
+   second-user mode stays documented and reported by `doctor`. Key: `[holdout] store`.
+4. **Every job type ships without the owner except `infra`** (was: `infra` and `security` stop).
+   `security` jobs now ship unattended; the diff rules of 5.4 (instruction surfaces, import hooks,
+   CI workflows, `conftest.py`) still stop any type, and the `github` target scans every diff for
+   secrets before a push (5.1, 5.5). Key: `[ship] decision_types = ["infra"]`.
+5. **`max_attempts = 3` is the only required budget** (was: `wall_clock` and `max_task_runs`
+   required). A job gets at most 3 attempts (task runs) before it is BLOCKED; wall clock, total
+   task runs, tokens and cost are optional and unlimited unless set, and a set token or cost
+   limit is still refused on a harness that cannot measure it (6.2). Key: `[limits]
+   max_attempts` (default in `[factory] defaults`).
+
+**The vision behind the answers**: the owner keeps talking to his orchestrator in chat exactly as
+he does at level 4, and the system behind that conversation becomes the dark factory. The chat is
+the intake (section 4.0) and the place escalations come back to; goal files stay the mechanism
+underneath; the level-5 proof includes the chat intake (leg P0, section 7).
 
 ## 10. Risks: what a dark factory can do wrong that level 4 could not
 
@@ -807,7 +973,10 @@ later.
 |---|---|---|
 | broken code reaches the target with nobody looking | a person decided what to merge | ship only on `verified` with every holdout passed on the exact commit (5.2); post-ship checks, regression set, automatic rollback (5.3) |
 | a weak, self-generated DoD makes "verified" meaningless | a person wrote the DoD | DoD lint without warnings, at least one PROBE per job, review by a different identity, holdouts from a third identity that must fail on the base (3.2, 4.2) |
-| one model writes the DoD, the holdouts and the code, and they agree on the same mistake | a person wrote the DoD | distinct identities enforced by the board; distinct harness/model configurable with a doctor WARN (Q1); holdouts black-box only |
+| one model writes the DoD, the holdouts and the code, and they agree on the same mistake (the owner's chosen setup, Q1) | a person wrote the DoD | distinct identities enforced by the board; separate contexts (the scenario writer sees goal, brief and a read-only target only; the producer never sees the scenarios); holdouts must fail on the base and stay out of the brief, so a scenario cannot just echo the producer's reading; black-box only; post-ship regression set and rollback; another harness/model optional, never required |
+| a same-model scenario writer is steered by the producer of an earlier job (text it shipped into the target) | there was no scenario writer | the scenario writer sees only the target's committed tree, read-only; instruction-surface diffs are owner decisions (5.4); every scenario passes lint and the negative control |
+| a `security` job ships unattended and weakens security (Q4) | `security` was always reviewed by a person at level 4 | the full gate set of every type plus the 5.4 diff rules (which stop any type), the secret scan before a `github` push, post-ship regression set and rollback; `infra` still stops |
+| shipping to GitHub publishes a secret or triggers CI with repository secrets (Q2) | nothing was pushed automatically | secret scan of every diff before the push (a finding is a DECISION); `.github/workflows/` diffs are owner decisions; push credentials live only in the factory process, masked in every phase |
 | holdouts erode: the producer learns them through repeated failures | no holdouts existed | redacted hints only, exposure budget, rotation, canary and literal scans (3.5, 3.6) |
 | runaway cost or an endless loop | a person started each job | per-goal hard limits checked every tick; unmeasurable budgets refused before the start; a budget stop pauses and escalates (6.2) |
 | errors compound: job 2 builds on a defect job 1 shipped | jobs were reviewed one by one | serial jobs per project; the regression set re-runs every shipped holdout after each ship; rollback (5.3) |
@@ -826,6 +995,7 @@ later.
 - A model deciding "done", "ship" or "roll back": holdouts, the DoD check, the verifier and the
   ship guard stay code. Reviewer phases (the DoD review included) write verdict files as they do
   at level 4, and a SHIP from them never replaces a mechanical check.
-- Pushing to a remote, opening pull requests or deploying through a built-in target: the
-  `command` target with an owner-written `rollback_cmd` covers those.
+- Deploying through a built-in target (pushing to GitHub and merging a pull request IS built in
+  since the owner's decision Q2: the `github` target; deploys stay with the `command` target and
+  an owner-written `rollback_cmd`).
 - Training or tuning models on factory transcripts.
