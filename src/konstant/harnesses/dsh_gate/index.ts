@@ -21,6 +21,15 @@
  *  (d) LEAVES ARE NEVER GATED: a delegated child (session header `origin === 'subagent'` or
  *      `delegationDepth >= 1`) passes untouched with no loop, and inside a `konstant task run`
  *      phase (KONSTANT_IN_TASK=1, the runner drives the loop) the plugin installs nothing.
+ *  (f) THE CHAT IS THE INTAKE (`chat: true`, from [notify] kind = "chat"; docs/LEVEL5.md 4.0): every
+ *      owner message of the session (depth 0) first goes through `konstant chat turn --session <id> -`.
+ *      konstant decides (Python, no model): this session's goal proposal is confirmed by a plain yes
+ *      and withdrawn by anything else; new factory escalations of this session's goals come back as
+ *      lines shown at the start of the turn; a typed request without a `[type:]`/`[job:]` tag gets
+ *      the INTAKE block (turn it into a goal proposal, `goal add --from-chat`) instead of the gate.
+ *      A failing chat turn never blocks the session: a notice says so and the gate runs as before.
+ *      The session's own bash gets KONSTANT_CHAT_SESSION=<id>: konstant refuses `intake`, `holdout
+ *      author` and every factory identity from it (the orchestrator proposes; the factory runs).
  *  (e) A CHILD ACTS AS WORKER (`shellEnv`, the seam the replaced kb-guard plugin used): every bash
  *      call of a delegated child gets KONSTANT_ROLE=worker and KONSTANT_IN_TASK=1, so the konstant
  *      CLI it runs refuses every token but worker and viewer (a phase never files, claims, closes
@@ -60,6 +69,9 @@ export interface Config {
   gateTimeoutMs?: number
   checkTimeoutMs?: number
   verifyTimeoutMs?: number
+  /** [notify] kind = "chat": the orchestrator chat is the level-5 intake (see (f)). */
+  chat?: boolean
+  chatTimeoutMs?: number
 }
 
 const SOURCE_KIND = 'konstant-gate'
@@ -106,6 +118,13 @@ export function childEnv(agent: Agent | undefined): Record<string, string> {
   return agent !== undefined && depthOf(agent) >= 1 ? { KONSTANT_ROLE: 'worker', KONSTANT_IN_TASK: '1' } : {}
 }
 
+/** The environment of the orchestrator session's OWN bash with the chat intake on: konstant then
+ * refuses the factory's steps (`intake`, `holdout author`) and the factory identities from it
+ * (docs/LEVEL5.md 4.0 step 4: the orchestrator files a proposal, it never runs the factory). */
+export function chatEnv(agent: Agent | undefined): Record<string, string> {
+  return agent !== undefined && depthOf(agent) === 0 ? { KONSTANT_CHAT_SESSION: String(agent.session.header.id) } : {}
+}
+
 /** A reason with run-specific noise removed, so "the same reason again" is a string comparison. */
 export function normReason(reason: string, run: string): string {
   const r = run === '' ? reason : reason.split(run).join('<run>')
@@ -142,7 +161,7 @@ export function verifyText(job: string, round: number, max: number, reasons: str
 export function runKonstant(cfg: Config, args: string[], stdin: string, cwd: string, timeoutMs: number): Promise<Result> {
   return new Promise((resolve) => {
     const env: Record<string, string | undefined> = { ...process.env, KONSTANT_HOME: cfg.home }
-    for (const k of ['KONSTANT_IN_TASK', 'KONSTANT_RUN', 'KONSTANT_ROLE']) delete env[k]
+    for (const k of ['KONSTANT_IN_TASK', 'KONSTANT_RUN', 'KONSTANT_ROLE', 'KONSTANT_CHAT_SESSION']) delete env[k]
     let child
     try {
       child = spawn(cfg.konstant, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -172,6 +191,15 @@ export function runKonstant(cfg: Config, args: string[], stdin: string, cwd: str
   })
 }
 
+/** `m` with its first text block replaced by `text` (a fresh frozen message, same source). */
+function replaceText(m: UserMessage, text: string): UserMessage {
+  const at = m.content.findIndex(b => b.type === 'text')
+  const content: ContentBlock[] = at === -1
+    ? [{ type: 'text', text }, ...m.content]
+    : m.content.map((b, idx) => (idx === at && b.type === 'text' ? { ...b, text } : b))
+  return Object.freeze({ ...m, id: randomUUID(), content }) as unknown as UserMessage
+}
+
 const tail = (s: string): string => (s.trim().split('\n').pop() ?? '').slice(0, 300)
 const lines = (s: string): string[] => s.split('\n').map(l => l.trim()).filter(l => l.length > 0)
 
@@ -182,8 +210,9 @@ const lines = (s: string): string[] => s.split('\n').map(l => l.trim()).filter(l
  */
 export function apply(ctx: Context, config: Config): void {
   const cfg: Required<Config> = {
-    enabled: true, maxResumes: 3, maxVerifyRounds: 3, verify: true, fileJob: false,
-    gateTimeoutMs: 120_000, checkTimeoutMs: 1_200_000, verifyTimeoutMs: 3_600_000, ...config,
+    enabled: true, maxResumes: 3, maxVerifyRounds: 3, verify: true, fileJob: false, chat: false,
+    gateTimeoutMs: 120_000, checkTimeoutMs: 1_200_000, verifyTimeoutMs: 3_600_000, chatTimeoutMs: 60_000,
+    ...config,
   }
   // every decision: dsh's logger AND var/logs/konstant-gate.log of the workspace (the record a
   // person or a test reads afterwards; dsh's headless mode does not print plugin log lines)
@@ -216,8 +245,9 @@ export function apply(ctx: Context, config: Config): void {
       variables: {
         KONSTANT_ROLE: { description: 'worker in a delegated child: the konstant CLI acts as the worker role.' },
         KONSTANT_IN_TASK: { description: '1 in a delegated child: the konstant CLI refuses every token but worker and viewer.' },
+        KONSTANT_CHAT_SESSION: { description: 'the orchestrator chat session (chat: true): konstant refuses the factory\'s own steps and identities from it.' },
       },
-      resolve: (execution: { agent?: Agent }) => childEnv(execution.agent),
+      resolve: (execution: { agent?: Agent }) => ({ ...childEnv(execution.agent), ...(cfg.chat ? chatEnv(execution.agent) : {}) }),
     })
   })
 
@@ -233,6 +263,26 @@ export function apply(ctx: Context, config: Config): void {
       if (!gateable(text) || isLeaf(agent)) continue
       const sid = String(agent.session.header.id)
       const cwd = (agent.session.header as { cwd?: string }).cwd ?? process.cwd()
+      // (f) the chat as intake: confirmations, escalations, the intake block
+      let prefix = ''
+      if (cfg.chat) {
+        const c = await runKonstant(cfg, ['chat', 'turn', '--session', sid, '-'], text, cwd, cfg.chatTimeoutMs)
+        let t: { lines?: string[]; intake?: boolean; block?: string; confirmed?: string | null } = {}
+        try { t = JSON.parse(c.stdout) as typeof t } catch { t = {} }
+        if (c.code !== 0 || !Array.isArray(t.lines)) {
+          log('warn', `chat turn failed session=${sid} exit=${String(c.code)}: ${tail(c.stderr)}`)
+          notice(agent, `konstant chat turn failed (exit ${String(c.code)}): no confirmation or report this turn - ${tail(c.stderr)}`, 'konstant chat turn failed')
+        } else {
+          prefix = t.lines.length > 0 ? `konstant chat:\n${t.lines.map(l => `- ${l}`).join('\n')}\n\n` : ''
+          log('info', `chat turn session=${sid} lines=${String(t.lines.length)} intake=${String(t.intake)} confirmed=${String(t.confirmed ?? null)}`)
+          if (t.intake === true && t.block) {
+            const replacement = replaceText(m, `${prefix}${t.block}\n${text}`)
+            seen.add(replacement)
+            out = out.toSpliced(i, 1, replacement)
+            continue
+          }
+        }
+      }
       // --session: the job this session works on is bound (var/sessions.json) and claimed
       const args = ['task', 'gate', '--json', '--harness', 'dsh', '--cwd', cwd, '--session', sid]
       if (cfg.fileJob) args.push('--file-job')
@@ -240,21 +290,27 @@ export function apply(ctx: Context, config: Config): void {
       const r = await runKonstant(cfg, args, text, cwd, cfg.gateTimeoutMs)
       let g: { type?: string; why?: string; block?: string; run_dir?: string; job?: number | null; job_display?: string | null } = {}
       try { g = JSON.parse(r.stdout) as typeof g } catch { g = {} }
+      const keepPrefix = (): void => {
+        if (prefix === '') return
+        const replacement = replaceText(m, `${prefix}${text}`)
+        seen.add(replacement)
+        out = out.toSpliced(i, 1, replacement)
+      }
       if (r.code !== 0 || g.type === undefined) {
         log('warn', `gate failed session=${sid} exit=${String(r.code)}: ${tail(r.stderr)}`)
         notice(agent, `konstant gate failed (exit ${String(r.code)}): this message went through UNGATED - ${tail(r.stderr)}`, 'konstant gate failed: ungated')
+        keepPrefix()
         continue
       }
       log('info', `decision session=${sid} type=${g.type} why=${String(g.why)}`)
-      if (g.type === 'small' || !g.block || !g.run_dir) continue
+      if (g.type === 'small' || !g.block || !g.run_dir) {
+        keepPrefix()
+        continue
+      }
       const job = g.job === null || g.job === undefined ? null : String(g.job)
       const tagged = job !== null && !/\[job:[0-9.]+\]/.test(text) ? `[job:${g.job_display ?? job}] ` : ''
-      const gated = `${g.block}\n${tagged}${text}`
-      const at = m.content.findIndex(b => b.type === 'text')
-      const content: ContentBlock[] = at === -1
-        ? [{ type: 'text', text: gated }, ...m.content]
-        : m.content.map((b, idx) => (idx === at && b.type === 'text' ? { ...b, text: gated } : b))
-      const replacement = Object.freeze({ ...m, id: randomUUID(), content }) as unknown as UserMessage
+      const gated = `${prefix}${g.block}\n${tagged}${text}`
+      const replacement = replaceText(m, gated)
       seen.add(replacement)
       out = out.toSpliced(i, 1, replacement)
       loops.set(agent, { run: g.run_dir, job, resumes: 0, verifyRounds: 0, finished: false, cwd })

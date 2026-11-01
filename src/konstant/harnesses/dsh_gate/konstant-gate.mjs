@@ -1,4 +1,4 @@
-// konstant-gate source-sha256=47db9a7de50e2274e3e52130d6b6c8e64c30556e5b61969d799f831e8c4e1b30 esbuild=0.28.2 (built by build.mjs from index.ts; do not edit)
+// konstant-gate source-sha256=d1b33fce0e00b2b95f77f1548324d20851e58584cd478dd71b607f033a1a6bcf esbuild=0.28.2 (built by build.mjs from index.ts; do not edit)
 // index.ts
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -25,6 +25,9 @@ function isLeaf(agent) {
 function childEnv(agent) {
   return agent !== void 0 && depthOf(agent) >= 1 ? { KONSTANT_ROLE: "worker", KONSTANT_IN_TASK: "1" } : {};
 }
+function chatEnv(agent) {
+  return agent !== void 0 && depthOf(agent) === 0 ? { KONSTANT_CHAT_SESSION: String(agent.session.header.id) } : {};
+}
 function normReason(reason, run) {
   const r = run === "" ? reason : reason.split(run).join("<run>");
   return r.replace(/\d{4}-\d{2}-\d{2}[T ][0-9:.]+(?:Z|[+-][0-9:]+)?/g, "<ts>").replace(/\b[0-9a-f]{12,64}\b/g, "<sha>").replace(/\d{9,}/g, "<n>").replace(/\s+/g, " ").trim();
@@ -46,7 +49,7 @@ function verifyText(job, round, max, reasons) {
 function runKonstant(cfg, args, stdin, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const env = { ...process.env, KONSTANT_HOME: cfg.home };
-    for (const k of ["KONSTANT_IN_TASK", "KONSTANT_RUN", "KONSTANT_ROLE"]) delete env[k];
+    for (const k of ["KONSTANT_IN_TASK", "KONSTANT_RUN", "KONSTANT_ROLE", "KONSTANT_CHAT_SESSION"]) delete env[k];
     let child;
     try {
       child = spawn(cfg.konstant, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
@@ -81,6 +84,11 @@ konstant-gate: timed out after ${String(timeoutMs)} ms` });
     child.stdin.end(stdin);
   });
 }
+function replaceText(m, text) {
+  const at = m.content.findIndex((b) => b.type === "text");
+  const content = at === -1 ? [{ type: "text", text }, ...m.content] : m.content.map((b, idx) => idx === at && b.type === "text" ? { ...b, text } : b);
+  return Object.freeze({ ...m, id: randomUUID(), content });
+}
 var tail = (s) => (s.trim().split("\n").pop() ?? "").slice(0, 300);
 var lines = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
 function apply(ctx, config) {
@@ -90,9 +98,11 @@ function apply(ctx, config) {
     maxVerifyRounds: 3,
     verify: true,
     fileJob: false,
+    chat: false,
     gateTimeoutMs: 12e4,
     checkTimeoutMs: 12e5,
     verifyTimeoutMs: 36e5,
+    chatTimeoutMs: 6e4,
     ...config
   };
   const log = (level, text) => {
@@ -125,9 +135,10 @@ function apply(ctx, config) {
       name: "konstant-gate",
       variables: {
         KONSTANT_ROLE: { description: "worker in a delegated child: the konstant CLI acts as the worker role." },
-        KONSTANT_IN_TASK: { description: "1 in a delegated child: the konstant CLI refuses every token but worker and viewer." }
+        KONSTANT_IN_TASK: { description: "1 in a delegated child: the konstant CLI refuses every token but worker and viewer." },
+        KONSTANT_CHAT_SESSION: { description: "the orchestrator chat session (chat: true): konstant refuses the factory's own steps and identities from it." }
       },
-      resolve: (execution) => childEnv(execution.agent)
+      resolve: (execution) => ({ ...childEnv(execution.agent), ...cfg.chat ? chatEnv(execution.agent) : {} })
     });
   });
   ctx.on("agent/pre-step", async ({ agent }, next) => {
@@ -142,6 +153,33 @@ function apply(ctx, config) {
       if (!gateable(text) || isLeaf(agent)) continue;
       const sid = String(agent.session.header.id);
       const cwd = agent.session.header.cwd ?? process.cwd();
+      let prefix = "";
+      if (cfg.chat) {
+        const c = await runKonstant(cfg, ["chat", "turn", "--session", sid, "-"], text, cwd, cfg.chatTimeoutMs);
+        let t = {};
+        try {
+          t = JSON.parse(c.stdout);
+        } catch {
+          t = {};
+        }
+        if (c.code !== 0 || !Array.isArray(t.lines)) {
+          log("warn", `chat turn failed session=${sid} exit=${String(c.code)}: ${tail(c.stderr)}`);
+          notice(agent, `konstant chat turn failed (exit ${String(c.code)}): no confirmation or report this turn - ${tail(c.stderr)}`, "konstant chat turn failed");
+        } else {
+          prefix = t.lines.length > 0 ? `konstant chat:
+${t.lines.map((l) => `- ${l}`).join("\n")}
+
+` : "";
+          log("info", `chat turn session=${sid} lines=${String(t.lines.length)} intake=${String(t.intake)} confirmed=${String(t.confirmed ?? null)}`);
+          if (t.intake === true && t.block) {
+            const replacement2 = replaceText(m, `${prefix}${t.block}
+${text}`);
+            seen.add(replacement2);
+            out = out.toSpliced(i, 1, replacement2);
+            continue;
+          }
+        }
+      }
       const args = ["task", "gate", "--json", "--harness", "dsh", "--cwd", cwd, "--session", sid];
       if (cfg.fileJob) args.push("--file-job");
       args.push("-");
@@ -152,20 +190,28 @@ function apply(ctx, config) {
       } catch {
         g = {};
       }
+      const keepPrefix = () => {
+        if (prefix === "") return;
+        const replacement2 = replaceText(m, `${prefix}${text}`);
+        seen.add(replacement2);
+        out = out.toSpliced(i, 1, replacement2);
+      };
       if (r.code !== 0 || g.type === void 0) {
         log("warn", `gate failed session=${sid} exit=${String(r.code)}: ${tail(r.stderr)}`);
         notice(agent, `konstant gate failed (exit ${String(r.code)}): this message went through UNGATED - ${tail(r.stderr)}`, "konstant gate failed: ungated");
+        keepPrefix();
         continue;
       }
       log("info", `decision session=${sid} type=${g.type} why=${String(g.why)}`);
-      if (g.type === "small" || !g.block || !g.run_dir) continue;
+      if (g.type === "small" || !g.block || !g.run_dir) {
+        keepPrefix();
+        continue;
+      }
       const job = g.job === null || g.job === void 0 ? null : String(g.job);
       const tagged = job !== null && !/\[job:[0-9.]+\]/.test(text) ? `[job:${g.job_display ?? job}] ` : "";
-      const gated = `${g.block}
+      const gated = `${prefix}${g.block}
 ${tagged}${text}`;
-      const at = m.content.findIndex((b) => b.type === "text");
-      const content = at === -1 ? [{ type: "text", text: gated }, ...m.content] : m.content.map((b, idx) => idx === at && b.type === "text" ? { ...b, text: gated } : b);
-      const replacement = Object.freeze({ ...m, id: randomUUID(), content });
+      const replacement = replaceText(m, gated);
       seen.add(replacement);
       out = out.toSpliced(i, 1, replacement);
       loops.set(agent, { run: g.run_dir, job, resumes: 0, verifyRounds: 0, finished: false, cwd });
@@ -246,6 +292,7 @@ var __testonly = { textOf, gateable, isLeaf, depthOf, normReason, nudgeText, ver
 export {
   __testonly,
   apply,
+  chatEnv,
   childEnv,
   name,
   normReason,

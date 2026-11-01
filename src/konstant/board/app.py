@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from konstant import __version__, catalog as catalog_mod
 from konstant.board import migrate, policy as policy_mod, redact
-from konstant.board.api import holdouts, jobs, lifecycle, projects, tokens, trail, verify
+from konstant.board.api import goals, holdouts, jobs, lifecycle, projects, tokens, trail, verify
 from konstant.config import Config
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -71,7 +71,7 @@ def create_app(cfg: Config) -> FastAPI:
                           for k, v in cat.types.items()},
                 "review_types": cat.review_types}
 
-    for mod in (projects, jobs, lifecycle, verify, trail, tokens, holdouts):
+    for mod in (projects, jobs, lifecycle, verify, trail, tokens, holdouts, goals):
         app.include_router(mod.router)
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")

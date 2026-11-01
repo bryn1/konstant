@@ -1,4 +1,4 @@
-# konstant — design (v0.1.0, pre-release; level-5 waves L5-1 and L5-2 landed)
+# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2 and L5-3 landed)
 
 konstant is a self-contained workspace for running coding agents with discipline: a local job
 board (**board**), a deterministic **task gate** that turns a task into phases run by one agent
@@ -11,7 +11,9 @@ Level 5 (docs/LEVEL5.md) lands wave by wave; this document describes what exists
 sealed holdout scenarios (§7.1): black-box acceptance checks a producing phase cannot read, run
 only by the verifier. Wave L5-2 added factory mode (§7.2): every phase of a holdout job confined
 in konstant's jail on any harness, per-identity tokens the board compares, and job clones with a
-read-only target.
+read-only target. Wave L5-3 added intake (§7.3): goals (from a file or the owner's orchestrator
+chat) turned into board jobs by a planner phase, a DoD review by another identity, deterministic
+filing and approval, and holdouts written by a scenario-writer phase.
 
 References of the form F-nn and G-nn name findings of the two independent security reviews of
 v0.1; docs/CONCEPTS.md "Security reviews" summarises them, and each has a test under `tests/review/`.
@@ -55,14 +57,17 @@ konstant-0.1.0/
     client.py                  # stdlib HTTP client (urllib) used by every CLI verb
     catalog.py                 # load + validate catalog/types.yaml, agents, skills, workflows
     cli/                       # argparse front end: main, board, project, job, task (+ task_run,
-                               # task_session), verify, holdout, agents, dsh, doctor
+                               # task_session), verify, holdout, goal (goal, intake, chat), agents,
+                               # dsh, doctor
     board/
       app.py                   # FastAPI app factory, static read-only UI
       api/                     # deps (auth deps, serialisation), projects, jobs (file/read),
                                # lifecycle (claim..move, dod-review), verify (verdict), trail,
                                # tokens routes,
-                               # holdouts (seal + list commitments; the verdict's holdout hooks)
+                               # holdouts (seal + list commitments; the verdict's holdout hooks),
+                               # goals (file/confirm/read goals, the intake state)
       db.py  migrate.py  migrations/0001_init.sql  0002_holdouts.sql  0003_workdir.sql
+                               0004_goals.sql
       dod.py                   # DoD extraction from a brief (required) + DoD row lint (warnings)
       policy.py                # role sets + switches from konstant.toml, fail-closed defaults
       transitions.py           # the job state machine (one table)
@@ -77,10 +82,14 @@ konstant-0.1.0/
       check.py                               # rule engine, exit codes
       rules/  common.py verdicts.py (verdicts + phases) judged.py done.py tests.py
               lastmile.py hygiene.py exercise.py verified.py authorship.py cleanup.py
+              holdouts.py backlog.py
     verify/   probe.py  shapes.py  native.py  procenv.py  rerun.py  verifier.py
               holdout.py                     # materialise the pinned commit, jailed no-net runs (§7.1)
     holdout/  lint.py  store.py  leak.py     # scenario format + lint, seal/check, leak scan (§7.1)
+              author.py                      # the scenario writer's phase (§7.3)
     factory/  clone.py  doctor.py            # job clones, factory doctor rows (§7.2)
+              goal.py backlog.py intake.py   # goal files, the filing rules, `konstant intake` (§7.3)
+              notify.py chat.py              # factory events, the orchestrator chat as intake
     harnesses/ base.py claude.py codex.py gemini.py dsh.py command.py   # adapters (§9)
                dsh_session.py dsh_gate/{index.ts,build.mjs,konstant-gate.mjs} # dsh session plugin (§6.6)
     jail.py                                  # bubblewrap jail for agent-written code
@@ -89,11 +98,12 @@ konstant-0.1.0/
     release/  build.py  scan.py  clidoc.py   # maintainer tooling (`python -m konstant.release`)
   catalog/
     types.yaml               # THE source: types, agents, phases, verdict files, skills, keywords
-    agents/<agent>.md        # 9 task agents + orchestrator.md
+    agents/<agent>.md        # 10 task agents (planner: level-5 intake) + orchestrator.md,
+                             # scenario-writer.md (the role agents)
     doctrine/base.md         # shared principles every profile inherits
     doctrine/contracts/{build,verdict,doc}.md
     skills/<name>/SKILL.md   # 26 skills
-    workflows/<type>.md      # 9 workflows
+    workflows/<type>.md      # 10 workflows
     templates/CLAUDE.md.tmpl  AGENTS.md.tmpl  agent.md.tmpl  skill.md.tmpl
               operate.md.tmpl  # the "how to operate konstant" table both top docs include
   release/patterns.toml      # generic public-safety patterns (IPs, emails, token shapes, paths)
@@ -115,7 +125,10 @@ konstant-0.1.0/
   var/secrets/<role>.token   # 0600, dir 0700; plaintext only here, sha256 only in the DB
   var/runs/<stamp>-<slug>/   # task-run records: record.json, phases/*.json, logs, events
   var/holdout/<job>/H<n>.scenario   # the SEALED holdout store (0700 dirs, 0400 files; §7.1):
-                             # masked in every jail, read-denied by every adapter
+                             # masked in every jail, read-denied by every adapter; runs/ (and,
+                             # during the phase, drafts/ + home/) of the scenario writer (§7.3)
+  var/factory/goals/<id>.toml  events.jsonl  notify.log  chat/<session>.json
+                             # goal copies, factory events, chat cursors (machinery; §7.3)
   var/logs/  var/backups/  var/board.pid
   projects/<slug>/           # default home of user projects (git repos)
   .claude/agents/<agent>.md  .claude/skills/<skill>/SKILL.md  .claude/settings.json
@@ -156,11 +169,12 @@ supported, but the generated surfaces only apply inside it (stated in QUICKSTART
 |---|---|---|
 | `schema_meta` | `version` | one row |
 | `projects` | `id, slug UNIQUE, name, path, root_job_id, status(active/archived), created_at` | `path` = project dir (default `projects/<slug>`) |
-| `jobs` | `id, project_id, parent_id, type, title, brief, acceptance, status, priority, requested_by, assignee, after_id, approval_required, verify_round, closed_by, evidence_json, result_summary, created_at, updated_at, holdout_required` | `acceptance` immutable after insert; `type` validated against `catalog/types.yaml` (root jobs have type `project`); `holdout_required` (v2): claimable only with sealed holdouts; `workdir`, `workdir_base` (v3): the job clone and the target commit it starts from, set by the first claim of a holdout job, then immutable |
+| `jobs` | `id, project_id, parent_id, type, title, brief, acceptance, status, priority, requested_by, assignee, after_id, approval_required, verify_round, closed_by, evidence_json, result_summary, created_at, updated_at, holdout_required` | `acceptance` immutable after insert; `type` validated against `catalog/types.yaml` (root jobs have type `project`); `holdout_required` (v2): claimable only with sealed holdouts; `workdir`, `workdir_base` (v3): the job clone and the target commit it starts from, set by the first claim of a holdout job, then immutable; `goal_id`, `budget_json`, `ship_mode` (v4): a goal job's goal, its share of the goal's limits and `auto`/`decision` (type in `[ship] decision_types`), computed by the board at filing, then immutable |
 | `trail` | `id, job_id, ts, actor, role, kind, body, payload_json` | append-only; kinds: `note status evidence verdict finding move approval review`, and since v2 the level-5 kinds `dod-review holdout ship rollback escalation budget` (`holdout` and, since L5-2, `dod-review` are written) |
 | `verifications` | `id, job_id, round, actor, started_at, finished_at, verdict(PASS/FAIL/BLOCKED), probes_json, rerun_json, holdout_json` | the verifier's ledger; `holdout_json` (v2) holds scenario ids, pass/fail, timings, the commit and the commitment digest, never a command or an output |
 | `holdouts` (v2) | `id, job_id, hid, kind(proof/regression), sha256, author_label, sealed_at, trail_id, generation, state(sealed/burned/retired)` | a COMMITMENT per scenario (sha256 of the file; its canary is the salt), never content; no delete; commitment columns immutable; `state` only moves forward from `sealed` (DB triggers) |
 | `runs` | `id, job_id, run_dir, type, started_at, finished_at, result(MET/UNMET/BLOCKED/ERROR)` | links task runs to jobs; written by `task run --job` through `POST /api/jobs/{ref}/runs`; `GET /api/jobs/{ref}` returns the job's `verifications` and `runs` |
+| `goals` (v4) | `id, slug, project_id, spec_text, spec_json, spec_sha256, source(file/chat), session, status(proposed/active/paused/done/stopped/withdrawn), intake(none/planning/filing/filed/refused), created_by, created_at, updated_at` | spec columns immutable (trigger); slug unique among non-withdrawn goals; `filed` is final (a goal is taken in once); no delete |
 | `tokens` | `id, role, label, sha256 UNIQUE, active, created_at` | `label` is the actor identity (e.g. `orchestrator`, `verifier`; the factory identities `planner`, `dod-reviewer`, `scenario`, `factory`: §5) |
 
 Hierarchy: depth 0 = project root (auto-created by
@@ -180,8 +194,8 @@ Terminal: `verified`, `reviewed`. `cancelled` is closed but reopenable.
 | from | verb | to | allowed roles | guard |
 |---|---|---|---|---|
 | (new) | `add` | `queued` or `waiting_approval` | owner, orchestrator, worker | acceptance non-empty with a DoD line; type known; depth ≤ 2; `approval_required` → `waiting_approval` |
-| `waiting_approval` | `approve` | `queued` | owner | — |
-| `queued` | `claim` | `claimed` | orchestrator, worker | `after_id`, if set, is `verified`/`reviewed`; a `holdout_required` job has at least `[holdout] min_per_job` sealed holdouts (409 `no holdout sealed`; §7.1) |
+| `waiting_approval` | `approve` | `queued` | owner (a goal job: also the `factory` identity) | not the requester's label; a goal job needs a `dod-review SHIP` from another identity first (409) |
+| `queued` | `claim` | `claimed` | orchestrator, worker | not a factory identity (planner, dod-reviewer, scenario, factory), the job's DoD reviewer or sealer, or the planner of a goal job (403); `after_id`, if set, is `verified`/`reviewed`; a `holdout_required` job has at least `[holdout] min_per_job` sealed holdouts (409 `no holdout sealed`; §7.1) |
 | `claimed` | `block` | `blocked` | owner, orchestrator, worker | reason required |
 | `blocked` | `claim` | `claimed` | orchestrator, worker | — |
 | `claimed` | `close` | `completed_unverified` | requester or assignee, owner | evidence contract (§4.3) |
@@ -233,8 +247,13 @@ as `var/secrets/<label>.token` (`board/policy.py` `IDENTITIES`); `board tokens -
 refused to the job's requester (`the requester cannot approve its own DoD`), `claim` and `close`
 to a label that posted the job's `dod-review` (`POST /api/jobs/{id}/dod-review`, only the
 `dod-reviewer` identity, before any claim) or sealed its holdouts (the owner or the `scenario`
-identity seal). Under one OS user these labels stay apart because a factory phase runs in the
-jail and reads only its own identity's token (§7.2).
+identity seal). Since L5-3: the planner of a goal job never claims or closes it, none of the four
+identities claims or closes any job, only the `planner` identity files goal jobs and only the
+`dod-reviewer` reviews them - both only while the `factory` identity holds the goal's intake at
+`filing` (`POST /api/goals/{id}/intake`), so an intake phase holding its token cannot file or review
+around the deterministic filing - and the `factory` identity approves a goal job after a
+`dod-review SHIP` (§7.3). Under one OS user these labels stay apart because a factory phase runs in
+the jail and reads only its own identity's token (§7.2).
 
 The CLI picks a token by `--as <role>` (default `[client] default_role`, `orchestrator`). Role
 separation on one machine is procedural, and the design says so plainly:
@@ -293,6 +312,11 @@ no verdict file or is run by the type's own agent (a `test` run's tester writes 
 verdict); a phase with a verdict file is **verifying**. `catalog.py` validates the phase keys,
 regexes, unique verdict files per type, a producer per type, and that every phase agent is the
 agent of some type.
+Level 5 (L5-3): a type may be `flag_only` (`intake`: reachable only with `--type`/`konstant
+intake`, never by the classifier or a `[type:]` tag, never filed as a job, not in the routing
+table), and a type or one phase may name the `identity` it acts as (default `worker`; `intake`:
+`planner`, its reviewer phase `dod-reviewer`; the close-out acts as the type's identity; the phase
+manifest records it). `roles` describes the role agents: `orchestrator` and `scenario-writer`.
 Each type also carries `workflow` (a `catalog/workflows/<name>.md`) and `skills` (names under
 `catalog/skills/`), and a top-level `roles: {orchestrator: {skills: [...]}}` gives the skills of the
 one agent that is no type's producer; `catalog.py` validates both on every load.
@@ -364,14 +388,15 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 | surfaces | `rules/done.py` | build types: one `surface <name>` row per surface, PASS or N/A with reason |
 | exercise | `rules/exercise.py` | Python only: tests under OUT enter at least one function of every non-test `.py` in OUT (traced run) |
 | holdouts | `rules/holdouts.py` | the verifier's newest holdout result since the run start: each failed holdout UNMET `holdout H<n> failed (hint: ...)` (owner producer), a LEAK or a commitment mismatch BLOCKED; a `DISPUTE \| H<n> \| <why>` row in DONE.md is BLOCKED (an owner decision, never resolved automatically, excuses nothing), a malformed one UNMET; unexcusable (§7.1) |
+| backlog | `rules/backlog.py` | `intake` runs only: the deterministic filing rules (`factory/backlog.py`, §7.3) hold; a brief that would be refused is UNMET (owner producer: the planner is resumed with the reasons), a job without a SHIP line in the newest `DOD-verdict*.md` is the DoD reviewer's; unexcusable |
 | verified | `rules/verified.py` | the run's job, once closed, has a `konstant verify` verdict newer than the run start; FAIL = UNMET, BLOCKED = BLOCKED; a board that cannot be read = UNMET (fail closed); `task check --offline` skips the rule with a warning (the evidence the runner closes with uses it, so the verifier's re-run does not wait on its own verdict) |
 | authorship | `rules/authorship.py` | runner mode: EVERY verdict file (superseded cycles too) must have been created by a run of the verifying phase it names (phase manifests, §6.5) and touched by no other phase run, and its content must equal the sha256 the last phase that touched it recorded (F-05: a change outside every phase window); otherwise UNMET `AUTHORSHIP:` (also for a verdict file no phase run created). No re-run can undo it: the loop stops (owner `none`). Inside a parallel group (one shared snapshot) a verdict file is credited by NAME to the member it names. Interactive mode: an unattributed WARNING |
 | cleanup | `rules/cleanup.py` | DONE.md carries `CLEANUP: <what was moved/removed and where>` or `CLEANUP: NONE-NEEDED`; `[gate] cleanup = warn` (default) or `fail` |
 
 Every finding carries an owner (`producer`, `orchestrator`, `verifier:<file>`, `none`) that the
 loop resumes. Rule order is fixed because the repeat-stop compares the FIRST reason: verdicts,
-phases, authorship, judged, done (+absence, surfaces), cleanup, tests (+exercise), lastmile,
-hygiene, holdouts, verified; the DECLINED filter runs last.
+phases, authorship, judged, backlog, done (+absence, surfaces), cleanup, tests (+exercise),
+lastmile, hygiene, holdouts, verified; the DECLINED filter runs last.
 
 What the check trusts (F-06, F-11): only run dirs directly under `<workspace>/var/runs/` (the
 workspace of KONSTANT_HOME / `--config` when the caller has one, else the one the run dir sits
@@ -651,6 +676,69 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
 - **doctor** rows `factory jail`, `factory harness` (per harness: home relocation), `claude
   sandbox`, `identities`.
 
+### 7.3 Intake: goals -> jobs -> reviewed DoD -> sealed holdouts (level 5; docs/LEVEL5.md 4)
+
+- **Goal files** (`factory/goal.py`): `[goal] id, project, text`, `[limits]` (only `max_attempts`
+  required, default 3, owner decision Q5; `wall_clock`, `max_task_runs`, `max_jobs`,
+  `max_rollbacks`, `max_tokens`, `max_cost_usd` optional, 0 = not limited), `[ship]` (target
+  github|branch|apply|command, branch, post_probes, the target's keys; read by L5-4), `[holdout]`
+  (author agent|owner, min_per_job). Missing values come from `[factory] defaults`. Unknown tables or
+  keys, wrong types and out-of-range values refuse the file (`goal: ...`, one line each).
+- **Filing a goal** (`POST /api/goals`, board/api/goals.py; CLI `goal add FILE|-`): from a file,
+  the owner role only, active at once; `--from-chat --session ID`, a role of `[factory]
+  goal_roles` (public default `["owner"]`; this owner's config adds `orchestrator`), recorded
+  `proposed` and filed only by `confirm` from the same session, which `chat turn` sends when the
+  owner's NEXT message is a plain yes (anything else: `withdraw`). Only role tokens file goals. The
+  board copies the filed bytes to `var/factory/goals/<id>.toml` (0400; machinery) and records
+  their sha256 (`spec_sha256`, immutable); `goal list|show|pause|resume|cancel` (pause: owner or
+  `factory`; resume, cancel: owner).
+- **The chat** (`factory/chat.py`, `chat turn`; the konstant-gate plugin's `chat: true`, from
+  `[notify] kind = "chat"`): per owner message of the orchestrator session: decide this session's
+  proposal; show new escalations of this session's goals (and of file goals) since the session's
+  cursor (`var/factory/chat/<session>.json`) and one summary line of new outcomes; a typed request
+  without a `[type:]`/`[job:]` tag gets the INTAKE block (one-line confirmation, `goal add -
+  --from-chat`) instead of the gate. Refused inside a task run. The plugin marks the session's own
+  bash `KONSTANT_CHAT_SESSION=<id>` (the default `--session` of `goal add --from-chat`); there
+  konstant refuses `intake`, `holdout author` and the four factory identities (4.0 step 4: the
+  orchestrator never runs the factory's steps). docs/DSH.md.
+- **`konstant intake GOAL`** (`factory/intake.py`): refused without the jail (exit 2), for a goal
+  that is not active or was taken in (exit 2). The factory identity sets the goal's intake to
+  `planning`; a task run of the flag-only type `intake` runs in factory mode (every phase jailed,
+  the planner as `planner`, the reviewer as `dod-reviewer`, the close-out as `planner`), with no
+  project: the phases work in `OUT` under the run dir (record `cwd`), the target is read-only and
+  named in the prompt (`KONSTANT-TARGET`, `KONSTANT-GOAL`, `KONSTANT-MAX-JOBS`). The DoD loop and
+  the `backlog` rule resume the planner on a brief the filing would refuse. After MET:
+  `backlog.lint()` again (same inputs); a reason = exit 3, one `UNMET: ...` line each, intake
+  `refused`, a `BLOCKED` event, nothing filed. Then, with the intake at `filing`: each job filed as
+  `planner` (`goal`, `after` = the job id of the earlier row; the board forces `waiting_approval`
+  and `holdout_required`, computes `budget_json` = `{max_attempts, goal_limits}` and `ship_mode`,
+  checks the goal's project and `max_jobs`), its `dod-review SHIP` posted as `dod-reviewer` (the
+  verdict line's reason), intake `filed`, each job approved as `factory`.
+- **The filing rules** (`factory/backlog.py`): `BACKLOG.md` rows `B<n> | <type> | <title> |
+  after:B<m>|-`, unique ids, within `max_jobs`; known, non-flag-only types; `after:` only to an
+  earlier row; each `jobs/B<n>.md` has a DoD, no `dod.lint` flag at all (NOPROBE = `job B<n> DoD
+  has no PROBE`), no PROBE the allowlist refuses (`{workdir}` checked as a project path), and a SHIP
+  line in the newest `DOD-verdict*.md`.
+- **The scenario writer** (`holdout/author.py`, also `holdout author JOB`): `[holdout]
+  writer_harness`/`writer_model` (default: the workspace's own; one model for every role is
+  supported and `doctor` says so as INFO), refused (`AuthorRefused`) on a harness whose home
+  cannot be relocated (`command`, an argv template) or without the jail. One phase as identity
+  `scenario`: cwd and only writable dir `<store>/<job>/drafts/`, harness home `<store>/<job>/home/`
+  (`Phase.home_base`; deleted after), run dir `<store>/<job>/runs/<stamp>-a<n>/`; the jail masks
+  the store (its own dirs are bound AFTER the mask: `jail.wrap` binds a writable dir inside a
+  masked one late instead of skipping the mask), `var/runs/`, `var/logs/`, `var/factory/`,
+  `var/sessions.json`, the board DB, every `<project>@<job>` clone and the target's `.audits/`
+  (`Phase.hide`), and exposes no token (`Phase.tokens = ()`). Prompt: the composed
+  `scenario-writer` profile, goal text, job title and brief, the target path, the drafts dir. Then
+  `store.seal(..., drafts=)` (lint + negative control + commitment as `scenario`); refused drafts go
+  back once with the lint reasons; a second refusal returns `holdout-authoring BLOCKED: job N:
+  <rule codes>`, which intake records as a `BLOCKED` event and an `escalation` trail row (actor
+  `factory`), exit 4. `author = "owner"`: the jobs wait for `holdout add`.
+- **Events** (`factory/notify.py`): `var/factory/events.jsonl`, one redacted line per event;
+  escalations also to `[notify] kind` stdout / file (`notify.log`) / chat; outcomes (`FILED`) are
+  never pushed. Webhook, retries, acks and the halt on a failed delivery are wave L5-5.
+- **doctor** rows `scenario writer` and `chat intake`.
+
 ## 8. Catalog, generator and generated surfaces
 
 Sources (in git): `catalog/agents/<agent>.md` = frontmatter (`name`, `description`, `tools` hint)
@@ -728,7 +816,8 @@ write, whatever the harness: the release's code and tools (`bin/ .venv/ src/ cat
 install.sh get.sh pyproject.toml konstant.toml`), every generated harness surface (`.claude/
 .agents/ .dsh/ .gemini/ AGENTS.md CLAUDE.md`), `var/harness/`, `var/secrets/`, the board DB and
 the bookkeeping files under `var/`, run records, and `.git/` (shells that commit get
-`.git/config` + `.git/hooks` read-only), and `var/holdout/`. `machinery.SEALED` lists what no phase may
+`.git/config` + `.git/hooks` read-only), `var/holdout/` and `var/factory/` (goal copies, factory
+events, chat cursors; L5-3). `machinery.SEALED` lists what no phase may
 even READ (the holdout store, §7.1). The Claude settings (deny rules + sandbox `denyWrite`),
 the codex profile, the gemini policy and the jail's bind rules all read it (`jail.wrap(home=)`
 re-binds every machinery path and all of `var/` read-only inside any writable bind, then reopens
@@ -990,6 +1079,11 @@ Global: `--as ROLE`, `--json`, `--config PATH`; env `KONSTANT_HOME`. Exit 0 ok, 
 | `verify ID` / `verify --pending` | `--dry-run --no-rerun --json` | §7 (exit 0 PASS, 3 FAIL, 4 BLOCKED) |
 | `holdout add ID` | `--file FILE` (repeatable) | lint + negative control + commitment; moves the files into the store (owner; §7.1; exit 1 refused, 2 no jail) |
 | `holdout list ID` / `holdout check ID` / `holdout show ID HID` | `--control` (check) | commitments and states / commitment + parse (+ negative control) / one file from the store; check and show refused inside a task run |
+| `holdout author ID` | `--harness` | run the scenario writer for one job and seal its drafts (§7.3; exit 4 refused twice, 2 setup) |
+| `goal add FILE\|-` | `--from-chat --session` | file a goal (owner), or propose one from the owner's chat (§7.3) |
+| `goal list` / `goal show ID` / `goal pause\|resume\|cancel ID` | `--status` (list) | goals, one goal with its jobs, status changes (owner; pause also factory) |
+| `intake GOAL` | `--harness` | planner -> DoD review -> filing -> approval -> scenario writer (§7.3; exit 0, 3 refused, 4 authoring BLOCKED, 2 setup) |
+| `chat turn` | `--session TEXT\|-` | one owner message of the orchestrator chat: confirm/withdraw, escalations, the intake block (JSON; the dsh plugin's seam) |
 | `agents sync` | `--check --harness NAME` | §8 (configured harnesses only) |
 | `dsh APP [ARGS]` | `--project --dry-run` | start your dsh session (web, tui, headless) with konstant's two layers (§6.6); refused (exit 1) when the session would load a layer from outside the workspace |
 | `agents list` | | types, agents, skills, workflows |
@@ -1059,6 +1153,20 @@ min_per_job = 2                # sealed scenarios a holdout job needs (at least 
 max_failed_rounds = 2          # failed holdout rounds before the set is worn and retired
 run_timeout_s = 60             # one scenario run in the verifier's jail
 store = "var/holdout"          # or an absolute path outside the workspace (a second OS user)
+writer_harness = ""            # the scenario writer's harness ("" = [harness]; never command)
+writer_model = ""              # its model ("" = the same: one model for every role, Q1)
+
+[factory]                      # level-5 intake (§7.3)
+goal_roles = ["owner"]         # + "orchestrator": goal add --from-chat from the owner's chat
+defaults = { max_attempts = 3, wall_clock = "0", max_task_runs = 0, max_jobs = 0,
+             max_rollbacks = 0, max_tokens = 0, max_cost_usd = 0, ship_target = "branch",
+             ship_branch = "main", holdout_author = "agent" }   # what a goal file does not name
+
+[notify]
+kind = "stdout"                # stdout | file | chat (the dsh orchestrator chat; webhook: L5-5)
+
+[ship]
+decision_types = ["infra"]     # goal jobs of these types are filed ship_mode = decision (Q4)
 
 [verify]
 rerun = true
@@ -1122,4 +1230,11 @@ board at start (a typo must not silently disarm a gate).
   `machinery.SEALED` is emptied; the board's claim guard, PASS guard, burn and exposure budget;
   the CLI; and holdout jobs run through the real dsh adapter (stub dsh + the fake harness's
   `peek`, `overfit` and `leak` modes) to `verify`.
+- **Intake (`tests/factory/`, L5-3):** `test_goals_board.py` (goal files B1/B2, goal_roles, the
+  chat proposal, the filing window, approval after a dod-review SHIP, the identity pairs, B10,
+  each refusal red beside green), `test_intake.py` (B3-B5, B8, B10 through the real dsh adapter
+  with the fake harness's planner / DoD-reviewer / scenario-writer modes, `weak-dod`,
+  `weak-scenario`, no jail, a non-relocatable writer), `test_scenario_isolation.py` (B9 and the
+  jail's late bind inside a mask, red twin), `test_chat_intake.py` (B11 with the fake harness's
+  `inject` mode); the plugin's chat path in `plugin.test.mjs`.
 - **CI:** GitHub Actions on Ubuntu, Python 3.10 and 3.12: unit + board + gate + e2e.

@@ -12,18 +12,19 @@ from tests.catalog.conftest import SRC
 
 TYPES = {"code": "coder", "frontend": "frontend", "infra": "infra", "test": "tester",
          "security": "security", "review": "reviewer", "research": "researcher",
-         "docs": "writer", "design": "architect"}
+         "docs": "writer", "design": "architect", "intake": "planner"}
+ROLES = ["orchestrator", "scenario-writer"]
 
 
 def test_one_agent_per_type():
     cat = catalog.load(SRC, check_files=True)
     mapping = {t: cat.agent_of(t) for t in cat.type_names()}
     assert mapping == TYPES
-    assert len(set(mapping.values())) == len(mapping) == 9          # a bijection
+    assert len(set(mapping.values())) == len(mapping) == 10         # a bijection
     assert {cat.type_of_agent(a) for a in mapping.values()} == set(TYPES)
     assert cat.type_of_agent("orchestrator") is None
     files = sorted(p.stem for p in (SRC / "agents").glob("*.md"))
-    assert files == sorted(list(TYPES.values()) + ["orchestrator"]) and len(files) == 10
+    assert files == sorted(list(TYPES.values()) + ROLES) and len(files) == 12
 
 
 def test_counts_skills_and_workflows():

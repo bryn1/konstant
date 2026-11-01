@@ -263,3 +263,65 @@ test('every decision is logged to var/logs/konstant-gate.log of the workspace', 
   assert.match(log, /dod-loop ARMED session=session-0001 type=docs job=null run=\/ws\/var\/runs\/r1/)
   assert.match(log, /dod-loop resume 1\/3 session=session-0001: r1/)
 })
+
+// --- (f) the chat is the intake (docs/LEVEL5.md 4.0; [notify] kind = "chat") ------------------
+const chatReply = (extra = {}) => ({ code: 0, stdout: JSON.stringify({ lines: [], intake: false, block: '', confirmed: null, withdrawn: null, ...extra }) })
+const INTAKE = '=== KONSTANT INTAKE (this chat is the intake) ===\npropose a goal\n=== END KONSTANT INTAKE ==='
+
+test('chat: a typed request gets the INTAKE block instead of the gate and arms no loop', async () => {
+  const h = setup({ turn: [chatReply({ intake: true, block: INTAKE })] }, { chat: true })
+  const a = agent()
+  const d = await preStep(h, a, [user('make greeter greet by name, with a CLI and a README')])
+  assert.equal(text(d.messages[0]), `${INTAKE}\nmake greeter greet by name, with a CLI and a README`)
+  const c = h.calls()
+  assert.equal(c.length, 1)
+  assert.deepEqual(c[0].argv, ['chat', 'turn', '--session', 'session-0001', '-'])
+  assert.equal(c[0].stdin, 'make greeter greet by name, with a CLI and a README')
+  await stop(h, a)                                   // no gate, so no DoD loop either
+  assert.equal(h.calls().length, 1)
+})
+
+test('chat: the owner\'s yes comes back with the confirmation line, then the gate runs', async () => {
+  const line = 'konstant: goal greeter FILED from this chat (sha256 0123456789ab): project greeter'
+  const h = setup({ turn: [chatReply({ lines: [line], confirmed: 'greeter' })], gate: [small] }, { chat: true })
+  const a = agent()
+  const d = await preStep(h, a, [user('yes')])
+  assert.equal(text(d.messages[0]), `konstant chat:\n- ${line}\n\nyes`)
+  assert.deepEqual(h.calls().map(c => c.argv[1]), ['turn', 'gate'])
+})
+
+test('chat: an escalation is shown at the start of a gated turn, before the gate block', async () => {
+  const esc = 'konstant BLOCKED: goal greeter: intake refused, nothing filed: UNMET: job B2 DoD has no PROBE'
+  const h = setup({ turn: [chatReply({ lines: [esc] })], gate: [typed()] }, { chat: true })
+  const a = agent()
+  const d = await preStep(h, a, [user('[type:docs] write USAGE.md')])
+  assert.equal(text(d.messages[0]), `konstant chat:\n- ${esc}\n\n${BLOCK}\n[type:docs] write USAGE.md`)
+})
+
+test('chat: a failing chat turn never blocks the session (notice, then the gate as before)', async () => {
+  const h = setup({ turn: [{ code: 1, stderr: 'board unreachable' }], gate: [small] }, { chat: true })
+  const a = agent()
+  const msgs = [user('what is the board?')]
+  const d = await preStep(h, a, msgs)
+  assert.equal(d.messages, msgs)
+  assert.match(text(a.injected[0]), /konstant chat turn failed \(exit 1\)/)
+})
+
+test('chat: off by default - no chat turn is run', async () => {
+  const h = setup({ gate: [small] })
+  await preStep(h, agent(), [user('what is the board?')])
+  assert.deepEqual(h.calls().map(c => c.argv[1]), ['gate'])
+})
+
+test('chat: a delegated child never reaches the chat turn', async () => {
+  const h = setup({}, { chat: true })
+  await preStep(h, agent({ origin: 'subagent', delegationDepth: 1 }), [user('yes')])
+  assert.equal(h.calls().length, 0)
+})
+
+test('chat: the session\'s own bash is marked KONSTANT_CHAT_SESSION, a child stays a worker', async () => {
+  const h = setup({}, { chat: true })
+  const env = h.registered[0]
+  assert.deepEqual(env.resolve({ agent: agent() }), { KONSTANT_CHAT_SESSION: 'session-0001' })
+  assert.deepEqual(env.resolve({ agent: agent({ origin: 'subagent' }) }), { KONSTANT_ROLE: 'worker', KONSTANT_IN_TASK: '1' })
+})

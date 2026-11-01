@@ -109,7 +109,9 @@ class Harness:
     def phase(self, values: dict) -> Phase:
         return Phase(values, model=self.model, endpoint=self.endpoint, allow=self.allow,
                      jail=self.jail, factory=self.factory,
-                     identity=values.get("identity") or "worker")
+                     identity=values.get("identity") or "worker",
+                     home_base=values.get("home_base"), tokens=values.get("tokens"),
+                     hide=tuple(values.get("hide") or ()))
 
     def driver(self):
         """The adapter that starts, confines and cleans up a phase: the configured one, or the
@@ -139,7 +141,8 @@ class Harness:
                 raise HarnessError(why)
 
     def run(self, prompt: str, *, agent: str, cwd: Path, run_dir: Path, label: str,
-            out: Path | None = None, identity: str = "worker") -> PhaseResult:
+            out: Path | None = None, identity: str = "worker", home_base: Path | None = None,
+            tokens: tuple | None = None, hide: tuple = ()) -> PhaseResult:
         if identity not in PHASE_IDENTITIES:
             raise HarnessError(f"a phase acts as one of {', '.join(PHASE_IDENTITIES)}, not "
                                f"{identity!r}")
@@ -151,7 +154,7 @@ class Harness:
             fh.write(prompt)
         values = {"prompt": prompt, "prompt_file": pfile, "agent": agent, "cwd": cwd,
                   "run_dir": run_dir, "workspace": self.workspace, "out": out,
-                  "identity": identity}
+                  "identity": identity, "home_base": home_base, "tokens": tokens, "hide": hide}
         argv = self.argv(values)
         drv, ph = self.driver(), self.phase(values)
         extra = {}

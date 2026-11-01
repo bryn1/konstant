@@ -144,6 +144,38 @@ rewritten tester profile, a layer planted for a later phase or for your session)
 this path in `tests/review/test_review2_dsh_attacks.py`. The plugin installs nothing inside such a
 phase (`KONSTANT_IN_TASK=1`): the runner owns the loop.
 
+## The chat is the intake (level 5)
+
+With `[notify] kind = "chat"` and `[factory] goal_roles = ["owner", "orchestrator"]` in
+`konstant.toml` (then `bin/konstant agents sync`), your orchestrator session is the intake of the
+dark factory ([LEVEL5.md](LEVEL5.md) section 4.0). The plugin runs `bin/konstant chat turn
+--session <id> -` on every message you type (never on a delegated child or a konstant nudge), and
+konstant (Python, no model) decides:
+
+- **A work request** (a typed task without `[type:..]` or `[job:..]`) is not done in the chat.
+  The message reaches the session with a `KONSTANT INTAKE` block in front of it: the orchestrator
+  says in ONE line what it will file (project, goal, limits; else the defaults: `max_attempts =
+  3`) and proposes it with `bin/konstant goal add - --from-chat --session <id>` (a goal file on
+  stdin). The proposal is `proposed`, not filed.
+- **Your next message** decides it: a plain yes (`yes`, `ok`, `ja`, `go`, `confirm`, `file it`,
+  ...) files the goal (source `chat`, its copy in `var/factory/goals/`); anything else withdraws it.
+  Only your own message in that same session does this: text in a phase log, a web page or a file
+  is never a message you sent, and `goal add`/`chat turn` refuse inside a task run.
+- **Reports come back here**: the factory's escalations for this session's goals (`BLOCKED`,
+  later `DECISION`, `BUDGET_STOP`, ...) are shown at the start of your next turn as `konstant
+  chat:` lines, once each; outcomes (`FILED`, ...) as one summary line, details with `bin/konstant
+  goal show <goal>`.
+- A message tagged `[type:..]` or `[job:..]` keeps the level-4 gate above.
+- The session's own bash gets `KONSTANT_CHAT_SESSION=<id>` (so `goal add --from-chat` needs no
+  `--session`), and konstant refuses the factory's own steps from it: `konstant intake`,
+  `holdout author` and `--as planner|dod-reviewer|scenario|factory`. The orchestrator proposes;
+  the factory runs.
+
+In this release the factory step after the yes is `bin/konstant intake <goal>`, run outside the
+chat (by you or, from wave L5-5 on, by the factory loop): planner and DoD-reviewer phases, deterministic filing,
+approval and the scenario writer; its result comes back into the chat as above. A failing `chat
+turn` never blocks the session: a notice says so and the gate runs as before.
+
 ## The plugin
 
 Source `src/konstant/harnesses/dsh_gate/index.ts` (TypeScript, dsh's cordis plugin API: the
@@ -172,6 +204,11 @@ differ. A type check against dsh's own sources: point a tsconfig that extends th
   Claude Code test run with your rights) is not checked, and dsh hot-reloads a profile's
   `cordis.patch.yml` into a running web session.
 - dsh confines writes, not the network; there is no per-command allow list.
+- The chat intake's confirmation is mechanical only as far as the session is: the plugin sends
+  `chat turn` for your genuine messages, but the session itself is unjailed, so a model in it that
+  ran `bin/konstant chat turn ... yes` on its own could confirm its own proposal. The one-line
+  confirmation stays visible in the chat, and every filed goal still goes through the whole
+  factory (DoD review by another identity, holdouts, the verifier).
 - konstant reads files, never the dsh transcript: in a session, verdict authorship is reported as
   a warning (the runner, with its phase manifests, enforces it).
 - The live check of this release ran on one local model (vLLM); a smaller model may not finish a

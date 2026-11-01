@@ -98,7 +98,29 @@ DEFAULTS: dict = {
         # the sealed store: var/holdout (masked in every jail), or an absolute path OUTSIDE the
         # workspace readable only by a second OS user who runs the verifier (Q3, LEVEL5 3.8)
         "store": "var/holdout",
+        # the scenario writer (docs/LEVEL5.md 3.4): "" = the default harness and model. Owner
+        # decision Q1: one model may play every role; independence comes from identity, context
+        # and the jail, so a second harness or model is optional, never required
+        "writer_harness": "",
+        "writer_model": "",
     },
+    # level-5 intake (docs/LEVEL5.md 4): who may file a goal, and the limits a goal gets for what
+    # it does not name. Only max_attempts is required (owner decision Q5); 0 = not limited
+    "factory": {
+        # `goal add` from a file: owner only; `goal add --from-chat` also these roles (the owner's
+        # orchestrator session is the intake: 4.0). The public default keeps it to the owner
+        "goal_roles": ["owner"],
+        "defaults": {"max_attempts": 3, "wall_clock": "0", "max_task_runs": 0, "max_jobs": 0,
+                     "max_rollbacks": 0, "max_tokens": 0, "max_cost_usd": 0,
+                     "ship_target": "branch", "ship_branch": "main", "holdout_author": "agent"},
+    },
+    # where the factory's escalations go (docs/LEVEL5.md 6.3): stdout, file (var/factory/
+    # notify.log) or chat (the gated dsh session shows them at the owner's next turn, 4.0);
+    # webhook arrives with the factory loop (wave L5-5)
+    "notify": {"kind": "stdout"},
+    # ship-time owner decisions (docs/LEVEL5.md 5.4; owner decision Q4): jobs of these types are
+    # filed `ship = decision` and never ship unattended
+    "ship": {"decision_types": ["infra"]},
     "verify": {
         "rerun": True,
         "rerun_timeout_s": 900,
@@ -109,7 +131,7 @@ DEFAULTS: dict = {
 }
 
 # Tables whose keys are free-form (user data), not a schema.
-_FREE_TABLES = {("harness", "env"), ("harness", "types")}
+_FREE_TABLES = {("harness", "env"), ("harness", "types"), ("factory", "defaults")}
 HARNESS_NAMES = ("claude", "codex", "gemini", "dsh", "command")
 TYPE_OVERRIDE_KEYS = ("name", "model", "command")
 
@@ -146,6 +168,10 @@ class Config:
     def base_url(self) -> str:
         b = self.data["board"]
         return f"http://{b['host']}:{b['port']}"
+
+    def session_gate(self) -> dict:
+        """[gate] plus `chat` ([notify] kind = "chat"): the dsh session plugin's settings."""
+        return {**self.data["gate"], "chat": self.data["notify"]["kind"] == "chat"}
 
     def resolve(self, rel: str) -> Path:
         p = Path(rel)
@@ -196,6 +222,35 @@ def _validate(data: dict, path) -> None:
     check_host(b["host"], b["allow_remote"], f"{path}: [board]")
     check_harness(data["harness"], path)
     check_holdout(data["holdout"], path)
+    check_factory(data, path)
+
+
+GOAL_ROLES = ("owner", "orchestrator")
+NOTIFY_KINDS = ("stdout", "file", "chat")
+
+
+def check_factory(data: dict, path) -> None:
+    """[factory], [notify], [ship] and the scenario writer's harness (docs/LEVEL5.md 4, 6.3)."""
+    roles = data["factory"]["goal_roles"]
+    bad = [r for r in roles if r not in GOAL_ROLES]
+    if bad or "owner" not in roles:
+        raise ConfigError(f"{path}: [factory] goal_roles = {roles!r}: owner, optionally "
+                          "orchestrator (a phase acts as worker and never files a goal)")
+    from konstant.factory import goal as goal_mod
+    try:
+        goal_mod.check_defaults(data["factory"]["defaults"])
+    except goal_mod.GoalError as exc:
+        raise ConfigError(f"{path}: [factory] defaults: {exc}") from None
+    if data["notify"]["kind"] not in NOTIFY_KINDS:
+        raise ConfigError(f"{path}: [notify] kind = {data['notify']['kind']!r}: one of "
+                          f"{', '.join(NOTIFY_KINDS)} (webhook arrives with the factory loop)")
+    w = data["holdout"]["writer_harness"]
+    if w and w not in HARNESS_NAMES:
+        raise ConfigError(f"{path}: [holdout] writer_harness = {w!r}: one of "
+                          f"{', '.join(HARNESS_NAMES)} or empty")
+    m = data["holdout"]["writer_model"]
+    if m and not _MODEL.fullmatch(m):
+        raise ConfigError(f"{path}: [holdout] writer_model = {m!r} is not a model name")
 
 
 def check_holdout(h: dict, path) -> None:

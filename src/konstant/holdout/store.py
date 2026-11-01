@@ -76,12 +76,21 @@ def _inside(path, parent) -> bool:
     return p == q or p.startswith(q + os.sep)
 
 
-def prepare(cfg, job: dict, sealed: list, sources: list) -> list:
+def drafts_dir(cfg, job_id) -> Path:
+    """Where the scenario writer's phase writes (docs/LEVEL5.md 3.4): inside the sealed store."""
+    return job_dir(cfg, job_id) / "drafts"
+
+
+def prepare(cfg, job: dict, sealed: list, sources: list, drafts: Path | None = None) -> list:
     """Parse + lint the new files against the job's brief and the sealed set. -> [(source,
-    Scenario)]; SealRefused with every reason."""
+    Scenario)]; SealRefused with every reason. `drafts`: the scenario writer's drafts dir, the
+    only place inside the workspace a source may come from (it is in the masked store)."""
     reasons, new = [], []
     for src in sources:
-        if _inside(src, cfg.home):
+        if drafts is not None:
+            if not _inside(src, drafts):
+                reasons.append(f"DRAFT OUTSIDE THE DRAFTS DIR: {src}")
+        elif _inside(src, cfg.home):
             reasons.append(f"SOURCE INSIDE THE WORKSPACE: {src}: phases can read it; write the "
                            "scenario outside the workspace and pass that path (it is moved into "
                            "the store)")
@@ -126,8 +135,9 @@ def project_of(cfg, client, job: dict) -> Path:
     return Path(path)
 
 
-def seal(cfg, client, ref: str, sources: list) -> list:
-    """The whole of 3.2 for `holdout add`. Returns the board's rows of the new scenarios."""
+def seal(cfg, client, ref: str, sources: list, drafts: Path | None = None) -> list:
+    """The whole of 3.2 for `holdout add` (and, with `drafts`, for the scenario writer's drafts:
+    holdout/author.py). Returns the board's rows of the new scenarios."""
     why = runner.confined(cfg)
     if why:
         raise SealRefused([why + " (the negative control runs every scenario in it)"], 2)
@@ -136,7 +146,7 @@ def seal(cfg, client, ref: str, sources: list) -> list:
         raise SealRefused([f"job {job['display_id']} is {job['status']}: holdouts are sealed "
                            "only while the job is not claimed (queued or waiting_approval)"])
     sealed = rows(client, job["id"])["holdouts"]
-    new = prepare(cfg, job, sealed, [Path(s) for s in sources])
+    new = prepare(cfg, job, sealed, [Path(s) for s in sources], drafts)
     project = project_of(cfg, client, job)
     try:   # the base: the target commit the job clone starts from (LEVEL5 3.2 step 2, 2.4)
         base = runner.resolve(project, job.get("workdir_base") or "HEAD")

@@ -4,8 +4,8 @@ Exit 0 MET (stdout empty) · 3 UNMET (one reason per line) · 4 BLOCKED (nothing
 or a verifier honestly reports what could not be verified; lines start `BLOCKED: `; never resumed,
 never MET) · 5 the check itself failed (never MET) · 2 usage.
 Rule order is fixed (the loop's repeat-stop compares the FIRST reason): verdicts, phases,
-authorship, judged, done, absence, surfaces, cleanup, tests, exercise, lastmile, hygiene,
-holdouts, verified. The DECLINED filter runs last; it never excuses a finding of the rules in
+authorship, judged, backlog (intake runs only), done, absence, surfaces, cleanup, tests,
+exercise, lastmile, hygiene, holdouts, verified. The DECLINED filter runs last; it never excuses a finding of the rules in
 UNEXCUSABLE (authorship, verdicts, phases, judged, tests, verified, holdouts: what the verifying
 phases, the tests and the holdouts say is never waived by text the close-out agent writes;
 REVIEW F-01, docs/LEVEL5.md 3.6 step 7).
@@ -25,16 +25,18 @@ from pathlib import Path
 
 from konstant import catalog, config
 from konstant.gate import record
-from konstant.gate.rules import (authorship, cleanup, done, holdouts, hygiene, judged, lastmile,
-                                 tests, verdicts, verified)
+from konstant.gate.rules import (authorship, backlog, cleanup, done, holdouts, hygiene, judged,
+                                 lastmile, tests, verdicts, verified)
 from konstant.gate.rules.common import Finding, Run
 
 MET, UNMET, BLOCKED, CHECK_ERROR, USAGE = 0, 3, 4, 5, 2
 RULES = (("verdicts", verdicts.check_verdicts), ("phases", verdicts.check_phases),
-         ("authorship", authorship.check), ("judged", judged.check), ("done", done.check),
+         ("authorship", authorship.check), ("judged", judged.check),
+         ("backlog", backlog.check), ("done", done.check),
          ("cleanup", cleanup.check), ("tests", tests.check), ("lastmile", lastmile.check),
          ("hygiene", hygiene.check), ("holdouts", holdouts.check), ("verified", verified.check))
-UNEXCUSABLE = {"authorship", "verdicts", "phases", "judged", "tests", "verified", "holdouts"}
+UNEXCUSABLE = {"authorship", "verdicts", "phases", "judged", "tests", "verified", "holdouts",
+               "backlog"}
 
 
 class CheckUsage(Exception):

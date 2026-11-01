@@ -10,15 +10,19 @@ from konstant import catalog
 
 EXPECTED = {"code": "coder", "frontend": "frontend", "infra": "infra", "test": "tester",
             "security": "security", "review": "reviewer", "research": "researcher",
-            "docs": "writer", "design": "architect"}
+            "docs": "writer", "design": "architect", "intake": "planner"}
 
 
 def test_the_shipped_catalog_has_nine_types_one_agent_each():
+    """Nine task types plus the flag-only level-5 `intake` (agent planner, LEVEL5 4.2); the role
+    agents are the orchestrator and the scenario writer (LEVEL5 3.4)."""
     cat = catalog.load()
     assert {t: cat.agent_of(t) for t in cat.type_names()} == EXPECTED
-    assert len(set(EXPECTED.values())) == 9                       # a bijection
+    assert len(set(EXPECTED.values())) == 10                      # a bijection
     assert cat.review_types == ["review", "docs", "design", "research"]
-    assert "orchestrator" in cat.agents() and len(cat.agents()) == 10
+    assert [t for t in cat.type_names() if cat.flag_only(t)] == ["intake"]
+    assert "orchestrator" in cat.agents() and "scenario-writer" in cat.agents()
+    assert len(cat.agents()) == 12
 
 
 def _write(tmp_path, data):

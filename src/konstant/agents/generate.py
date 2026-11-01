@@ -115,6 +115,11 @@ class Generator:
 
     def contract(self, agent: str) -> str:
         t = self.cat.type_of_agent(agent)
+        if t is None and agent == "scenario-writer":
+            return ("Your deliverable is the scenario files in the drafts directory your prompt "
+                    "names, nothing else: konstant lints each one, runs it on the base (a proof "
+                    "must fail there, a regression pass) and seals it where no producer can read "
+                    "it (docs/LEVEL5.md 3.4).")
         if t is None:
             return ("You produce no deliverable of your own: phases produce, verifiers judge, "
                     "konstant checks. Your deliverable is the closed loop and the final report.")
@@ -131,8 +136,11 @@ class Generator:
         text = fill(self._read("templates/agent.md.tmpl"), {
             "body": body.strip(), "contract": self.contract(agent),
             "base": self._read("doctrine/base.md").strip(), "skills": self.skills_block(agent),
-            "type": t or "(role: drives every type)",
-            "workflow": f"`workflow-{self.cat.workflow_of(t)}`" if t else "one per type",
+            "type": t or ("(role: a job's holdout scenarios, before any producer)"
+                          if agent == "scenario-writer" else "(role: drives every type)"),
+            "workflow": (f"`workflow-{self.cat.workflow_of(t)}`" if t else
+                         "none (one phase, run by `konstant intake` / `holdout author`)"
+                         if agent == "scenario-writer" else "one per type"),
         }, "templates/agent.md.tmpl")
         return meta, text
 
@@ -167,7 +175,7 @@ class Generator:
     def routing_table(self) -> str:
         rows = ["| type | agent | deliverable | workflow skill | closes by |",
                 "|---|---|---|---|---|"]
-        for t in self.cat.type_names():
+        for t in self.cat.classifiable():      # a flag-only type (intake) is not routed to
             spec = self.cat.types[t]
             rows.append(f"| `{t}` | `{spec['agent']}` | {spec['deliverable']} | "
                         f"`workflow-{t}` | {'review' if self.cat.is_review_type(t) else 'verify'} |")
@@ -178,7 +186,7 @@ class Generator:
         return HEADER + "\n" + fill(self._read(f"templates/{tmpl}"), {
             "workspace": str(self.ws), "routing": self.routing_table(),
             "orchestrator": orch.strip(), "base": self._read("doctrine/base.md").strip(),
-            "types": ", ".join(f"`{t}`" for t in self.cat.type_names()),
+            "types": ", ".join(f"`{t}`" for t in self.cat.classifiable()),
             "operate": self._read("templates/operate.md.tmpl").strip(),
             **self._agents_md_paths(),
         }, f"templates/{tmpl}")

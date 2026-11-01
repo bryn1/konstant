@@ -48,7 +48,9 @@ def plugin_config(ws: Path, gate: dict, policy: dict) -> dict:
             "maxResumes": int(gate.get("max_resumes", 3)),
             "maxVerifyRounds": int(policy.get("max_rounds", 3)),
             "verify": bool(gate.get("verify_after_close", True)),
-            "fileJob": bool(gate.get("file_job", False))}
+            "fileJob": bool(gate.get("file_job", False)),
+            # [notify] kind = "chat": the orchestrator chat is the intake (docs/LEVEL5.md 4.0)
+            **({"chat": True} if gate.get("chat") else {})}
 
 
 def session_patch(ws: Path, gate: dict, policy: dict, header: str) -> str:

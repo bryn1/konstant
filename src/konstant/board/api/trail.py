@@ -24,7 +24,9 @@ def get_trail(ref: str, request: Request, actor: Actor = Depends(reader)):
 
 @router.post("/api/jobs/{ref}/trail")
 def append(ref: str, body: NoteIn, request: Request, actor: Actor = Depends(writer)):
-    if body.kind not in APPEND_KINDS:
+    if body.kind == "escalation" and actor.label == "factory":
+        pass              # the factory identity records an escalation (docs/LEVEL5.md 6.3)
+    elif body.kind not in APPEND_KINDS:
         raise HTTPException(422, f"kind {body.kind!r} is reserved; append kinds are "
                                  f"{', '.join(APPEND_KINDS)}")
     if not body.body.strip():

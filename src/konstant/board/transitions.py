@@ -29,13 +29,16 @@ TABLE = (
     Rule("add", (), "queued", ("owner", "orchestrator", "worker"),
          "acceptance with a DoD line; type known; depth <= 2; --approval -> waiting_approval"),
     Rule("approve", ("waiting_approval",), "queued", "approve_roles",
-         "not the requester's own label"),
+         "not the requester's own label; a goal job: a dod-review SHIP from another identity "
+         "first, and the factory identity may approve it"),
     Rule("claim", ("queued", "blocked"), "claimed", ("orchestrator", "worker"),
-         "not the job's DoD reviewer or scenario writer; after_id, if set, is verified or "
+         "not a factory identity, the job's DoD reviewer or scenario writer, or the planner of "
+         "a goal job; after_id, if set, is verified or "
          "reviewed; a holdout job: enough sealed holdouts, and the first claim records its clone"),
     Rule("block", ("claimed",), "blocked", ("owner", "orchestrator", "worker"), "reason required"),
     Rule("close", ("claimed",), "completed_unverified", ("owner", "orchestrator", "worker"),
-         "not the job's DoD reviewer or scenario writer; requester or assignee (or owner); the "
+         "not a factory identity, the job's DoD reviewer or scenario writer, or the planner of "
+         "a goal job; requester or assignee (or owner); the "
          "evidence contract"),
     Rule("review", ("claimed", "completed_unverified"), "reviewed", "review_roles",
          "type in review_types; not the requester, assignee or closer; a SHIP/PASS verdict and "
@@ -68,16 +71,17 @@ def legal_verbs(state: str) -> list:
     return [r.verb for r in TABLE if state in r.sources]
 
 
-def check_role(verb: str, role: str, policy) -> None:
-    allowed = roles_for(verb, policy)
+def check_role(verb: str, role: str, policy, extra: tuple = ()) -> None:
+    allowed = roles_for(verb, policy) + tuple(r for r in extra if r not in roles_for(verb, policy))
     if role not in allowed:
         raise Refused(403, f"{verb} requires role {', '.join(allowed)} (this token is {role})")
 
 
-def decide(state: str, verb: str, role: str, policy) -> Rule:
-    """The rule for (state, verb, role), or Refused(403|409)."""
+def decide(state: str, verb: str, role: str, policy, extra: tuple = ()) -> Rule:
+    """The rule for (state, verb, role), or Refused(403|409). `extra`: roles the route admits
+    for this actor besides the rule's (the factory identity approving a goal job, LEVEL5 4.2)."""
     rule = RULES[verb]
-    check_role(verb, role, policy)
+    check_role(verb, role, policy, extra)
     if state not in rule.sources:
         legal = ", ".join(legal_verbs(state)) or "none"
         raise Refused(409, f"illegal transition: the job is {state}; {verb} is not legal from "

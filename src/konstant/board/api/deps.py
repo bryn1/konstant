@@ -61,6 +61,12 @@ def serialize(conn, row) -> dict:
     out["approval_required"] = bool(out["approval_required"])
     if "holdout_required" in out:
         out["holdout_required"] = bool(out["holdout_required"])
+    if "budget_json" in out:                      # a goal job's share of its limits (LEVEL5 6.2)
+        raw = out.pop("budget_json")
+        out["budget"] = json.loads(raw) if raw else None
+    if out.get("goal_id") is not None:
+        g = conn.execute("SELECT slug FROM goals WHERE id=?", (out["goal_id"],)).fetchone()
+        out["goal"] = g["slug"] if g else None
     out["display_id"] = tree.display_id(conn, row["id"])
     out["depth"] = tree.depth(conn, row["id"])
     proj = conn.execute("SELECT slug FROM projects WHERE id=?", (row["project_id"],)).fetchone()

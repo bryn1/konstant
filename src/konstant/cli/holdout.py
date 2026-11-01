@@ -88,6 +88,39 @@ def cmd_show(ctx) -> int:
     return EXIT_OK
 
 
+def cmd_author(ctx) -> int:
+    """The scenario writer for one job (docs/LEVEL5.md 3.4): seals as the scenario identity."""
+    from konstant.cli.goal import no_chat
+    if _refuse_in_task("author") or no_chat("holdout author"):
+        return EXIT_FAIL
+    from konstant import catalog as catalog_mod
+    from konstant.holdout import author
+    cfg = ctx.cfg
+    viewer = ctx.client("viewer")
+    job = viewer.get(f"/api/jobs/{ctx.args.id}")
+    goal_text = ""
+    if job.get("goal"):
+        goal_text = viewer.get(f"/api/goals/{job['goal']}")["spec"]["goal"]["text"]
+    from konstant.verify.verifier import project_dir
+    target = project_dir(cfg, viewer.get("/api/projects")["projects"], job["project"])
+    cat = catalog_mod.load(catalog_mod.find_root(cfg.home, cfg.data["catalog"]["path"]),
+                           check_files=True)
+    try:
+        res = author.author(cfg, cat, job, goal_text or job["title"], target,
+                            ctx.client("scenario"), cfg.data["holdout"]["min_per_job"],
+                            ctx.args.harness, log=lambda m: print(m, file=sys.stderr))
+    except author.AuthorRefused as exc:
+        print(f"konstant: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    if "blocked" in res:
+        print(res["blocked"], file=sys.stderr)
+        return 4
+    ctx.out({"job": job["id"], **res}, "\n".join(
+        f"sealed {r['hid']} ({r['kind']}) sha256 {r['sha256']} by {r['author_label']}"
+        for r in res["sealed"]))
+    return EXIT_OK
+
+
 def register(sub, leaf) -> None:
     h = sub.add_parser("holdout", help="sealed holdout scenarios of a job (run only by verify)")
     hs = h.add_subparsers(dest="holdout_cmd", metavar="VERB")
@@ -98,6 +131,12 @@ def register(sub, leaf) -> None:
     p.add_argument("--file", action="append", required=True, metavar="FILE",
                    help="a scenario file outside the workspace (repeat for a set)")
     p.set_defaults(func=cmd_add)
+    p = hs.add_parser("author", parents=[leaf], help="run the scenario writer for a job and "
+                      "seal its drafts (the scenario identity; exit 4 refused twice)")
+    p.add_argument("id", help="job id or display id")
+    p.add_argument("--harness", help="an adapter name for the scenario writer (default "
+                   "[holdout] writer_harness, else [harness])")
+    p.set_defaults(func=cmd_author)
     p = hs.add_parser("list", parents=[leaf], help="ids, kinds, commitments and states")
     p.add_argument("id")
     p.set_defaults(func=cmd_list)

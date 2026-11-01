@@ -32,9 +32,9 @@ import os
 import re
 from pathlib import Path
 
-from konstant import machinery
 from konstant.harnesses import dsh_session
-from konstant.harnesses.base import (Adapter, Phase, Reach, harness_home, private_dir)
+from konstant.harnesses.base import (Adapter, Phase, Reach, harness_home, phase_hidden,
+                                     phase_tokens, private_dir, prompt_binds)
 
 PATCH = ".dsh/konstant.patch.yml"
 PHASES = "phases"                  # var/harness/dsh/phases/: one fresh home per phase
@@ -108,7 +108,8 @@ class Dsh(Adapter):
         """The phase's own fresh dsh root (home/ + agents/), created on first use."""
         if "dsh_root" not in ph.scratch:
             import tempfile
-            base = private_dir(harness_home(ph.workspace, "dsh") / PHASES)
+            base = private_dir(Path(ph.home_base) / "dsh" if ph.home_base
+                               else harness_home(ph.workspace, "dsh") / PHASES)
             label = Path(str(ph.values.get("prompt_file") or "phase")).stem or "phase"
             root = Path(tempfile.mkdtemp(prefix=f"{label[:40]}-", dir=base))
             private_dir(root / "home")
@@ -163,9 +164,10 @@ class Dsh(Adapter):
         secrets = ws / "var" / "secrets"
         rw = [ph.cwd, self._root(ph)] + ([ph.out] if ph.out else [])
         under_tmp = Path(os.path.realpath(ws)).parts[1:2] == ("tmp",)
-        return jail.wrap(argv, rw=rw, hide=jail.hidden(ws), home=ws,
-                         expose=[secrets / t for t in machinery.tokens_readable(ph.identity)],
-                         tmpfs=() if under_tmp else ("/tmp",), cwd=ph.cwd, net=True)
+        return jail.wrap(argv, rw=rw, hide=phase_hidden(ph), home=ws,
+                         expose=[secrets / t for t in phase_tokens(ph)],
+                         tmpfs=() if under_tmp else ("/tmp",), cwd=ph.cwd, net=True,
+                         ro_binds=prompt_binds(ph))
 
     def confines(self, jail: bool = True, factory: bool = False) -> bool:
         """Every dsh phase, factory mode or not (dsh's sandbox does not confine reads)."""

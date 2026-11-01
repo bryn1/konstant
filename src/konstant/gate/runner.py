@@ -82,7 +82,8 @@ class PhaseRunner:
         self.runs: dict = {}           # phase n -> number of runs so far
         self.seq = 0
         self.cycles: list = []         # rows for CYCLES.md
-        self.cwd = Path(rec["project"]) if rec.get("project") else Path(rec["workspace"])
+        # an intake run (no project: the target is read-only to it) works in OUT (LEVEL5 4.2)
+        self.cwd = Path(rec.get("cwd") or rec.get("project") or rec["workspace"])
         self.isolate = isolate and reaper.become_subreaper()   # only the `task run` process
         agents = dict.fromkeys([p["agent"] for p in rec.get("phases", [])] + [ORCHESTRATOR])
         self.profiles = {a: self._compose(a) for a in agents}       # the snapshot (F-08)
@@ -126,6 +127,9 @@ class PhaseRunner:
             head.append(f"KONSTANT-JOB: {r['job']}")
         if "holdouts" in r:
             head.append(f"KONSTANT-HOLDOUTS: {r['holdouts']}")
+        for key in ("goal", "target", "max_jobs"):          # an intake run (LEVEL5 4.2)
+            if r.get("intake") and r.get(key) not in (None, ""):
+                head.append(f"KONSTANT-{key.upper().replace('_', '-')}: {r[key]}")
         head += [f"KONSTANT-CYCLE-ROW: {row}" for row in (self.cycles if closeout else [])]
         head += [f"KONSTANT-DOD-ROW: DoD-{i} | {row}"
                  for i, row in enumerate(self.dod_rows() if closeout else [], 1)]
@@ -180,7 +184,8 @@ class PhaseRunner:
             ph, _t, label, _c, prompt = job
             self.log(f"konstant task: phase {label} ...")
             return self.harness.run(prompt, agent=ph["agent"], cwd=self.cwd,
-                                    run_dir=self.run_dir, label=label, out=self.out)
+                                    run_dir=self.run_dir, label=label, out=self.out,
+                                    identity=self.identity(ph, closeout))
 
         if len(jobs) == 1:
             results = [one(jobs[0])]
@@ -202,7 +207,8 @@ class PhaseRunner:
             m = {"n": ph["n"], "agent": ph["agent"], "step": ph.get("step"), "cycle": cyc,
                  "label": label, "verdict": target, "closeout": closeout, "rc": res.rc,
                  "seconds": res.seconds, "timed_out": res.timed_out, "log": res.log, **changes,
-                 "shas": shas, "left_running": left, **self._harness_of(ph["agent"])}
+                 "shas": shas, "left_running": left, **self._harness_of(ph["agent"]),
+                 "identity": self.identity(ph, closeout)}
             if len(jobs) > 1:
                 m["group"] = [j[2] for j in jobs]
                 m["group_verdicts"] = verdicts
@@ -212,6 +218,13 @@ class PhaseRunner:
             if res.rc != 0:
                 self.log(f"konstant task: phase {label} exited {res.rc} (log {res.log})")
         return manifests
+
+    def identity(self, phase: dict, closeout: bool = False) -> str:
+        """The identity a phase acts as (catalog: worker unless the type or phase names a factory
+        identity; the close-out acts as the type's own identity)."""
+        if closeout:
+            return self.cat.identity(self.rec["type"]) if self.cat is not None else "worker"
+        return phase.get("identity") or "worker"
 
     def _harness_of(self, agent: str) -> dict:
         h = self.harness.for_agent(agent) if hasattr(self.harness, "for_agent") else self.harness

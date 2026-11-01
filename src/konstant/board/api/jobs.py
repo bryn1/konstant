@@ -39,6 +39,39 @@ class JobIn(BaseModel):
     after: str = ""
     approval: bool = False
     holdout_required: bool = False      # claimable only with sealed holdouts (LEVEL5 3.2)
+    goal: str = ""                      # a goal job, filed by the planner identity (LEVEL5 4.2)
+
+
+GOAL_FILERS = ("planner",)
+
+
+def goal_fields(conn, st, body: JobIn, actor: Actor, proj) -> dict:
+    """A goal job (docs/LEVEL5.md 4.2 step 3): only the planner identity files it, only while the
+    factory holds the goal's intake at `filing`, only under the goal's own project, within its
+    max_jobs; it always waits for approval and for sealed holdouts. Its budget (its share of the
+    goal's limits) and its ship mode (`decision` for a type in [ship] decision_types, owner
+    decision Q4) are computed HERE, never taken from the caller."""
+    from konstant.board.api.goals import goal_spec, load_goal
+    from konstant.board.policy import role_of
+    from konstant.factory.goal import job_budget
+    if actor.label not in GOAL_FILERS or role_of(actor.label) != actor.role:
+        raise HTTPException(403, f"goal jobs are filed by the {', '.join(GOAL_FILERS)} identity "
+                                 f"(this token is {actor.label})")
+    g = load_goal(conn, body.goal)
+    if g["status"] != "active" or g["intake"] != "filing":
+        raise HTTPException(409, f"goal {g['slug']} is {g['status']} with intake {g['intake']}: "
+                                 "its jobs are filed only while the factory files its intake")
+    if g["project_id"] != proj["id"]:
+        raise HTTPException(409, f"goal {g['slug']}'s jobs are filed under its own project, not "
+                                 f"{proj['slug']}")
+    spec = goal_spec(g)
+    cap = spec["limits"]["max_jobs"]
+    have = conn.execute("SELECT count(*) FROM jobs WHERE goal_id=?", (g["id"],)).fetchone()[0]
+    if cap and have >= cap:
+        raise HTTPException(409, f"goal {g['slug']} has max_jobs = {cap} and {have} job(s)")
+    decide = st.cfg.data["ship"]["decision_types"]
+    return {"goal_id": g["id"], "budget_json": json.dumps(job_budget(spec), sort_keys=True),
+            "ship_mode": "decision" if body.type in decide else "auto"}
 
 
 @router.post("/api/jobs")
@@ -55,10 +88,14 @@ def add_job(body: JobIn, request: Request, actor: Actor = Depends(writer)):
     if not jtype:
         tag = TYPE_TAG.search(title)
         jtype = tag.group(1) if tag else ""
-    known = st.catalog.type_names()
+    known = st.catalog.classifiable()               # a flag-only type (intake) is never a job
+    if st.catalog.flag_only(jtype):
+        raise HTTPException(422, f"type {jtype} runs only as `konstant {jtype}`, never as a "
+                                 f"job; job types: {', '.join(known)}")
     if jtype not in known:
         what = f"unknown type {jtype!r}" if jtype else "a type is required (--type)"
         raise HTTPException(422, f"{what}; known types: {', '.join(known)}")
+    body.type = jtype
     brief = redact(body.brief or "")
     acceptance = dod.extract_acceptance(brief)
     if not acceptance:
@@ -88,14 +125,24 @@ def add_job(body: JobIn, request: Request, actor: Actor = Depends(writer)):
             after_id = tree.resolve_path(conn, body.after)
             if after_id is None:
                 raise HTTPException(404, f"--after job {body.after} not found")
-        status = "waiting_approval" if body.approval else "queued"
+        gf = goal_fields(conn, st, body, actor, proj) if body.goal.strip() else {}
+        if gf and after_id is not None:
+            dep = conn.execute("SELECT goal_id FROM jobs WHERE id=?", (after_id,)).fetchone()
+            if dep["goal_id"] != gf["goal_id"]:
+                raise HTTPException(409, f"a goal job runs after another job of the same goal "
+                                         f"(job {after_id} is not one)")
+        approval = body.approval or bool(gf)          # a goal job always waits for approval
+        holdout = body.holdout_required or bool(gf)   # ... and for its sealed holdouts
+        status = "waiting_approval" if approval else "queued"
         job_id = conn.execute(
             "INSERT INTO jobs (project_id, parent_id, type, title, brief, acceptance, status, "
-            "priority, requested_by, after_id, approval_required, holdout_required) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "priority, requested_by, after_id, approval_required, holdout_required, goal_id, "
+            "budget_json, ship_mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (proj["id"], parent_id, jtype, title, brief, acceptance, status, body.priority,
-             actor.label, after_id, int(body.approval), int(body.holdout_required))).lastrowid
-        add_trail(conn, job_id, actor, "status", f"filed as {status}")
+             actor.label, after_id, int(approval), int(holdout), gf.get("goal_id"),
+             gf.get("budget_json"), gf.get("ship_mode"))).lastrowid
+        add_trail(conn, job_id, actor, "status", f"filed as {status}"
+                  + (f" for goal {body.goal.strip()}" if gf else ""))
         out = serialize(conn, conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
     out["warnings"] = [f"DoD {cls}: {row!r} - {dod.ADVICE[cls]}" for cls, row in dod.lint(brief)]
     return out

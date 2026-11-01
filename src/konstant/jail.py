@@ -97,6 +97,11 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
             a += ["--tmpfs", p]
     roots = [p for p in dict.fromkeys(os.path.realpath(str(x)) for x in rw if x)
              if os.path.isdir(p)]
+    masked = [os.path.realpath(str(x)) for x in hide if x]
+    # a writable dir INSIDE a masked one (the scenario writer's drafts and home in the sealed
+    # store, docs/LEVEL5.md 3.4) is bound AFTER the mask: the rest of that dir stays masked
+    late = [p for p in roots if any(_inside(p, m) and p != m for m in masked)]
+    roots = [p for p in roots if p not in late]
     for p in roots:
         a += ["--bind", p, p]
     for src, dst in binds:
@@ -116,7 +121,8 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
         for p in roots:                       # a writable bind nested in a read-only one
             if any(_inside(p, q) and p != q for q in ro):
                 a += ["--bind", p, p]
-    keep = [os.path.realpath(str(x)) for x in (home, cwd) if x] + roots + \
+    keep = [os.path.realpath(str(x)) for x in (home, cwd) if x
+            and os.path.realpath(str(x)) not in late] + roots + \
         [os.path.realpath(str(d)) for _s, d in binds]
     for p in dict.fromkeys(os.path.realpath(str(x)) for x in hide if x):
         if any(_inside(k, p) for k in keep):
@@ -125,6 +131,8 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
             a += ["--tmpfs", p]
         elif os.path.isfile(p):
             a += ["--ro-bind", os.devnull, p]
+    for p in late:
+        a += ["--bind", p, p]
     for p in dict.fromkeys(os.path.realpath(str(x)) for x in expose if x):
         if os.path.isfile(p):
             a += ["--ro-bind", p, p]

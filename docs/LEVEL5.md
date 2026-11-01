@@ -1,9 +1,10 @@
 # konstant level 5: the dark factory
 
-Status: **plan, being built**. Wave L5-1 (pillar A, sealed holdouts: section 3) and wave L5-2
-(factory confinement, identities, job clones: section 2) have landed and are described as built in
-DESIGN.md §7.1 and §7.2; "L5-1 as built" and "L5-2 as built" in section 8 list where they differ
-from the text below. The owner answered the open questions on 2026-11-01 (section 9); the
+Status: **plan, being built**. Wave L5-1 (pillar A, sealed holdouts: section 3), wave L5-2
+(factory confinement, identities, job clones: section 2) and wave L5-3 (pillar B, intake from the
+orchestrator chat, DoD review and the scenario writer: section 4) have landed and are described as
+built in DESIGN.md §7.1, §7.2 and §7.3; "L5-1 as built", "L5-2 as built" and "L5-3 as built" in
+section 8 list where they differ from the text below. The owner answered the open questions on 2026-11-01 (section 9); the
 sections they change say so. Everything else on this page is still the plan that the next
 releases build in the waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as
 each part lands, and this page stays the roadmap until level 5 is reached.
@@ -829,7 +830,7 @@ for what it lands.
 |---|---|---|---|---|
 | **L5-1** sealed holdouts (**done**; see "L5-1 as built" below) (before L5-2 only dsh phases are confined, so the adversarial modes run through the real dsh adapter with `tests/fixtures/stub_dsh.py`, as the second review's fixes did) | scenario format, `holdout add/list/check/show`, `holdout/store.py` + `lint.py` + `leak.py`, `verify/holdout.py` (pinned materialisation, jailed no-network runs, redacted findings), settle extension, `0002` tables `holdouts` + `verifications.holdout_json`, `machinery.SEALED` in jail + all adapters, DECLINED cannot excuse holdouts, the claim guard, `jobs.holdout_required`, fake modes `overfit`, `peek`, `leak` | `machinery.py`, `jail.py` `hidden`, `verify/verifier.py` `settle`/`verify_job`, `verify/rerun.py`, `agents/settings.py` `render`, `harnesses/codex.py` `filesystem`, `harnesses/gemini.py`, `gate/rules/done.py`, `board/migrate.py` | v0.1.0 | A1-A3, A5-A13 (through the dsh adapter) |
 | **L5-2** confinement + identities (**done**; see "L5-2 as built" below) | generalised `Adapter.confine` for every harness in factory mode, one exposed identity token per phase, labelled worker tokens, board label guards, job clones + target read-only, `jobs.workdir` and the `{workdir}` probe substitution (`verify/probe.py`, `verifier.project_dir`), `Adapter.relocatable_home`, doctor `factory` rows, live smoke of a jailed claude phase (records whether Claude's sandbox nests) | `harnesses/base.py`, `claude.py`, `codex.py`, `gemini.py`, `command.py`, `board/auth.py`, `board/api/lifecycle.py`, `board/transitions.py`, `cli/task_run.py`, `cli/doctor.py` | L5-1 | A4 on every adapter, B6, B7, C9 |
-| **L5-3** intake + scenario writer | intake from the orchestrator chat (4.0: `goal add --from-chat`, `[factory] goal_roles`, `[factory] defaults`), goal files (`goal add/list/show/pause/resume/cancel`), type `intake` + agent `planner`, `DOD-verdict.md`, deterministic filing, approval rule, role agent `scenario-writer`, `holdout/author.py` with the run dir in the store, fake planner / reviewer / scenario modes incl. `weak-dod` | `catalog/types.yaml`, `catalog.py` `ROLE_AGENTS`, `board/dod.py` `lint`, `gate/runner.py`, `gate/rules/authorship.py`, `gate/rules/judged.py`, `agents/generate.py` | L5-2 | B1-B5, B8-B11 |
+| **L5-3** intake + scenario writer (**done**; see "L5-3 as built" below) | intake from the orchestrator chat (4.0: `goal add --from-chat`, `[factory] goal_roles`, `[factory] defaults`), goal files (`goal add/list/show/pause/resume/cancel`), type `intake` + agent `planner`, `DOD-verdict.md`, deterministic filing, approval rule, role agent `scenario-writer`, `holdout/author.py` with the run dir in the store, fake planner / reviewer / scenario modes incl. `weak-dod` | `catalog/types.yaml`, `catalog.py` `ROLE_AGENTS`, `board/dod.py` `lint`, `gate/runner.py`, `gate/rules/authorship.py`, `gate/rules/judged.py`, `agents/generate.py` | L5-2 | B1-B5, B8-B11 |
 | **L5-R1** independent review 1 | review only, by someone who built none of L5-1..3: try to reach `verified` past holdouts, read the store from every harness, leak through feedback, transcripts, the board or run records, forge identities, weaken a generated DoD; one reproduction per finding | the adversarial fake harness, as the first two reviews did | L5-3 | report with severity per finding |
 | **L5-F1** fixes 1 | one red-then-green test per finding under `tests/review/` (`test_H<nn>_...`); zero open P0/P1 | — | L5-R1 | all A and B rows green again |
 | **L5-4** ship + rollback | `ship`, `ship list`, targets `github` (push + PR create/merge, revert-PR rollback, the secret scan before a push, a `gh` stand-in for tests; Q2) / `branch` / `apply` / `command`, `[ship] decision_types = ["infra"]` (Q4), the guard on both sides, plumbing-only ref moves, post-ship checks with the regression set, rollback + tree check, the follow-up job after a rollback, halt on a failed rollback, decision rules (5.4), table `ships`, fake modes `ship-break`, `self-ship` | `gate/rules/common.py` git plumbing, `verify/probe.py` `run_line`, `verify/holdout.py`, `board/api/` | L5-F1 | C1-C12 |
@@ -916,6 +917,66 @@ above, and why (section 2's text is already corrected where it was wrong):
   `identities` doctor row states that one model may play every role (Q1).
 - The cosmetic `[type:code] (None)` reason print of a holdout run is fixed (the refusal check no
   longer overwrites the classification reason).
+
+### L5-3 as built
+
+Landed as DESIGN.md §7.3 describes. Where it differs from sections 2-4 above, and why:
+
+- **The chat confirmation is mechanical, not only a sentence.** `goal add --from-chat --session ID`
+  records the goal as `proposed` (nothing copied, no intake); the konstant-gate plugin runs `konstant
+  chat turn` on every genuine owner message of the session (depth 0, `source.kind = user`), and only
+  the owner's NEXT message there decides it: a plain yes confirms (the board writes the copy, the
+  goal becomes active, `source = "chat"`), anything else withdraws it (status `withdrawn`, which
+  frees the id). `goal add` and `chat turn` refuse inside a task run, so text in a phase log, a web
+  page or a file cannot propose or confirm. Limit (stated in DSH.md): the session itself is
+  unjailed, so a model in it that ran `chat turn ... yes` on its own could confirm its own proposal;
+  the line stays visible and the goal still passes the whole factory. The plugin path is on when
+  `[notify] kind = "chat"`; a typed request without a `[type:]`/`[job:]` tag then gets an INTAKE
+  block instead of the level-4 gate (a tagged one keeps the gate).
+- **After the yes, intake is `bin/konstant intake GOAL`** (the owner, or the factory loop of L5-5):
+  nothing starts a background run from the chat in this wave. Found in the live smoke: after the
+  owner's yes the orchestrator model ran `konstant intake` itself from the session (4.0 step 4 says
+  it never runs factory steps). The plugin now marks the session's own bash
+  `KONSTANT_CHAT_SESSION=<id>` and konstant refuses `intake`, `holdout author` and every factory
+  identity (`--as planner|dod-reviewer|scenario|factory`) there; the INTAKE block says so too. Its escalations and outcome come back
+  into the chat at the next turn (escalations as lines, outcomes as one summary line).
+- **The filing window.** Spec 2.1 lets each phase read its identity's token, so a planner phase could
+  have filed goal jobs itself, around the deterministic filing. The board therefore takes goal jobs
+  (only from the `planner` identity) and their `dod-review` (only from `dod-reviewer`) only while the
+  `factory` identity holds the goal's new `intake` state at `filing` (`none -> planning -> filing ->
+  filed`, or `refused`; `filed` is final: a goal is taken in once). A goal job's `after` must name a
+  job of the same goal. Known gap: an intake phase can still file a level-4 job (no goal) with its
+  planner token, as L5-2 allowed every identity to file; no factory step ever approves, seals or
+  ships such a job.
+- **Approval**: any approver of a goal job (the owner too) needs the latest `dod-review` to be SHIP
+  from another identity than the requester; the `factory` identity approves goal jobs only.
+- **Identity pairs**: besides L5-2's guards, the planner of a goal job never claims or closes it and
+  none of the four identities (planner, dod-reviewer, scenario, factory) claims or closes any job.
+- **Schema** `0004_goals.sql`: `goals` gains `spec_text` (the filed bytes), `source`, `session`,
+  `intake`, `created_by`, the statuses `proposed` and `withdrawn`; `jobs.ship_mode`
+  (`auto`/`decision` from `[ship] decision_types`, owner decision Q4) beside `goal_id` and
+  `budget_json`, all computed by the board at filing and immutable. `budget_json` =
+  `{max_attempts, goal_limits}`: the job's own attempts and the goal-wide limits that are set.
+- **`var/factory/` joined `machinery.DIRS` now** (planned for L5-5): goal copies, events and chat
+  cursors live there from this wave on.
+- **The intake run** has no project: its phases work in `OUT` under the run dir (target read-only,
+  named in the prompt), the close-out acts as `planner`, and the phase manifest records each phase's
+  identity. A new DoD-check rule `backlog` (intake runs only, unexcusable) applies the filing rules
+  inside the loop, so the planner is resumed with the reasons; the filing after MET applies them
+  again (exit 3, nothing filed). `types.yaml` gained `flag_only` and `identity`.
+- **The scenario writer reads no token** (2.1 would allow its own): it needs no board, and without a
+  token it cannot read other jobs' trails or evidence either. Its jail also masks `var/runs/`,
+  `var/logs/`, `var/factory/`, `var/sessions.json`, the board DB, every job clone and the target's
+  `.audits/`. `jail.wrap` now binds a writable dir that lies inside a masked one AFTER the mask
+  (before, such a bind made the jail skip the mask: the drafts dir inside `var/holdout/` would have
+  exposed every job's scenarios); its prompt file is bound read-only. A refused set is retried once
+  with the lint reasons, then `holdout-authoring BLOCKED` (a BLOCKED event plus an `escalation`
+  trail row, which the board now accepts from the factory identity); `holdout author JOB` runs the
+  same phase by hand.
+- **Notifier as far as intake needs it**: `factory/notify.py` writes `var/factory/events.jsonl` and
+  delivers escalations to `stdout`, `file` or `chat`; the outcome vocabulary gained `FILED`. Webhook,
+  retries, acks and the halt on a failed delivery stay in L5-5.
+- **doctor** rows `scenario writer` (one model for every role: INFO) and `chat intake`.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

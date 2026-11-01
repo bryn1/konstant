@@ -15,6 +15,11 @@ task); every phase agent is the agent of some type; verdict files end in `-verdi
 unique within a type; each type has a producer phase (its own agent, no step). Top level:
 `surfaces`, `verdict_words`, `small_shapes`, `imperative`, `deliverable_signal`.
 
+Level 5 (docs/LEVEL5.md 4.2): a type may be `flag_only` (reachable only with `--type`, never by
+the classifier or a `[type:]` tag, never filed as a board job: `intake`), and a type or a phase
+may name the `identity` its phases act as (default worker: a factory identity of
+board/policy.py PHASE_IDENTITIES).
+
 Catalog content, validated on every load: each type names its `workflow` (a file name under
 catalog/workflows/) and its `skills` (names under catalog/skills/); `roles` gives the skills of a
 role agent (the orchestrator). With `check_files=True` every named agent profile, skill and
@@ -33,8 +38,10 @@ DELIVERABLES = ("build", "verdict", "doc")
 STEPS = ("open", "close")
 WHENS = ("changed",)
 VERDICT_SUFFIX = "-verdict.md"
-PHASE_KEYS = {"agent", "step", "verdict", "parallel", "when", "task"}
-ROLE_AGENTS = ("orchestrator",)
+PHASE_KEYS = {"agent", "step", "verdict", "parallel", "when", "task", "identity"}
+# role agents: no type's producer. The orchestrator drives a session; the scenario writer writes a
+# job's holdout scenarios before any producer exists (docs/LEVEL5.md 3.4), run by holdout/author.py
+ROLE_AGENTS = ("orchestrator", "scenario-writer")
 RESERVED_TYPES = ("project",)
 NAME_RE = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"     # skill / workflow names: lowercase-kebab
 
@@ -66,9 +73,22 @@ class Catalog:
     # --- gate vocabulary -------------------------------------------------------------------
     def phases(self, type_name: str) -> list:
         """Ordered phases, each a dict with every PHASE_KEYS key filled (None/False defaults)."""
+        ident = self.identity(type_name)
         return [{"agent": p["agent"], "step": p.get("step"), "verdict": p.get("verdict"),
                  "parallel": bool(p.get("parallel", False)), "when": p.get("when"),
-                 "task": str(p.get("task") or "")} for p in self.types[type_name]["phases"]]
+                 "task": str(p.get("task") or ""), "identity": p.get("identity") or ident}
+                for p in self.types[type_name]["phases"]]
+
+    def identity(self, type_name: str) -> str:
+        """The identity a type's phases (and its close-out) act as: worker unless it says."""
+        return self.types[type_name].get("identity") or "worker"
+
+    def flag_only(self, type_name: str) -> bool:
+        return bool(self.types.get(type_name, {}).get("flag_only", False))
+
+    def classifiable(self) -> list:
+        """The types the classifier and a `[type:]` tag may pick (flag-only types excluded)."""
+        return [t for t in self.types if not self.flag_only(t)]
 
     def is_producer(self, type_name: str, phase: dict) -> bool:
         """A producer writes the deliverable: no step, and either no verdict file or the type's
@@ -212,9 +232,17 @@ def _regex(where: str, value) -> None:
         raise CatalogError(f"types.yaml: {where} is not a valid regex: {exc}") from exc
 
 
+def _identity(where: str, value) -> None:
+    from konstant.board.policy import PHASE_IDENTITIES
+    if value is not None and value not in PHASE_IDENTITIES:
+        raise CatalogError(f"types.yaml: {where} identity must be one of "
+                           f"{', '.join(PHASE_IDENTITIES)}")
+
+
 def _validate_gate(name: str, spec: dict) -> None:
     _regex(f"type {name!r} keywords", spec.get("keywords"))
-    for key in ("read_only", "done_rows"):
+    _identity(f"type {name!r}", spec.get("identity"))
+    for key in ("read_only", "done_rows", "flag_only"):
         if not isinstance(spec.get(key, False), bool):
             raise CatalogError(f"types.yaml: type {name!r} {key} must be true or false")
     phases = spec.get("phases")
@@ -234,6 +262,7 @@ def _validate_gate(name: str, spec: dict) -> None:
             raise CatalogError(f"types.yaml: {where} when must be one of {', '.join(WHENS)}")
         if not isinstance(ph.get("parallel", False), bool):
             raise CatalogError(f"types.yaml: {where} parallel must be true or false")
+        _identity(where, ph.get("identity"))
         v = ph.get("verdict")
         if v is not None:
             if not isinstance(v, str) or not re.fullmatch(r"[A-Z][A-Z0-9]*" + re.escape(VERDICT_SUFFIX), v):

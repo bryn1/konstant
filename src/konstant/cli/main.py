@@ -62,7 +62,8 @@ def common_flags(suppress: bool) -> argparse.ArgumentParser:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from konstant.cli import agents, board, doctor, dsh, holdout, job, project, task, verify
+    from konstant.cli import (agents, board, doctor, dsh, goal, holdout, job, project, task,
+                              verify)
     parser = argparse.ArgumentParser(prog="konstant", parents=[common_flags(False)],
                                      description="konstant: job board, task gate and verifier "
                                                  "for coding agents.")
@@ -75,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     task.register(sub, leaf)
     verify.register(sub, leaf)
     holdout.register(sub, leaf)
+    goal.register(sub, leaf)
     agents.register(sub, leaf)
     dsh.register(sub, leaf)
     doctor.register(sub, leaf)

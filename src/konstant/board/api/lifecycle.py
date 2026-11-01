@@ -70,9 +70,15 @@ DOD_REVIEWER = "dod-reviewer"
 DOD_REVIEW_STATES = ("waiting_approval", "queued")
 
 
+# the factory identities do only their own part (docs/LEVEL5.md 2.2 "may"): none of them claims
+# or closes work; the producer and verifying phases act as `worker`
+NON_WORKERS = ("planner", "dod-reviewer", "scenario", "factory")
+
+
 def identity_guard(conn, job, actor: Actor, verb: str) -> None:
-    """docs/LEVEL5.md 2.2: the identities that prepared a job (its DoD review, its holdouts) never
-    do or close its work: a claimant that wrote the scenarios could write code for them."""
+    """docs/LEVEL5.md 2.2: the identities that prepared a job (its plan, its DoD review, its
+    holdouts) never do or close its work: a claimant that wrote the scenarios could write code for
+    them, a planner that claims its own job could pick a DoD it can meet."""
     rows = conn.execute("SELECT DISTINCT actor FROM trail WHERE job_id=? AND kind='dod-review'",
                         (job["id"],)).fetchall()
     if actor.label in {r[0] for r in rows}:
@@ -83,6 +89,14 @@ def identity_guard(conn, job, actor: Actor, verb: str) -> None:
     if actor.label in {r[0] for r in rows}:
         raise Refused(403, f"the scenario writer of a job cannot {verb} it: {actor.label} "
                            f"sealed holdouts of job {job['id']}")
+    if job["goal_id"] is not None and actor.label == job["requested_by"]:
+        raise Refused(403, f"the planner of a job cannot {verb} it: {actor.label} filed goal "
+                           f"job {job['id']}")
+    if actor.label in NON_WORKERS:
+        raise Refused(403, f"the {actor.label} identity cannot {verb} a job: it does only its "
+                           "own part of the factory (planner files, dod-reviewer reviews, "
+                           "scenario seals, factory approves and ships); work is claimed and "
+                           "closed as worker")
 
 
 def clone_fields(request: Request, conn, job) -> dict:
@@ -99,15 +113,17 @@ def clone_fields(request: Request, conn, job) -> dict:
     return {"workdir": clone.workdir_of(proj["path"], job["id"]), "workdir_base": base}
 
 
-def run(request: Request, ref: str, verb: str, actor: Actor, apply) -> dict:
-    """Shared frame: transaction, root refusal, decide(), the verb's apply(conn, job) -> extra."""
+def run(request: Request, ref: str, verb: str, actor: Actor, apply, extra=None) -> dict:
+    """Shared frame: transaction, root refusal, decide(), the verb's apply(conn, job) -> extra.
+    `extra(job)` -> roles admitted for this actor on this job besides the rule's own."""
     with db.transaction(request.app.state.db_path) as conn:
         job = load_job(conn, ref)
         if job["parent_id"] is None:
             raise HTTPException(409, f"job {job['id']} is a project root; a root never changes "
                                      "state and is never moved")
         try:
-            transitions.decide(job["status"], verb, actor.role, request.app.state.policy)
+            transitions.decide(job["status"], verb, actor.role, request.app.state.policy,
+                               extra(job) if extra else ())
             extra = apply(conn, job) or {}
         except (Refused, tree.TreeRefused) as exc:
             refuse(exc)
@@ -232,15 +248,39 @@ def cancel(ref: str, body: Reason, request: Request, actor: Actor = Depends(writ
     return run(request, ref, "cancel", actor, apply)
 
 
+FACTORY = "factory"
+
+
+def _is_factory(actor: Actor) -> bool:
+    from konstant.board.policy import role_of
+    return actor.label == FACTORY and role_of(FACTORY) == actor.role
+
+
 @router.post("/api/jobs/{ref}/approve")
 def approve(ref: str, request: Request, actor: Actor = Depends(writer)):
+    """A goal job (docs/LEVEL5.md 4.2 step 4) is approved only after a `dod-review SHIP` from an
+    identity other than its requester, and then the factory identity may approve it (code, never
+    a model: it approves what the DoD reviewer's verdict file states)."""
     def apply(conn, job):
         if actor.label == job["requested_by"]:
             raise Refused(403, f"the requester cannot approve its own DoD: {actor.label} filed "
                                f"job {job['id']}; another identity approves it")
+        if _is_factory(actor) and job["goal_id"] is None:
+            raise Refused(403, f"the factory identity approves goal jobs only (job {job['id']} "
+                               "belongs to no goal)")
+        if job["goal_id"] is not None:
+            last = conn.execute("SELECT actor, payload_json FROM trail WHERE job_id=? AND "
+                                "kind='dod-review' ORDER BY id DESC LIMIT 1",
+                                (job["id"],)).fetchone()
+            word = json.loads(last["payload_json"] or "{}").get("verdict") if last else None
+            if word != "SHIP" or last["actor"] == job["requested_by"]:
+                raise Refused(409, f"goal job {job['id']} has no dod-review SHIP from another "
+                                   "identity than its requester: its DoD is reviewed first "
+                                   f"(last dod-review: {word or 'none'})")
         set_status(conn, job["id"], "queued")
         add_trail(conn, job["id"], actor, "approval", f"approved by {actor.label}")
-    return run(request, ref, "approve", actor, apply)
+    return run(request, ref, "approve", actor, apply,
+               extra=lambda job: ("orchestrator",) if _is_factory(actor) else ())
 
 
 @router.post("/api/jobs/{ref}/move")
@@ -288,6 +328,13 @@ def dod_review(ref: str, body: DodReviewIn, request: Request, actor: Actor = Dep
         if actor.label == job["requested_by"]:
             raise HTTPException(403, f"the requester cannot review its own DoD: {actor.label} "
                                      f"filed job {job['id']}")
+        if job["goal_id"] is not None:          # only inside the factory's filing window (4.2)
+            g = conn.execute("SELECT slug, intake FROM goals WHERE id=?",
+                             (job["goal_id"],)).fetchone()
+            if g["intake"] != "filing":
+                raise HTTPException(409, f"goal job {job['id']}: its DoD is reviewed while the "
+                                         f"factory files goal {g['slug']} (intake is "
+                                         f"{g['intake']}), never from a phase")
         reason = redact((body.reason or "").strip())[:2000]
         add_trail(conn, job["id"], actor, "dod-review", f"dod-review {word}"
                   + (f": {reason}" if reason else ""), {"verdict": word})

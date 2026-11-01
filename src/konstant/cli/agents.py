@@ -27,7 +27,7 @@ def cmd_sync(ctx) -> int:
         cfg, cat = _load(ctx)
         harnesses.check_types(cfg.data["harness"], cat)
         gen = Generator(cat, cfg.home, cfg.data["permissions"], harness=cfg.data["harness"],
-                        gate=cfg.data["gate"], policy=cfg.data["board"]["policy"])
+                        gate=cfg.session_gate(), policy=cfg.data["board"]["policy"])
         only = ctx.args.harness
         if ctx.args.check:
             names = [only] if only else gen.harness_names()

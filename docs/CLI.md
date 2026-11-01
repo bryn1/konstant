@@ -23,6 +23,10 @@ positional arguments:
     task         task gate, phase runner, DoD check
     verify       verify a completed job (probes + re-run)
     holdout      sealed holdout scenarios of a job (run only by verify)
+    goal         level-5 goals: what the owner wants and its limits
+    intake       turn a goal into jobs: planner, DoD review, filing, approval, scenario writer
+                 (level 5)
+    chat         the orchestrator chat as intake (the dsh plugin's seam)
     agents       generate and list the agent catalog surfaces
     dsh          start your dsh session (web, tui, headless) with the konstant gate plugin
     doctor       check that this workspace is ready (exit 0 when nothing FAILs)
@@ -680,6 +684,8 @@ usage: konstant holdout [-h] VERB ...
 positional arguments:
   VERB
     add       lint, control and seal scenario files (moves them into the store; owner)
+    author    run the scenario writer for a job and seal its drafts (the scenario identity; exit 4
+              refused twice)
     list      ids, kinds, commitments and states
     check     commitment + parse of each sealed file
     show      print one sealed scenario (never in a task)
@@ -703,6 +709,24 @@ options:
   --json         print JSON
   --config PATH  konstant.toml to use
   --file FILE    a scenario file outside the workspace (repeat for a set)
+```
+
+## `konstant holdout author`
+
+```
+usage: konstant holdout author [-h] [--as ROLE] [--json] [--config PATH] [--harness HARNESS] id
+
+positional arguments:
+  id                 job id or display id
+
+options:
+  -h, --help         show this help message and exit
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
+  --json             print JSON
+  --config PATH      konstant.toml to use
+  --harness HARNESS  an adapter name for the scenario writer (default [holdout] writer_harness, else
+                     [harness])
 ```
 
 ## `konstant holdout list`
@@ -753,6 +777,172 @@ options:
                  scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
+```
+
+## `konstant goal`
+
+```
+usage: konstant goal [-h] VERB ...
+
+positional arguments:
+  VERB
+    add       file a goal file (owner), or propose one from the owner's chat (--from-chat)
+    list      goals with status, intake state, source
+    show      one goal: spec, limits, its jobs
+    pause     pause an active goal (owner)
+    resume    resume a paused goal (owner)
+    cancel    stop a goal for good (owner)
+
+options:
+  -h, --help  show this help message and exit
+```
+
+## `konstant goal add`
+
+```
+usage: konstant goal add [-h] [--as ROLE] [--json] [--config PATH] [--from-chat] [--session SESSION]
+                         file
+
+positional arguments:
+  file               the goal TOML file, or - for stdin
+
+options:
+  -h, --help         show this help message and exit
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
+  --json             print JSON
+  --config PATH      konstant.toml to use
+  --from-chat        a proposal from the orchestrator chat: filed when the owner's next message in
+                     --session is a yes
+  --session SESSION  the chat session id (default $KONSTANT_CHAT_SESSION)
+```
+
+## `konstant goal list`
+
+```
+usage: konstant goal list [-h] [--as ROLE] [--json] [--config PATH] [--status STATUS]
+
+options:
+  -h, --help       show this help message and exit
+  --as ROLE        act with this role's token, or a factory identity's (planner, dod-reviewer,
+                   scenario, factory) (default [client] default_role)
+  --json           print JSON
+  --config PATH    konstant.toml to use
+  --status STATUS  filter: proposed,active,paused,done,stopped,withdrawn
+```
+
+## `konstant goal show`
+
+```
+usage: konstant goal show [-h] [--as ROLE] [--json] [--config PATH] id
+
+positional arguments:
+  id
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant goal pause`
+
+```
+usage: konstant goal pause [-h] [--as ROLE] [--json] [--config PATH] id
+
+positional arguments:
+  id
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant goal resume`
+
+```
+usage: konstant goal resume [-h] [--as ROLE] [--json] [--config PATH] id
+
+positional arguments:
+  id
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant goal cancel`
+
+```
+usage: konstant goal cancel [-h] [--as ROLE] [--json] [--config PATH] id
+
+positional arguments:
+  id
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant intake`
+
+```
+usage: konstant intake [-h] [--as ROLE] [--json] [--config PATH] [--harness HARNESS] goal
+
+positional arguments:
+  goal               the goal id
+
+options:
+  -h, --help         show this help message and exit
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
+  --json             print JSON
+  --config PATH      konstant.toml to use
+  --harness HARNESS  an adapter name or an argv template for the intake phases and the scenario
+                     writer (default: [harness] / [holdout] writer_harness)
+```
+
+## `konstant chat`
+
+```
+usage: konstant chat [-h] VERB ...
+
+positional arguments:
+  VERB
+    turn      one owner message: confirm/withdraw this session's goal proposal, new escalations, the
+              intake block (JSON)
+
+options:
+  -h, --help  show this help message and exit
+```
+
+## `konstant chat turn`
+
+```
+usage: konstant chat turn [-h] [--as ROLE] [--json] [--config PATH] --session SESSION
+                          text [text ...]
+
+positional arguments:
+  text               the owner's message, or - for stdin
+
+options:
+  -h, --help         show this help message and exit
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
+  --json             print JSON
+  --config PATH      konstant.toml to use
+  --session SESSION  the chat session id
 ```
 
 ## `konstant agents`

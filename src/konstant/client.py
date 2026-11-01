@@ -26,6 +26,15 @@ def in_task() -> bool:
     return os.environ.get("KONSTANT_IN_TASK") == "1"
 
 
+def in_chat() -> str:
+    """The orchestrator chat session this process runs in (the konstant-gate plugin marks the
+    session's own bash with KONSTANT_CHAT_SESSION when the chat is the intake), else ''."""
+    return os.environ.get("KONSTANT_CHAT_SESSION", "").strip()
+
+
+CHAT_REFUSED_LABELS = ("planner", "dod-reviewer", "scenario", "factory")
+
+
 def default_role(configured: str) -> str:
     """The role a command acts as when no --as is given: worker inside a task run."""
     if in_task():
@@ -55,6 +64,10 @@ def identity() -> str:
 def token_for(cfg: Config, role: str) -> str:
     """The token of `role` (a role, or a factory identity's label)."""
     label = role
+    if in_chat() and role in CHAT_REFUSED_LABELS:
+        raise ClientError(f"refused: --as {role} is not available in the orchestrator chat "
+                          "(KONSTANT_CHAT_SESSION): the orchestrator proposes goals; the factory "
+                          "identities act only in the factory's own steps (docs/LEVEL5.md 4.0)")
     if in_task():
         if role in ("worker", identity()):
             label = identity()                    # the phase's own identity token

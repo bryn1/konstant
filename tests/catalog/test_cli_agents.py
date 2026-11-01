@@ -18,8 +18,8 @@ def test_agents_list_json(workspace):
     r = run(workspace, "list", "--json")
     assert r.returncode == 0, r.stderr
     data = json.loads(r.stdout)
-    assert len(data["types"]) == 9 and len(data["agents"]) == 10
-    assert len(data["skills"]) == 26 and len(data["workflows"]) == 9 and data["bijection"]
+    assert len(data["types"]) == 10 and len(data["agents"]) == 12   # + intake, planner, scenario writer
+    assert len(data["skills"]) == 26 and len(data["workflows"]) == 10 and data["bijection"]
     assert data["types"]["code"] == {"agent": "coder", "deliverable": "build",
                                      "workflow": "workflow-code",
                                      "skills": data["types"]["code"]["skills"]}

@@ -56,8 +56,10 @@ For the dark factory (level 5) `board init` also mints four **identities**: toke
 label - `planner`, `dod-reviewer` and `scenario` (role worker) and `factory` (role orchestrator).
 `--as LABEL` acts as one; `board tokens --rotate ROLE --label LABEL` replaces one. The board
 compares labels: a job's requester never approves its own DoD, and the identity that reviewed a
-job's DoD or sealed its holdouts never claims or closes it. One model may play every one of these
-roles: the separation is the identity, what each phase is shown, and the jail's file isolation.
+job's DoD or sealed its holdouts never claims or closes it, the planner of a goal job never
+claims or closes it, and none of the four identities claims or closes work at all (the producer
+and verifying phases act as `worker`). One model may play every one of these roles: the
+separation is the identity, what each phase is shown, and the jail's file isolation.
 
 On one machine, role separation is procedural:
 
@@ -87,6 +89,11 @@ nine types, each with exactly one agent:
 
 Phases in parentheses run only when the run changed a project file (read-only types). Every run
 ends with the `orchestrator` close-out, which writes DONE.md and CYCLES.md.
+
+Level 5 adds a tenth type, `intake` (agent `planner`: planner → reviewer `DOD-verdict.md`, acting
+as the `planner` and `dod-reviewer` identities). It is reachable only through `bin/konstant intake`
+("Goals and intake" below): the classifier and a `[type:intake]` tag never pick it, and it is never
+a board job. A second role agent besides the orchestrator, `scenario-writer`, writes holdouts.
 
 `bin/konstant agents list` prints the exact table from your catalog. The `orchestrator` profile
 drives intake and the close-out. Each agent profile in `.claude/agents/` is composed from its role,
@@ -220,10 +227,49 @@ level-4 PASS needs **and** every holdout passed. Repeated failures wear a set ou
 and a fresh one must be sealed); a leaked canary burns it. `holdout list` shows ids, kinds, hashes
 and states, never content; `holdout show` prints one file and is refused inside a task run.
 
+## Goals and intake
+
+At level 5 you say what you want; konstant turns it into jobs ([LEVEL5.md](LEVEL5.md) section 4).
+A **goal** is the goal text, its project and its limits (only `max_attempts`, attempts per job, is
+required; default 3), as a TOML file:
+
+```toml
+[goal]
+id = "greeter"
+project = "greeter"
+text = "A small greeting library: greet(name) and a CLI `greet NAME`."
+[limits]
+max_attempts = 3
+```
+
+`bin/konstant --as owner goal add goal.toml` files it (a copy goes to `var/factory/goals/`, which
+no phase can write, with its sha256 on the board; editing your file later changes nothing). Or you
+just ask your orchestrator in the dsh chat ([DSH.md](DSH.md) "The chat is the intake"): it
+proposes the goal in one line, and your next message `yes` files it.
+
+`bin/konstant intake greeter` then runs, every phase in konstant's jail:
+
+1. a **planner** phase (identity `planner`) writes `BACKLOG.md` and one brief per job, each with a
+   DoD whose rows `PROBE:` lines settle (paths of the result as `{workdir}/...`);
+2. a **DoD review** phase (the reviewer, identity `dod-reviewer`) writes `DOD-verdict.md` with one
+   SHIP/FIX line per job; FIX sends the planner back;
+3. konstant **files** the jobs only if every brief passes `job lint` with no flag and carries a
+   PROBE, the types are real and the `after:` order is sound (else exit 3, nothing filed); each job
+   is filed by the planner identity, its DoD review posted by the dod-reviewer identity, and
+   approved by the `factory` identity;
+4. the **scenario writer** (identity `scenario`) writes each job's holdouts from the goal, the
+   brief and a read-only view of the project, in a jail where it sees no job clone, no run record,
+   no board and no token; konstant lints them, runs them on the current commit and seals them.
+
+The order is the point: DoD, review and holdouts exist before any producer runs, each from a
+different identity. A job whose holdout authoring fails twice is reported `BLOCKED` and waits
+(its claim needs sealed holdouts).
+
 ## Generated surfaces
 
 `konstant agents sync` renders `catalog/` into `.claude/agents/<agent>.md`,
-`.claude/skills/<skill>/SKILL.md` (26 skills plus one `workflow-<type>` skill per type),
+`.claude/skills/<skill>/SKILL.md` (26 skills plus one `workflow-<type>` skill per type, the
+level-5 `intake` type included),
 `.claude/settings.json`, `CLAUDE.md` and `AGENTS.md`. Generated files carry a header and are
 overwritten on every sync. Edit `catalog/` instead. `agents sync --check` (also run by `doctor`)
 names every drifted file.
@@ -304,6 +350,10 @@ loopback (a remote bind needs `[board] allow_remote = true`); request bodies cap
   codex and gemini keep only their own credential file there, read-only), and the target project
   read-only. The network stays open (the harness needs its model), so a phase can still send what
   it CAN read somewhere; it cannot read the store, the other tokens or your credential homes.
+- **The scenario writer works blind to the producers**: its jail additionally masks `var/runs/`,
+  every job clone, the project's `.audits/`, the board DB, the logs and `var/factory/`, and it
+  reads no token; its prompt, logs and harness home live in the sealed store (the home is deleted
+  after it). A harness whose home konstant cannot relocate (`command`) never runs it.
 - **konstant's machinery is read-only to every phase, whatever the harness**
   (`konstant/machinery.py`, one list read by the Claude settings, the codex profile, the gemini
   policy and the jail): `bin/`, `.venv/`, `src/`, `catalog/`, `tests/`, `install.sh`, `get.sh`,

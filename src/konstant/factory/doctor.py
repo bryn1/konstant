@@ -7,6 +7,10 @@
   claude sandbox     (claude configured) whether Claude Code's own sandbox runs nested inside the
                      jail, or the jail is the boundary with Claude Code's sandbox off
   identities         the factory identities' tokens: present, 0600
+  scenario writer    the harness the scenario writer runs on (refused when its home cannot be
+                     relocated); one model for every role is INFO, never a WARN (owner Q1)
+  chat intake        whether the dsh orchestrator chat is the intake ([notify] kind = chat and
+                     goal_roles with orchestrator)
 """
 from __future__ import annotations
 
@@ -48,6 +52,50 @@ def rows(cfg) -> list:
         out.append(claude_row(cfg.home))
     out.append(identities_row(cfg, IDENTITIES))
     return out
+
+
+def intake_rows(cfg) -> list:
+    """The level-5 intake rows (wave L5-3): the scenario writer's harness and the chat intake."""
+    return [writer_row(cfg), intake_row(cfg)]
+
+
+def writer_row(cfg) -> tuple:
+    """Which harness the scenario writer runs on, refused when it cannot relocate its home
+    (docs/LEVEL5.md 3.4); one model for every role is supported (owner decision Q1)."""
+    from konstant import catalog as catalog_mod
+    from konstant.holdout import author
+    try:
+        cat = catalog_mod.load(catalog_mod.find_root(cfg.home, cfg.data["catalog"]["path"]))
+        hv, _ad = author.writer_harness(cfg, cat)
+    except author.AuthorRefused as exc:
+        return ("WARN", "scenario writer", f"{exc}: `konstant intake` files the jobs but every "
+                "job's holdout authoring escalates BLOCKED until [holdout] writer_harness names one")
+    except Exception as exc:  # noqa: BLE001 - a row, never a crash of doctor
+        return ("INFO", "scenario writer", f"not checked: {exc}")
+    same = not cfg.data["holdout"]["writer_harness"] and not cfg.data["holdout"]["writer_model"]
+    return ("INFO", "scenario writer", f"runs on {hv.name}"
+            + (f" (model {hv.model})" if hv.model else "") + ", jailed, home relocated into the "
+            "sealed store and deleted after the phase; "
+            + ("the same harness and model as every other role: supported (separation by "
+               "identity, context and isolation; docs/LEVEL5.md §9 Q1)" if same else
+               "[holdout] writer_harness / writer_model set"))
+
+
+def intake_row(cfg) -> tuple:
+    """Whether the owner's orchestrator chat is the intake (docs/LEVEL5.md 4.0)."""
+    chat = cfg.data["notify"]["kind"] == "chat"
+    orch = "orchestrator" in cfg.data["factory"]["goal_roles"]
+    if chat and orch:
+        return ("PASS", "chat intake", "[notify] kind = chat and goal_roles include the "
+                "orchestrator: a typed request in `konstant dsh` becomes a goal proposal, filed "
+                "on the owner's next-message yes; escalations come back in that chat")
+    if chat:
+        return ("WARN", "chat intake", "[notify] kind = chat but [factory] goal_roles lacks "
+                "orchestrator: the session shows the intake block, yet its `goal add "
+                "--from-chat` is refused; add \"orchestrator\" to goal_roles")
+    return ("INFO", "chat intake", f"off ([notify] kind = {cfg.data['notify']['kind']}): goals "
+            "come from `konstant goal add FILE` (owner); set [notify] kind = \"chat\" and "
+            "goal_roles = [\"owner\", \"orchestrator\"] to make the dsh chat the intake")
 
 
 def claude_row(home=None) -> tuple:

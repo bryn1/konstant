@@ -1,6 +1,7 @@
 """Deterministic task classifier (DESIGN §6.2). No model; vocabulary from catalog/types.yaml.
 
-Order: an explicit `[type:x]` tag wins (an unknown tag is reported and the words decide);
+Order: an explicit `[type:x]` tag wins (an unknown tag is reported and the words decide; a
+flag-only type such as `intake` counts as unknown: it is reachable only with `--type`);
 else a question (the FIRST small shape: a question-word opener ending in `?`) that is not a
 request ("can you / could you / would you ...?" asks for work) -> small; else the first type
 (catalog order, `code` last) whose keywords match, when the task also carries a deliverable
@@ -27,7 +28,7 @@ def _word(m) -> str:
 
 def keyword_hit(text: str, cat):
     low = text.lower()
-    for t in cat.type_names():
+    for t in cat.classifiable():                 # a flag-only type (intake) is never picked
         m = re.search(cat.keywords(t), low)
         if m:
             return t, _word(m)
@@ -39,7 +40,7 @@ def classify(task: str, cat) -> tuple:
     m = TAG.search(task)
     if m:
         tag = m.group(1).lower()
-        if tag in cat.types:
+        if tag in cat.classifiable():
             return tag, "tag"
         t, _w = keyword_hit(TAG.sub(" ", task), cat)
         return (t or "code"), f"unknown-tag:{tag}"

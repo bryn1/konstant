@@ -13,7 +13,9 @@ in every one of them. A phase may never write any of these paths, whatever the h
     home: a profile layer planted there runs unjailed in that session), var/secrets/, the board DB
     and the other bookkeeping files under var/,
   - any .git/ directory (a .git/config or hook edit turns a later git command into arbitrary
-    execution; shells that must commit get .git/config and .git/hooks read-only instead).
+    execution; shells that must commit get .git/config and .git/hooks read-only instead),
+  - var/factory/ (the goal copies, the factory's events and the chat cursors: docs/LEVEL5.md 2.3;
+    a phase that edited its goal or an event would steer the factory).
 
 SEALED (docs/LEVEL5.md 2.3, 3.3) lists what no phase may even READ: the holdout store
 var/holdout/. The jail masks it (jail.hidden), Claude Code's settings deny Read on it and
@@ -30,7 +32,8 @@ from konstant.board.policy import LABELS, PHASE_IDENTITIES
 # workspace-relative directories no phase may write
 DIRS = ("bin", ".venv", "src", "catalog", "tests",
         ".claude", ".agents", ".dsh", ".gemini",
-        ".git", "var/secrets", "var/harness", "var/logs", "var/locks", "var/holdout")
+        ".git", "var/secrets", "var/harness", "var/logs", "var/locks", "var/holdout",
+        "var/factory")
 # workspace-relative files no phase may write
 FILES = ("konstant.toml", "install.sh", "get.sh", "pyproject.toml", "AGENTS.md", "CLAUDE.md",
          "var/board.db", "var/board.db-wal", "var/board.db-shm", "var/board.pid",

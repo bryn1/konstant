@@ -10,6 +10,10 @@
 # verdict (the verdict file a VERIFYING phase must leave in OUT), parallel (may run with the
 # previous phase), when (changed: runs only when the run changed a project file), task (brief).
 #
+# Level 5 keys (docs/LEVEL5.md 4.2): flag_only (reachable only with --type; the classifier and a
+# [type:] tag never pick it; never filed as a job), identity (the identity a type's phases, or one
+# phase, act as: worker unless named; board/policy.py PHASE_IDENTITIES).
+#
 # Content keys: workflow (catalog/workflows/<name>.md, generated into the skill `workflow-<type>`),
 # skills (catalog/skills/<name>/SKILL.md, loaded by that type's agent). `roles` lists the skills of
 # the role agent that is no type's producer (the orchestrator).
@@ -125,6 +129,20 @@ types:
       - {agent: tester, verdict: TEST-verdict.md, task: write and run the suite}
       - {agent: reviewer, verdict: REVIEW-verdict.md, task: review the suite for gaps}
       - {agent: architect, step: close, verdict: ARCH-verdict.md, task: architecture doc matches reality; hygiene holds}
+  intake:
+    agent: planner
+    deliverable: doc
+    summary: Level 5 intake - a goal turned into a backlog of jobs, each with a DoD a verifier can settle, reviewed by another identity (only `konstant intake`).
+    keywords: '(?!)'
+    flag_only: true
+    identity: planner
+    workflow: intake
+    skills: [board, reuse-first, test-design, workspace-layout, verify]
+    read_only: true
+    done_rows: false
+    phases:
+      - {agent: planner, task: 'OUT/BACKLOG.md (rows `B<n> | <type> | <title> | after:B<m>`) and one brief per row in OUT/jobs/B<n>.md, each with a DoD whose rows PROBE lines settle'}
+      - {agent: reviewer, identity: dod-reviewer, verdict: DOD-verdict.md, task: 'review every brief''s DoD against the goal: one line per job `B<n> | SHIP or FIX | why`, then the verdict'}
   code:
     agent: coder
     deliverable: build
@@ -143,6 +161,8 @@ types:
 roles:
   orchestrator:
     skills: [board, fan-out, findings-triage, brainstorm, exposure-gate, skill-authoring, workspace-layout, verify]
+  scenario-writer:
+    skills: [test-design, verify]
 surfaces: [backend, db, frontend, api contract, tests, docs, deploy]
 verdict_words: {pass: [PASS, SHIP], fail: [FAIL, FIX, RECONSIDER], blocked: [BLOCKED]}
 # small shapes (gate/classify.py): the FIRST is the question shape, tried before the keywords

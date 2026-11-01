@@ -96,6 +96,12 @@ class Phase:
     scratch: dict = field(default_factory=dict)     # per-phase state of the adapter (dsh's home)
     factory: bool = False       # a phase of a job with sealed holdouts: always jailed (LEVEL5 2.1)
     identity: str = "worker"    # whose token the phase reads (LEVEL5 2.2)
+    # the scenario writer (LEVEL5 3.4): its harness home lives under `home_base` (inside the sealed
+    # store) instead of var/harness/<name>/phases; `tokens` overrides the token files it may read
+    # (None: its identity's and viewer's); `hide` masks more paths (job clones, run records)
+    home_base: Path | None = None
+    tokens: tuple | None = None
+    hide: tuple = ()
 
     @property
     def workspace(self) -> Path:
@@ -218,7 +224,8 @@ def phase_home(ph: Phase, name: str) -> Path:
     reaches a later phase (docs/LEVEL5.md 3.4)."""
     key = f"{name}_home"
     if key not in ph.scratch:
-        base = private_dir(harness_home(ph.workspace, name) / "phases")
+        base = private_dir(Path(ph.home_base) / name if ph.home_base
+                           else harness_home(ph.workspace, name) / "phases")
         label = Path(str(ph.values.get("prompt_file") or "phase")).stem or "phase"
         ph.scratch[key] = Path(tempfile.mkdtemp(prefix=f"{label[:40]}-", dir=base))
     return ph.scratch[key]
@@ -236,6 +243,27 @@ def private_tmp(workspace) -> bool:
     return Path(os.path.realpath(workspace)).parts[1:2] != ("tmp",)
 
 
+def phase_tokens(ph: Phase) -> tuple:
+    """The token files the phase's jail exposes (machinery.tokens_readable unless overridden)."""
+    return machinery.tokens_readable(ph.identity) if ph.tokens is None else tuple(ph.tokens)
+
+
+def phase_hidden(ph: Phase) -> list:
+    from konstant import jail
+    return jail.hidden(ph.workspace) + [str(p) for p in ph.hide]
+
+
+def prompt_binds(ph: Phase) -> list:
+    """The prompt file bound read-only when it lies in a masked dir (the scenario writer's run
+    dir is inside the sealed store, LEVEL5 3.4)."""
+    pf = ph.values.get("prompt_file")
+    if not pf or not Path(str(pf)).is_file():
+        return []
+    real = os.path.realpath(str(pf))
+    masked = [os.path.realpath(h) for h in phase_hidden(ph)]
+    return [(real, real)] if any(real.startswith(m.rstrip("/") + "/") for m in masked) else []
+
+
 def jailed(argv: list, ph: Phase, rw=(), ro_binds=()) -> list:
     """The phase inside konstant.jail (the module docstring's shape). Writable: the project dir
     (the job clone in factory mode), OUT, the phase TMPDIR and `rw`; every machinery path stays
@@ -246,7 +274,7 @@ def jailed(argv: list, ph: Phase, rw=(), ro_binds=()) -> list:
     secrets = ws / "var" / "secrets"
     tmp = private_dir(ph.run_dir / "tmp")
     roots = [ph.cwd] + ([ph.out] if ph.out else []) + [tmp, *rw]
-    return jail.wrap(argv, rw=roots, hide=jail.hidden(ws), home=ws,
-                     expose=[secrets / t for t in machinery.tokens_readable(ph.identity)],
+    return jail.wrap(argv, rw=roots, hide=phase_hidden(ph), home=ws,
+                     expose=[secrets / t for t in phase_tokens(ph)],
                      tmpfs=("/tmp",) if private_tmp(ws) else (), cwd=ph.cwd, net=True,
-                     ro_binds=ro_binds)
+                     ro_binds=[*ro_binds, *prompt_binds(ph)])
