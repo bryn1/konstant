@@ -32,6 +32,28 @@ class Workspace:
         env.update(KONSTANT_HOME=str(self.home), **extra)
         return env
 
+    def stop_board(self) -> None:
+        """`board stop`, and when that cannot run (a test broke konstant.toml, the CLI refuses)
+        the board this workspace's var/board.pid names is killed: a fixture never leaves one
+        running (tests/conftest.py fails the session if it does)."""
+        self.run("board", "stop")
+        pidfile = self.home / "var" / "board.pid"
+        try:
+            pid = int(pidfile.read_text().split()[0])
+            cmd = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        except (OSError, ValueError, IndexError):
+            return
+        if b"board" in cmd and b"serve" in cmd:
+            import signal
+            import time
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(50):
+                if not Path(f"/proc/{pid}").exists():
+                    break
+                time.sleep(0.1)
+            else:
+                os.kill(pid, signal.SIGKILL)
+
     def run(self, *args, env=None, stdin=None) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, "-m", "konstant", *map(str, args)],
                               capture_output=True, text=True, env=env or self.env(),
@@ -53,9 +75,11 @@ def ws(tmp_path_factory):
     w = Workspace(tmp_path_factory.mktemp("ws"))
     w.ok("board", "init")
     w.ok("board", "start")
-    w.ok("project", "add", "demo")
-    yield w
-    w.run("board", "stop")
+    try:
+        w.ok("project", "add", "demo")
+        yield w
+    finally:
+        w.stop_board()
 
 
 @pytest.fixture()

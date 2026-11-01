@@ -28,11 +28,13 @@ GOAL = ('[goal]\nid = "greeter"\nproject = "greeter"\ntext = """\nA small greeti
 @pytest.fixture()
 def iws(tmp_path):
     w = make_ws(tmp_path)
-    (w.src / "goal.toml").write_text(GOAL)
-    res = w.run("--as", "owner", "goal", "add", w.src / "goal.toml")
-    assert res.returncode == 0, res.stderr
-    yield w
-    w.run("board", "stop")
+    try:                                   # the board stops even when the setup below fails
+        (w.src / "goal.toml").write_text(GOAL)
+        res = w.run("--as", "owner", "goal", "add", w.src / "goal.toml")
+        assert res.returncode == 0, res.stderr
+        yield w
+    finally:
+        w.stop_board()
 
 
 def intake(w, mode: str = "", harness: str = "dsh", **env):
@@ -148,3 +150,28 @@ def test_B8_classify_never_returns_intake(iws, text):
 def test_intake_refused_inside_a_task_run(iws):
     res = iws.run("intake", "greeter", env=iws.henv(KONSTANT_IN_TASK="1"))
     assert res.returncode == 1 and "not available inside a task run" in res.stderr
+
+
+@needs_jail
+def test_a_stopped_intake_escalates_instead_of_going_silent(iws):
+    """Found in the live smoke: `timeout` stopped a long intake and the chat heard nothing. A
+    SIGTERM now ends the intake with a BLOCKED event and the intake state `refused`."""
+    import signal
+    import time
+    e = iws.henv(STUB_DSH_ACTIONS="sleep:30")
+    p = subprocess.Popen([sys.executable, "-m", "konstant", "intake", "greeter", "--harness", "dsh"],
+                         env=e, cwd=str(iws.home), stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True)
+    deadline = time.time() + 60
+    while time.time() < deadline and iws.json("goal", "show", "greeter")["intake"] != "planning":
+        time.sleep(0.5)
+    time.sleep(2)
+    p.send_signal(signal.SIGTERM)
+    _out, err = p.communicate(timeout=60)
+    assert p.returncode == 128 + signal.SIGTERM, err[-1500:]
+    assert "KILLED (SIGTERM)" in err
+    ev = [json.loads(ln) for ln in (iws.home / "var" / "factory" / "events.jsonl").read_text()
+          .splitlines()]
+    assert ev[-1]["event"] == "BLOCKED" and "intake stopped by SIGTERM" in ev[-1]["reason"]
+    assert iws.json("goal", "show", "greeter")["intake"] == "refused"
+    assert jobs(iws) == []

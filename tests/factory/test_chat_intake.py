@@ -31,13 +31,15 @@ S = "session-owner-1"
 @pytest.fixture()
 def cws(tmp_path):
     w = make_ws(tmp_path)
-    toml = w.home / "konstant.toml"
-    toml.write_text(toml.read_text() + '[factory]\ngoal_roles = ["owner", "orchestrator"]\n'
-                    '[notify]\nkind = "chat"\n')
-    w.ok("board", "stop")                 # the board reads [factory] goal_roles at start
-    w.ok("board", "start")
-    yield w
-    w.run("board", "stop")
+    try:                                   # the board stops even when the setup below fails
+        toml = w.home / "konstant.toml"
+        toml.write_text(toml.read_text() + '[factory]\ngoal_roles = ["owner", "orchestrator"]\n'
+                        '[notify]\nkind = "chat"\n')
+        w.ok("board", "stop")             # the board reads [factory] goal_roles at start
+        w.ok("board", "start")
+        yield w
+    finally:
+        w.stop_board()
 
 
 def turn(w, text: str, session: str = S) -> dict:
@@ -93,7 +95,7 @@ def test_chat_proposal_refused_without_goal_roles(tmp_path):
         res = propose(w)
         assert res.returncode == 1 and "goal_roles" in res.stderr
     finally:
-        w.run("board", "stop")
+        w.stop_board()
 
 
 def test_a_tagged_task_keeps_the_level4_gate(cws):

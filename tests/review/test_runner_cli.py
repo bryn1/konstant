@@ -136,9 +136,11 @@ def bws(tmp_path_factory):
     w = Workspace(tmp_path_factory.mktemp("ws"))
     w.ok("board", "init")
     w.ok("board", "start")
-    w.ok("project", "add", "demo")
-    yield w
-    w.run("board", "stop")
+    try:
+        w.ok("project", "add", "demo")
+        yield w
+    finally:
+        w.stop_board()
 
 
 def test_F12_a_phase_acts_as_worker(bws):

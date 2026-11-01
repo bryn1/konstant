@@ -734,6 +734,8 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
   back once with the lint reasons; a second refusal returns `holdout-authoring BLOCKED: job N:
   <rule codes>`, which intake records as a `BLOCKED` event and an `escalation` trail row (actor
   `factory`), exit 4. `author = "owner"`: the jobs wait for `holdout add`.
+- A stopped `konstant intake` (SIGINT/SIGTERM) records a `BLOCKED` event and the intake state
+  `refused` (unless `filed`), exit 128+signal.
 - **Events** (`factory/notify.py`): `var/factory/events.jsonl`, one redacted line per event;
   escalations also to `[notify] kind` stdout / file (`notify.log`) / chat; outcomes (`FILED`) are
   never pushed. Webhook, retries, acks and the halt on a failed delivery are wave L5-5.
@@ -1236,5 +1238,10 @@ board at start (a typo must not silently disarm a gate).
   with the fake harness's planner / DoD-reviewer / scenario-writer modes, `weak-dod`,
   `weak-scenario`, no jail, a non-relocatable writer), `test_scenario_isolation.py` (B9 and the
   jail's late bind inside a mask, red twin), `test_chat_intake.py` (B11 with the fake harness's
-  `inject` mode); the plugin's chat path in `plugin.test.mjs`.
+  `inject` mode, the chat marker's refusals, a stopped intake's escalation); the plugin's chat path
+  in `plugin.test.mjs`.
+- **No leaked boards:** `tests/conftest.py` fails the session (and kills the process) when a
+  `konstant board serve` whose cwd lies under the run's basetemp is still alive at the end; board
+  fixtures stop their board in a finalizer that also runs when their own setup fails
+  (`Workspace.stop_board`, which kills the pid-file's board when `board stop` cannot run).
 - **CI:** GitHub Actions on Ubuntu, Python 3.10 and 3.12: unit + board + gate + e2e.

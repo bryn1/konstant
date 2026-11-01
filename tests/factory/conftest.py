@@ -29,12 +29,16 @@ def harness_arg(name: str) -> str:
 
 def make_fws(tmp: Path):
     w = make_ws(tmp)
-    for name in ("claude", "codex", "gemini"):
-        stub_cli.install(w.bindir, name)
-    home = tmp / "home"
-    for rel in (*CRED.values(), ".claude/planted", ".codex/planted", ".ssh/id_planted"):
-        (home / rel).parent.mkdir(parents=True, exist_ok=True)
-        (home / rel).write_text("FAKE-SECRET-" + rel.replace("/", "-") + "\n")
+    try:
+        for name in ("claude", "codex", "gemini"):
+            stub_cli.install(w.bindir, name)
+        home = tmp / "home"
+        for rel in (*CRED.values(), ".claude/planted", ".codex/planted", ".ssh/id_planted"):
+            (home / rel).parent.mkdir(parents=True, exist_ok=True)
+            (home / rel).write_text("FAKE-SECRET-" + rel.replace("/", "-") + "\n")
+    except BaseException:
+        w.stop_board()                             # never leave a board behind a failed setup
+        raise
     w.fake_home = home
     return w
 
@@ -76,4 +80,4 @@ def git_out(repo, *args) -> str:
 def fws(tmp_path):
     w = make_fws(tmp_path)
     yield w
-    w.run("board", "stop")
+    w.stop_board()

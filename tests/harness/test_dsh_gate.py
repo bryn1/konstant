@@ -133,9 +133,11 @@ def bws(tmp_path_factory):
     toml.write_text(toml.read_text() + '[harness]\nname = "dsh"\n')
     w.ok("board", "init")
     w.ok("board", "start")
-    w.ok("project", "add", "demo", "--init-git")
-    yield w
-    w.run("board", "stop")
+    try:
+        w.ok("project", "add", "demo", "--init-git")
+        yield w
+    finally:
+        w.stop_board()
 
 
 def _gate(w, text, *extra, cwd=None):

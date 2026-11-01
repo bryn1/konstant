@@ -21,13 +21,15 @@ from tests.holdout.conftest import make_ws, needs_jail
 @pytest.fixture()
 def iws(tmp_path):
     w = make_ws(tmp_path)
-    (w.src / "goal.toml").write_text(GOAL)
-    assert w.run("--as", "owner", "goal", "add", w.src / "goal.toml").returncode == 0
-    clone = w.home / "projects" / "greeter@99"              # another job's clone, with content
-    clone.mkdir()
-    (clone / "producer-output.py").write_text("print('the producer was here')\n")
-    yield w
-    w.run("board", "stop")
+    try:                                   # the board stops even when the setup below fails
+        (w.src / "goal.toml").write_text(GOAL)
+        assert w.run("--as", "owner", "goal", "add", w.src / "goal.toml").returncode == 0
+        clone = w.home / "projects" / "greeter@99"          # another job's clone, with content
+        clone.mkdir()
+        (clone / "producer-output.py").write_text("print('the producer was here')\n")
+        yield w
+    finally:
+        w.stop_board()
 
 
 @needs_jail

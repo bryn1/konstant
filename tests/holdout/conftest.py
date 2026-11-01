@@ -109,14 +109,18 @@ def make_ws(tmp: Path, verify_after_close: bool = True) -> HWS:
     w.ok("board", "init")
     w.ok("agents", "sync")
     w.ok("board", "start")
-    proj = w.home / "projects" / "greeter"
-    proj.mkdir(parents=True)
-    git(proj, "init", "-q", "-b", "main")
-    (proj / "greeter.py").write_text(BASE_GREETER)
-    (proj / "README.md").write_text("greeter\n")
-    git(proj, "add", "-A")
-    git(proj, "commit", "-qm", "base")
-    w.ok("project", "add", "greeter")          # job 1 = the project root
+    try:
+        proj = w.home / "projects" / "greeter"
+        proj.mkdir(parents=True)
+        git(proj, "init", "-q", "-b", "main")
+        (proj / "greeter.py").write_text(BASE_GREETER)
+        (proj / "README.md").write_text("greeter\n")
+        git(proj, "add", "-A")
+        git(proj, "commit", "-qm", "base")
+        w.ok("project", "add", "greeter")          # job 1 = the project root
+    except BaseException:
+        w.stop_board()                             # never leave a board behind a failed setup
+        raise
     return w
 
 
@@ -124,7 +128,7 @@ def make_ws(tmp: Path, verify_after_close: bool = True) -> HWS:
 def hws(tmp_path):
     w = make_ws(tmp_path)
     yield w
-    w.run("board", "stop")
+    w.stop_board()
 
 
 @pytest.fixture()
@@ -132,4 +136,4 @@ def hws_manual(tmp_path):
     """verify_after_close = false: the test runs `verify` itself (A8, A9, A10)."""
     w = make_ws(tmp_path, verify_after_close=False)
     yield w
-    w.run("board", "stop")
+    w.stop_board()

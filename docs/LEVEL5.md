@@ -977,6 +977,14 @@ Landed as DESIGN.md §7.3 describes. Where it differs from sections 2-4 above, a
   delivers escalations to `stdout`, `file` or `chat`; the outcome vocabulary gained `FILED`. Webhook,
   retries, acks and the halt on a failed delivery stay in L5-5.
 - **doctor** rows `scenario writer` (one model for every role: INFO) and `chat intake`.
+- **A stopped intake escalates** (also found in the live smoke: a time-boxed intake was stopped and
+  the chat heard nothing): SIGINT/SIGTERM end `konstant intake` with a `BLOCKED` event (`intake
+  stopped by SIGTERM after Ns`) and the intake state `refused` (unless it already reached `filed`).
+- **Live run (owner's setup: one local model through dsh for every role)**: the chat path worked as
+  designed (proposal in the request's turn, filed on the yes, no intake from the chat); a full
+  intake on that model takes longer than an hour (planner, a DoD review that FIXed a real bug in a
+  brief, a second planner cycle; the scenario writer's first drafts were refused by the held-out
+  lint and its second set sealed), so the live runs were time-boxed and recorded partially.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

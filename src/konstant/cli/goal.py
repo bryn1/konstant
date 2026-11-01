@@ -102,13 +102,31 @@ def no_chat(what: str) -> bool:
 def cmd_intake(ctx) -> int:
     if _no_task("intake") or no_chat("intake"):
         return EXIT_FAIL
-    from konstant.factory import intake
+    import time
+
+    from konstant.factory import intake, notify
     from konstant.gate import harness as harness_mod
+    from konstant.gate import loop
+    started = time.time()
+    loop.install_signals(started, lambda m: print(m, file=sys.stderr, flush=True))
     try:
         return intake.run(ctx, ctx.args.goal, ctx.args.harness)
     except harness_mod.HarnessError as exc:
         print(f"konstant intake: {exc}", file=sys.stderr)
         return EXIT_USAGE
+    except loop.Killed as k:
+        # a stopped intake is an escalation, never silence (found in the L5-3 live smoke: a
+        # timed-out intake left the chat with nothing to report)
+        import signal
+        name = signal.Signals(k.sig).name
+        notify.emit(ctx.cfg, "BLOCKED", ctx.args.goal,
+                    reason=f"intake stopped by {name} after {int(time.time() - started)}s; "
+                    "`konstant goal show` says how far it got")
+        try:
+            ctx.client("factory").post(f"/api/goals/{ctx.args.goal}/intake", {"state": "refused"})
+        except Exception:   # noqa: BLE001 - filing already reached `filed`: that state is final
+            pass
+        return 128 + int(k.sig)
 
 
 def cmd_chat_turn(ctx) -> int:
