@@ -23,7 +23,10 @@ from tests.factory.conftest import HARNESSES, logs, make_fws, run, sealed_job
 from tests.holdout.conftest import needs_jail
 
 PROBE = r'''
-import json, os, pathlib, stat
+import json, os, pathlib, stat, uuid
+# a unique name per attempt: phases run in parallel, each in its own pid namespace where
+# os.getpid() is the same small number, so a pid-named file of one phase was unlinked by another
+tag = uuid.uuid4().hex
 ws = pathlib.Path(os.environ["KONSTANT_HOME"])
 home = pathlib.Path(os.environ["HOME"])
 out = {}
@@ -48,7 +51,7 @@ def write(key, p, append=False):
 
 read("ssh_key", home / ".ssh" / "id_planted")
 read("token_file", os.environ["PROBE_TOKEN_FILE"])
-write("outside", pathlib.Path(os.environ["PROBE_OUTSIDE"]) / f"w-{os.getpid()}")
+write("outside", pathlib.Path(os.environ["PROBE_OUTSIDE"]) / f"w-{tag}")
 sock = os.environ.get("SSH_AUTH_SOCK", "")
 try:
     out["ssh_agent"] = "SOCKET" if sock and stat.S_ISSOCK(os.stat(sock).st_mode) else "none"
@@ -63,11 +66,11 @@ except OSError as exc:
     out["holdout"] = type(exc).__name__
 out["tokens"] = sorted(t.name for t in (ws / "var" / "secrets").glob("*.token")
                        if t.read_text().strip()) if (ws / "var" / "secrets").is_dir() else []
-write("machinery_catalog", ws / "catalog" / f"planted-{os.getpid()}")
+write("machinery_catalog", ws / "catalog" / f"planted-{tag}")
 write("machinery_toml", ws / "konstant.toml", append=True)
 write("machinery_db", ws / "var" / "board.db", append=True)
 write("machinery_git", ws / "projects" / "greeter" / ".git" / "config", append=True)
-write("target", ws / "projects" / "greeter" / f"planted-{os.getpid()}")
+write("target", ws / "projects" / "greeter" / f"planted-{tag}")
 print("confine-probe: " + json.dumps(out, sort_keys=True), flush=True)
 '''
 CORE_TOKENS = ["viewer.token", "worker.token"]

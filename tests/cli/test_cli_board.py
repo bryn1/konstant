@@ -60,7 +60,10 @@ def test_running_board(ws):
     assert "already running" in ws.ok("board", "start").stdout
     assert ws.ok("version").stdout.strip() == "konstant 0.1.0"
     projects = json.loads(ws.ok("project", "list", "--json").stdout)
-    assert [p["slug"] for p in projects] == ["demo"]
+    slugs = [p["slug"] for p in projects]
+    # the module's shared workspace: `demo` from the fixture, `gitted` only once
+    # test_project_add_init_git ran (an order the test must not depend on)
+    assert slugs[0] == "demo" and set(slugs) <= {"demo", "gitted"}, slugs
     assert (ws.home / "projects" / "demo").is_dir()
 
 
