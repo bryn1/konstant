@@ -212,6 +212,8 @@ def show_job(ref: str, request: Request, trail: bool = False, actor: Actor = Dep
                 d["holdouts"] = json.loads(raw)
             out["verifications"].append(d)
         out["holdouts"] = holdouts.listing(conn, row["id"])
+        from konstant.board.api import triage
+        out["intake_cards"] = triage.listing(conn, row["id"])
         out["runs"] = [dict(r) for r in conn.execute(
             "SELECT * FROM runs WHERE job_id=? ORDER BY id", (row["id"],)).fetchall()]
         if trail:

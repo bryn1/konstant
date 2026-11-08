@@ -73,7 +73,7 @@ def read_rows(run: Run):
         if len(cs) < 2 or all(re.fullmatch(r":?-{2,}:?", c) for c in cs if c):
             continue
         norm = [c.strip("*`_ ").upper() for c in cs]
-        if norm[:4] == HEADER or norm[0] in ("DECLINED", "DISPUTE"):
+        if norm[:4] == HEADER or norm[0] in ("DECLINED", "DISPUTE", "COPIED"):
             continue
         at = [i for i, c in enumerate(norm) if c in STATUSES]
         if len(cs) < 3 or norm[2] not in STATUSES:

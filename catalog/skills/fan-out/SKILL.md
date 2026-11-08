@@ -15,7 +15,9 @@ description: Hand a phase to a subagent and get a verifiable result back - pick 
 - **One concern per child, one writer per file**: two children never write the same file. Give
   each child the exact path to work in.
 - **Parallel** only for independent concerns (no shared file, no dependency): the phases the gate
-  marks parallel. **Sequential** when a child needs another's artifact: never spawn the tester
+  marks parallel, or the parts of a `fanout`/`max` task. **Never more children at once than the
+  cap** the intake card prints (`[harness] max_concurrency` // `max_parallel`): children beyond
+  the endpoint's slots evict each other's prompt cache and all of them finish later. **Sequential** when a child needs another's artifact: never spawn the tester
   before the build is committed or the reviewer before the plan exists.
 - A child that is clearly off task or over a reasonable time budget is stopped and re-briefed.
 

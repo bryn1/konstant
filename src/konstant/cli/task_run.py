@@ -161,7 +161,7 @@ def _run(ctx, task: str, prepare) -> int:
     ctx._project_lock = lock          # held until this process exits
     harness = _harness(ctx, cat)
     harness.check()                                                          # fail fast
-    err(f"konstant task: [type:{t}] ({why}) run {run_dir}")
+    err(f"konstant task: [type:{t}] ({why}) tier {rec.get('tier', 'agent')} run {run_dir}")
     client = ctx.client() if rec.get("job") else None
     if client is not None:
         _claim(client, rec)
@@ -201,13 +201,47 @@ def _run_factory(ctx, task: str, cat, t: str, why: str, rec: dict, run_dir) -> i
     return _phases(ctx, cat, t, rec, run_dir, harness, client)
 
 
+def max_parallel(hcfg: dict) -> int:
+    """[harness] max_parallel, never above the endpoint's real slots ([harness] max_concurrency
+    when set): more concurrent phases than slots evict each other's prompt cache."""
+    mp, mc = int(hcfg["max_parallel"]), int(hcfg.get("max_concurrency") or 0)
+    return max(1, min(mp, mc) if mc else mp)
+
+
+def research_step(ctx, cat, rec: dict, run_dir, override=None) -> None:
+    """The intake card's research step (konstant/triage/research.py), run by code before any
+    planning phase when the card says nothing similar was found: the closed researcher, whose
+    parsed, cited summary (never its raw pages) every phase prompt then carries."""
+    card = rec.get("card") or {}
+    if not card.get("research_required"):
+        return
+    from konstant.gate import record as record_mod
+    from konstant.triage import card as card_mod
+    from konstant.triage import research
+    try:
+        client = ctx.client("researcher")
+    except (ClientError, OSError):
+        client = None
+    res = research.run(ctx.cfg, cat, rec, card_mod.render(card), client=client,
+                       override=override, log=err)
+    rec["research"] = {"state": res["state"], "summary": res.get("summary") or "",
+                       "memory": res.get("memory")}
+    record_mod.write(run_dir, rec)
+
+
 def _phases(ctx, cat, t: str, rec: dict, run_dir, harness, client) -> int:
     cfg, a = ctx.cfg, ctx.args
     gate = cfg.data["gate"]
     max_cycles = a.max_cycles or gate["max_cycles"]
     max_resumes = a.max_resumes if a.max_resumes is not None else gate["max_resumes"]
+    tier = (rec.get("card") or {}).get("tier") or {}
+    if tier.get("name") in ("fanout", "max"):
+        err(f"konstant task: tier {tier['name']} ({tier['why']}): this runner works the task as "
+            f"ONE typed run; the fan-out (at most {tier['agents']} part(s) at once, cap "
+            f"{tier['cap']}) is the orchestrating session's: one `konstant task gate` per part")
+    research_step(ctx, cat, rec, run_dir, a.harness)
     pr = PhaseRunner(rec, cat, harness, run_dir=Path(run_dir),
-                     max_parallel=cfg.data["harness"]["max_parallel"],
+                     max_parallel=max_parallel(cfg.data["harness"]),
                      acceptance=rec.get("acceptance", ""), log=err, isolate=True)
     pr.run_all(max_cycles)
     pr.closeout()

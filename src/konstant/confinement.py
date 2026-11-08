@@ -136,11 +136,15 @@ class Confinement:
 
     def for_phase(self, identity: str = "worker", factory: bool = False) -> "Confinement":
         """The confinement one phase gets. The scenario writer handles sealed content: it always
-        runs closed (an open one could copy its drafts where producers read). Factory mode never
+        runs closed (an open one could copy its drafts where producers read). The web researcher
+        reads untrusted pages with the network on: it always runs RESEARCH (closed, and $HOME
+        masked too, so nothing private is there to send anywhere; konstant/triage/research.py). Factory mode never
         passes the docker socket (root on the host: it would void the integrity core) and never
         runs with the integrity core off."""
         if identity == "scenario":
             return CLOSED
+        if identity == "researcher":
+            return RESEARCH
         if factory:
             return replace(self, docker_socket=False, integrity=True)
         return self
@@ -205,6 +209,10 @@ class Confinement:
 
 
 CLOSED = Confinement()
+# the closed web researcher (konstant/triage/research.py), whatever the workspace's profile:
+# network on (it fetches pages), $HOME masked (no private file to exfiltrate), no credentials, no
+# ssh agent, no docker socket, no host write; its own private dirs are the only writable ones
+RESEARCH = Confinement(network=True, home_read=False)
 
 
 def _profile_defaults(profile: str) -> dict:

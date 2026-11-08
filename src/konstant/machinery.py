@@ -17,11 +17,14 @@ in every one of them. A phase may never write any of these paths, whatever the h
   - var/factory/ (the goal copies, the factory's events and the chat cursors: docs/LEVEL5.md 2.3;
     a phase that edited its goal or an event would steer the factory),
   - memory/ (the memory vault, its own git repository; only the board writes it, attributed to
-    the identity whose token asked: konstant/memory/).
+    the identity whose token asked: konstant/memory/),
+  - var/research/ (the closed researcher's work: its raw pages, transcripts and the summary
+    konstant parsed from them: konstant/triage/research.py).
 
 SEALED (docs/LEVEL5.md 2.3, 3.3) lists what no phase may even READ: the holdout store
-var/holdout/ and the memory vault memory/ (a phase reaches memory only through the board, which
-enforces the pools: konstant/memory/guard.py). The jail masks them (jail.hidden),
+var/holdout/, the memory vault memory/ (a phase reaches memory only through the board, which
+enforces the pools: konstant/memory/guard.py) and the research store var/research/ (a producer
+sees only the researcher's parsed summary, never the pages it fetched). The jail masks them (jail.hidden),
 Claude Code's settings deny Read on them and read-deny them in the sandbox, the codex profile
 denies them and the gemini policy denies its file tools under them. No holdout content is ever
 stored anywhere else a phase can read.
@@ -37,14 +40,16 @@ from konstant.board.policy import LABELS, PHASE_IDENTITIES
 DIRS = ("bin", ".venv", "src", "catalog", "tests",
         ".claude", ".agents", ".dsh", ".gemini",
         ".git", "var/secrets", "var/harness", "var/logs", "var/locks", "var/holdout",
-        "var/factory", "memory")
+        "var/factory", "memory", "var/research")
 # workspace-relative files no phase may write
 FILES = ("konstant.toml", "install.sh", "get.sh", "pyproject.toml", "AGENTS.md", "CLAUDE.md",
          "var/board.db", "var/board.db-wal", "var/board.db-shm", "var/board.pid",
          "var/sessions.json")
-# workspace-relative directories no phase may READ: the sealed holdout store (LEVEL5 2.3) and
-# the memory vault (read through the board only, which enforces the pools)
-SEALED = ("var/holdout", "memory")
+# workspace-relative directories no phase may READ: the sealed holdout store (LEVEL5 2.3), the
+# memory vault (read through the board only, which enforces the pools) and the research store
+# (the closed researcher's raw pages and transcripts: producers get only its parsed, cited
+# summary; konstant/triage/research.py)
+SEALED = ("var/holdout", "memory", "var/research")
 # inside a git repository a shell may commit to: the parts that make git run commands
 GIT_GUARDS = (".git/config", ".git/hooks")
 # per run (var/runs/<run>/): the records konstant writes and the DoD check trusts

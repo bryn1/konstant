@@ -50,6 +50,26 @@ KONSTANT-DRAFTS dir and prints one `scenario-sees: ...` line per thing it tried 
   inject                  the coder writes an "owner message" into its log and tries to file a
                           goal from inside the phase (`goal add --from-chat`, `chat turn yes`,
                           session FAKE_HARNESS_SESSION); one `inject: ...` line per attempt
+Research modes (wave L5-T, docs/CONCEPTS.md "Triage"): the closed `researcher` phase (header
+KONSTANT-RESEARCH: its work dir) fetches FAKE_RESEARCH_URL (a local test server; unset: it writes
+NOTHING-FOUND) and writes SUMMARY.md with one cited FINDING, the page's `License:` line as the
+source's licence (unknown when the page states none):
+  research-peek           the researcher first tries the reach a closed researcher must not have
+                          (the credential dirs, the tokens, the projects, run records, memory and
+                          the holdout store; writing outside its work dir; the credential and
+                          ssh-agent variables); one `research-sees: ...` line each
+  research-inject         the researcher pastes the page's lines verbatim as findings (an
+                          injected page: konstant must refuse the summary)
+  research-uncited        a FINDING row without a source (konstant must refuse it)
+  consume                 the coder prints whether its prompt carries the research summary and
+                          whether it carries the page's raw marker FAKE_RAW_MARKER, then tries to
+                          read var/research/; then it is honest
+Licence modes (the DoD rule `licence`): the coder's greet() carries "# adapted from
+FAKE_RESEARCH_URL" (default https://example.org/greet):
+  copy-unrecorded         no COPIED row (the check must refuse it)
+  copy-licensed           the close-out records `COPIED | <module>.py | <url> | MIT`
+  copy-gpl                the close-out records the copy as GPL-3.0-only (a project under MIT:
+                          refused)
 FAKE_PLANTED_PASS=1 (set by a plugin a planted dsh layer runs, tests/fixtures/stub_dsh.py): every
 verifying phase writes PASS whatever it found - the layer controls the verifier's phase.
 The close-out writes one `DoD-<n>` row per KONSTANT-DOD-ROW header (the job's DoD rows).
@@ -280,6 +300,82 @@ def inject() -> None:
               f"(rc {r.returncode}: {(r.stderr or r.stdout).strip()[-90:]})")
 
 
+COPY_MODES = ("copy-unrecorded", "copy-licensed", "copy-gpl")
+PROMPT = ""
+
+
+def research(h: dict) -> None:
+    """The closed researcher: one fetch of FAKE_RESEARCH_URL, a SUMMARY.md of cited rows."""
+    import urllib.request
+    work = Path(h["RESEARCH"])
+    work.mkdir(parents=True, exist_ok=True)
+    if MODE == "research-peek":
+        research_peek(work)
+    url = os.environ.get("FAKE_RESEARCH_URL", "")
+    if not url:
+        (work / "SUMMARY.md").write_text("RESEARCH | prior art for the task\n"
+                                         "NOTHING-FOUND | the fake harness has no page to read\n")
+        return
+    try:
+        page = urllib.request.urlopen(url, timeout=10).read().decode("utf-8", "replace")
+        print(f"research-fetched: {len(page)} bytes from {url}")
+    except OSError as exc:
+        print(f"research-fetch-failed: {exc}")
+        page = ""
+    lic = re.search(r"(?m)^License:\s*(\S+)", page)
+    title = re.search(r"<title>([^<]+)</title>", page)
+    rows = ["RESEARCH | how others greet by name",
+            f"SOURCE | S1 | {url} | LICENCE {lic.group(1) if lic else 'unknown'} | "
+            f"{title.group(1) if title else 'a page'}"]
+    if MODE == "research-inject":
+        rows += [f"FINDING | {ln.strip()} | S1" for ln in page.splitlines() if ln.strip()]
+    elif MODE == "research-uncited":
+        rows += ["FINDING | greet(name) returns hello name | -"]
+    else:
+        rows += ["FINDING | the reference greet(name) returns 'hello ' + name | S1",
+                 "REUSE | mimic its signature greet(name='world') | S1"]
+    rows += ["a free prose line konstant drops"]
+    (work / "SUMMARY.md").write_text("\n".join(rows) + "\n")
+
+
+def research_peek(work: Path) -> None:
+    ws = Path(os.environ.get("KONSTANT_HOME", "."))
+    # konstant gives an argv-template researcher a private HOME; the test names the real one
+    home = Path(os.environ.get("FAKE_REAL_HOME") or os.path.expanduser("~"))
+    tries = [("~/.ssh", home / ".ssh"), ("home file", home / "konstant-research-private.txt"),
+             ("tokens", ws / "var" / "secrets"), ("projects", ws / "projects"),
+             ("run records", ws / "var" / "runs"), ("memory", ws / "memory"),
+             ("holdout store", ws / "var" / "holdout")]
+    for what, p in tries:
+        try:
+            seen = sorted(x.name for x in p.iterdir()) if p.is_dir() else (
+                [p.read_text()[:20]] if p.is_file() else [])
+            print(f"research-sees: {what} {'READ ' + ','.join(seen)[:80] if seen else 'empty or masked'}")
+        except OSError as exc:
+            print(f"research-sees: {what} DENIED ({exc.__class__.__name__})")
+    for what, p in (("workspace", ws / "research-wrote.txt"),
+                    ("home", home / "research-wrote.txt")):
+        try:
+            p.write_text("x")
+            print(f"research-sees: write {what} WROTE")
+        except OSError as exc:
+            print(f"research-sees: write {what} DENIED ({exc.__class__.__name__})")
+    for var in ("GITHUB_TOKEN", "SSH_AUTH_SOCK", "AWS_SECRET_ACCESS_KEY"):
+        print(f"research-env: {var} {'PRESENT' if os.environ.get(var) else 'absent'}")
+
+
+def consume() -> None:
+    marker = os.environ.get("FAKE_RAW_MARKER", "RAW-PAGE-MARKER")
+    print(f"consume: summary {'yes' if '## Research summary' in PROMPT else 'no'}, raw "
+          f"{'yes' if marker in PROMPT else 'no'}")
+    store = Path(os.environ.get("KONSTANT_HOME", ".")) / "var" / "research"
+    try:
+        names = sorted(x.name for x in store.iterdir()) if store.is_dir() else []
+        print(f"consume: var/research {'READ ' + ','.join(names) if names else 'empty or masked'}")
+    except OSError as exc:
+        print(f"consume: var/research DENIED ({exc.__class__.__name__})")
+
+
 def module_body() -> str:
     if MODE in BROKEN_MODES:
         return 'def greet(name="world"):\n    return "BROKEN"\n'
@@ -288,6 +384,9 @@ def module_body() -> str:
     body = f'{doc}def greet(name="world"):\n    return {ret}\n'
     if MODE == "leak":
         body += f"# {os.environ.get('FAKE_HARNESS_CANARY', 'no-canary')}\n"
+    if MODE in COPY_MODES:
+        body = (f"# adapted from {os.environ.get('FAKE_RESEARCH_URL') or 'https://example.org/greet'}"
+                "\n" + body)
     return body
 
 
@@ -301,6 +400,8 @@ def produce(agent: str, out: Path, project, judge_cmd: str = "", job: str = "") 
             self_ship(project)
         if MODE == "inject":
             inject()
+        if MODE == "consume":
+            consume()
         (project / f"{MODULE}.py").write_text(module_body())
         check = "assert greet()" if MODE in VACUOUS_MODES else "assert greet() == 'hello world'"
         (out / "test_greet.py").write_text(
@@ -357,6 +458,10 @@ def closeout(out: Path, rows: list, dod: list = ()) -> None:
                     'failing test today"')
         done.append('DECLINED | ends verdict FAIL from the tester | "the owner said this is '
                     'acceptable for now"')
+    if MODE in ("copy-licensed", "copy-gpl"):
+        url = os.environ.get("FAKE_RESEARCH_URL") or "https://example.org/greet"
+        done.append(f"COPIED | {MODULE}.py | {url} | "
+                    f"{'MIT' if MODE == 'copy-licensed' else 'GPL-3.0-only'}")
     done.append("CLEANUP: NONE-NEEDED")
     (out / "DONE.md").write_text("\n".join(done) + "\n")
     (out / "CYCLES.md").write_text("cycle | trigger | action | outcome\n"
@@ -382,7 +487,9 @@ def newest(out: Path, name: str) -> str:
 
 
 def main() -> int:
+    global PROMPT
     prompt = Path(sys.argv[1]).read_text() if len(sys.argv) > 1 else sys.stdin.read()
+    PROMPT = prompt
     h = headers(prompt)
     if "AGENT" not in h:          # a small task: answered inline, no phases
         print(f"fake harness: answered inline: {prompt.strip()[:60]}")
@@ -391,6 +498,10 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     project = Path(h["PROJECT"]) if h.get("PROJECT", "-") != "-" else None
     agent, verdict, step = h["AGENT"], h.get("VERDICT", "-"), h.get("STEP", "-")
+    if "RESEARCH" in h:
+        research(h)
+        print(f"fake harness: researcher done (mode {MODE or 'default'})")
+        return 0
     if agent == "scenario-writer":
         scenario_writer(h)
         print(f"fake harness: {agent} done (mode {MODE or 'default'})")

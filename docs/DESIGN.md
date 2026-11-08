@@ -1,4 +1,4 @@
-# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b, L5-3 and L5-M landed)
+# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b, L5-3, L5-M and L5-T landed)
 
 konstant is a self-contained workspace for running coding agents with discipline: a local job
 board (**board**), a deterministic **task gate** that turns a task into phases run by one agent
@@ -15,7 +15,10 @@ read-only target. Wave L5-3 added intake (§7.3): goals (from a file or the owne
 chat) turned into board jobs by a planner phase, a DoD review by another identity, deterministic
 filing and approval, and holdouts written by a scenario-writer phase. Wave L5-M added built-in
 memory (§7.4): an Obsidian-compatible Markdown vault with its own git history, a rebuildable
-recall index, one MCP server for every harness, held to the integrity core.
+recall index, one MCP server for every harness, held to the integrity core. Wave L5-T added
+triage (§6.2.1): size tiers on top of the type, an intake card computed by code before any model
+plans a task (new or continuation, prior work, reuse), a closed web-research phase for tasks with
+nothing similar, and a licence gate for copied code.
 
 References of the form F-nn and G-nn name findings of the two independent security reviews of
 v0.1; docs/CONCEPTS.md "Security reviews" summarises them, and each has a test under `tests/review/`.
@@ -188,7 +191,8 @@ supported, but the generated surfaces only apply inside it (stated in QUICKSTART
 | `runs` | `id, job_id, run_dir, type, started_at, finished_at, result(MET/UNMET/BLOCKED/ERROR)` | links task runs to jobs; written by `task run --job` through `POST /api/jobs/{ref}/runs`; `GET /api/jobs/{ref}` returns the job's `verifications` and `runs` |
 | `goals` (v4) | `id, slug, project_id, spec_text, spec_json, spec_sha256, source(file/chat), session, status(proposed/active/paused/done/stopped/withdrawn), intake(none/planning/filing/filed/refused), created_by, created_at, updated_at` | spec columns immutable (trigger); slug unique among non-withdrawn goals; `filed` is final (a goal is taken in once); no delete |
 | `memory_writes` (v5) | `id, path, pool, actor, role, kind(fact/note), state(stored/refused), reason, sha256, commit_sha, run, job_id, at` | every write konstant made to the memory vault and every write it refused (§7.4); append-only (triggers); `actor`/`role` from the token; a note is ATTRIBUTED while its file hashes to its latest `stored` row |
-| `tokens` | `id, role, label, sha256 UNIQUE, active, created_at` | `label` is the actor identity (e.g. `orchestrator`, `verifier`; the factory identities `planner`, `dod-reviewer`, `scenario`, `factory`: §5) |
+| `intake_cards` (v6) | `id, job_id, run, actor, role, tier, continuation(new/continuation), research_required, card_json, sha256, at` | the intake card of each run bound to a job (§6.2.1), recorded by owner or orchestrator tokens only (`POST /api/jobs/{ref}/intake-card`), the sha256 recomputed by the board; append-only (triggers); `job show` lists them |
+| `tokens` | `id, role, label, sha256 UNIQUE, active, created_at` | `label` is the actor identity (e.g. `orchestrator`, `verifier`; the factory identities `planner`, `dod-reviewer`, `scenario`, `researcher`, `factory`: §5) |
 
 Hierarchy: depth 0 = project root (auto-created by
 `project add`, never closes, no DoD), depth 1 = feature (carries the DoD), depth 2 = task. Depth > 2
@@ -254,14 +258,16 @@ and keeps it in browser storage). No shared token, no password users, no open re
 `konstant board tokens --rotate <role>` (owner) replaces a token.
 
 Factory identities (level 5, docs/LEVEL5.md §2.2): `board init` also mints tokens with their own
-LABEL - `planner`, `dod-reviewer`, `scenario` (role worker) and `factory` (role orchestrator) -
+LABEL - `planner`, `dod-reviewer`, `scenario`, `researcher` (role worker) and `factory` (role
+orchestrator) -
 as `var/secrets/<label>.token` (`board/policy.py` `IDENTITIES`); `board tokens --rotate ROLE
 --label LABEL` replaces one, `--as LABEL` acts as one. The board compares labels: `approve` is
 refused to the job's requester (`the requester cannot approve its own DoD`), `claim` and `close`
 to a label that posted the job's `dod-review` (`POST /api/jobs/{id}/dod-review`, only the
 `dod-reviewer` identity, before any claim) or sealed its holdouts (the owner or the `scenario`
-identity seal). Since L5-3: the planner of a goal job never claims or closes it, none of the four
-identities claims or closes any job, only the `planner` identity files goal jobs and only the
+identity seal). Since L5-3: the planner of a goal job never claims or closes it, none of the
+identities claims or closes any job (L5-T added `researcher`: the label konstant stores the closed
+researcher's summary under in the shared memory pool; its phase itself holds no token), only the `planner` identity files goal jobs and only the
 `dod-reviewer` reviews them - both only while the `factory` identity holds the goal's intake at
 `filing` (`POST /api/goals/{id}/intake`), so an intake phase holding its token cannot file or review
 around the deterministic filing - and the `factory` identity approves a goal job after a
@@ -360,6 +366,63 @@ opener; a read-only opener like "show"/"list") → `small`; else no deliverable 
 must still be gated). F-16: the earlier order (every small shape first) let "ok, implement X"
 and "Can you implement X in a.py?" run ungated.
 
+### 6.2.1 Triage: size tiers, the intake card, research, the licence gate (wave L5-T)
+
+`konstant/triage/`, deterministic, no model (docs/CONCEPTS.md "Triage" has the user-facing rules).
+
+- **Tiers** (`tiers.py` `decide`, after the classifier and `--type`): `[tier:x]` tag (owner
+  override; on a small task a tier other than inline gates it with the keyword type or `code`;
+  `factory` on a bound job is `agent`) -> small = `inline` -> `factory` (a long-running phrase AND
+  a mechanical acceptance AND a `build` type not in `[ship] decision_types`; a long-running task
+  that fails the other two gets a size tier and a `factory-unsuitable:` note) -> `max` (a
+  whole-scope phrase, or more parts than the cap) -> `fanout` (>= `[triage] fanout_min` parts:
+  list items, distinct file paths, an explicit count, counted before the DoD section) -> `agent`.
+  The cap = `[harness] max_concurrency // [harness] max_parallel` (at least 1; unset slots = one run
+  at a time); `task classify` prints the tier, its reason, the agents and the cap with its source.
+  `task run` refuses `factory` (exit 2, how to file it as a goal) BEFORE any job binding or
+  filing, runs `inline` as the small path, and works `fanout`/`max` as one typed run, saying the
+  fan-out is the orchestrating session's; the runner's parallel phases are capped at
+  `max_concurrency` too (`task_run.max_parallel`).
+- **The intake card** (`card.py` `build`, called by `cli/task.py prepare` for every typed task,
+  before the record is written): type and tier with reasons; new or continuation (bound job ->
+  continuation; an open job or active/proposed/paused goal sharing paths or keywords ->
+  continuation; else new); related jobs (`/api/search` per path and keyword, project-scoped) and
+  goals; prior work (`/api/memory/recall` with the viewer token: shared pool and owner notes,
+  verified-job lessons first, as the board orders them); reuse candidates (named files that exist,
+  project files by name, matching catalog skills); `research_required` = new AND nothing related
+  AND no memory hit AND `[triage] research = "required"`. An unreachable board: no lookup, no
+  requirement, a warning (the card says `board: unreachable`). Stored in the run record (`card`,
+  a run fact the check trusts like `task` and `type`), rendered after the gate block (outside the
+  3,300-character budget, which measures rule text), put into every phase prompt but the
+  close-out, and posted to the job (`POST /api/jobs/{ref}/intake-card`, owner/orchestrator only;
+  table `intake_cards`, a `note` trail line).
+- **The researcher** (`research.py`): when the card requires it, `task run` (and `konstant intake`
+  for a goal) runs it before the first phase; an interactive session runs `konstant task research
+  RUN`. One phase of agent `researcher` as identity `researcher` on the workspace's harness, always
+  in factory mode (jailed on any adapter; no jail -> state `unavailable`, never open), under
+  `confinement.RESEARCH` whatever the profile (`for_phase`): network on, `home_read` off (`$HOME`
+  masked; `harnesses/base.py exe_roots` keeps the phase's own program and its install root
+  reachable), no credentials, no ssh agent, no docker socket, no host write; `tokens=()`, no memory
+  server; masked besides the core: `projects/`, `var/runs`, `var/logs`, `var/factory`,
+  `var/harness`, `var/sessions.json`, the board DB. Its cwd, harness home and run dir live in
+  `var/research/<run>/` (machinery `DIRS` and `SEALED`: no phase reads or writes it; its own dirs
+  are bound after the mask, as the scenario writer's drafts are); an argv-template harness gets
+  `HOME`/`XDG_*` in that private home. konstant parses `SUMMARY.md` (`parse`): only `RESEARCH`,
+  `SOURCE | S<n> | <http(s) URL> | LICENCE <id> | ...`, `FINDING | ... | S<n>`, `REUSE | ... |
+  S<n>` and `NOTHING-FOUND` rows survive; an uncited row, a bad source, a missing licence, control
+  characters, > 16 KiB or an instruction-shaped line (`INJECTION`) refuse it. The accepted summary
+  is rendered by konstant (`render`, framed as data), stored as a note in the shared pool through
+  the `researcher` token (tags `research`, `licence-notes`), written to `result.json` and handed to
+  every phase prompt (`rec["research"]`); a refused one is described, never passed on.
+- **DoD rules** (§6.4): `research` (card required research -> `result.json` for this run exists;
+  `unavailable` warns) and `licence` (below); both unexcusable.
+- **Licence gate** (`licence.py`, `gate/rules/licence.py`): `COPIED | <path> | <source> | <SPDX>`
+  rows in DONE.md or `OUT/LICENSES.md` must name a licence compatible with the project's (LICENSE
+  phrases/SPDX, pyproject.toml, Cargo.toml, package.json; unreadable -> permissive only); a changed
+  code file (project diff vs the run base by plumbing, as `lastmile`; OUT source files) whose added
+  lines carry a provenance note, a foreign SPDX id or a URL of the run's research sources needs a
+  row. Documents are not scanned. `done.py` treats `COPIED` rows as non-matrix rows.
+
 ### 6.3 Gate block and run record
 
 `konstant task gate "<task>" [--job N] [--out DIR] [--harness NAME] [--cwd DIR] [--session ID]
@@ -393,7 +456,7 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 | verdicts | `rules/verdicts.py` | fresh verdict files end with exactly one `# VERDICT: <word>` line; at most one `# JUDGED:` line |
 | phases | `rules/phases.py` | every verifying phase has a fresh verdict file named for it; a cycle writes a new suffixed file (`-c2`); the newest decides; after 3 cycles a non-pass verdict counts as BLOCKED |
 | judged | `rules/judged.py` | a decisive PASS verdict's `# JUDGED: <sha>` equals the content hash of OUT (minus verdicts/DONE/CYCLES/.tmp) + the git diff of the project tree vs the run base (a project that is not a git tree: every project file outside OUT), recomputed by replaying the args recorded with the pin; mismatch = edited after judging (the changed paths are named); unrecorded args (`PIN-ARGS-UNRECORDED`) / base mismatch (`PIN-BASE-DIFFERS`) = UNMET by name; the judge refuses an EMPTY state (exit 2) |
-| done | `rules/done.py` | DONE.md rows `ID | claim | STATUS | evidence`, STATUS in PASS FAIL BLOCKED N/A UNVERIFIED; the header is only a line whose first four cells are exactly those names (F-09); FAIL/UNVERIFIED/placeholder evidence/N/A without reason = UNMET; ≥1 PASS row; with a job, one `DoD-<n>` row per row of the job's DoD (`board.dod.dod_rows`), PASS or BLOCKED, never N/A (F-21); `DECLINED | <claim> | job <id>` excuses an EXCUSABLE condition only when the claim quotes it (≥2 contiguous shared words, claim ≥3 words) AND job `<id>` carries an owner-role note/approval `DECLINED: <the same claim>` read from a reachable board (F-01: a quoted "owner statement" and "any existing job" were text the close-out agent could author); offline or unreachable = unresolved (fail closed); never excuses the rules verdicts, phases, judged, tests, verified, authorship, holdouts; `DECLINED`/`DISPUTE` rows are not matrix rows |
+| done | `rules/done.py` | DONE.md rows `ID | claim | STATUS | evidence`, STATUS in PASS FAIL BLOCKED N/A UNVERIFIED; the header is only a line whose first four cells are exactly those names (F-09); FAIL/UNVERIFIED/placeholder evidence/N/A without reason = UNMET; ≥1 PASS row; with a job, one `DoD-<n>` row per row of the job's DoD (`board.dod.dod_rows`), PASS or BLOCKED, never N/A (F-21); `DECLINED | <claim> | job <id>` excuses an EXCUSABLE condition only when the claim quotes it (≥2 contiguous shared words, claim ≥3 words) AND job `<id>` carries an owner-role note/approval `DECLINED: <the same claim>` read from a reachable board (F-01: a quoted "owner statement" and "any existing job" were text the close-out agent could author); offline or unreachable = unresolved (fail closed); never excuses the rules verdicts, phases, judged, tests, verified, authorship, holdouts, backlog, research, licence; `DECLINED`/`DISPUTE`/`COPIED` rows are not matrix rows |
 | tests | `rules/tests.py` | the test command passes: `[gate] test_cmd` read from the WORKSPACE config, never the record (F-06); `auto` = `pytest` over `test_*.py` under OUT and over the project when it holds Python test files outside OUT (F-18); every run of agent code goes through `konstant.jail` (bubblewrap: read-only root, writes to OUT/project/private tmp, secrets + credential dirs masked, no network) when it works |
 | last mile | `rules/lastmile.py` | in a git tree: no untracked file created during the run outside OUT/.audits/.tmp; no marker words (`TODO`, `FIXME`, `XXX`) added to source since start; changed test files pass |
 | hygiene | `rules/hygiene.py` | non-test source in OUT > 400 lines needs a `reason` in its first 5 lines; a project source file the run grew past 600 lines without one = UNMET (thresholds configurable) |
@@ -402,14 +465,16 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 | exercise | `rules/exercise.py` | Python only: tests under OUT enter at least one function of every non-test `.py` in OUT (traced run) |
 | holdouts | `rules/holdouts.py` | the verifier's newest holdout result since the run start: each failed holdout UNMET `holdout H<n> failed (hint: ...)` (owner producer), a LEAK or a commitment mismatch BLOCKED; a `DISPUTE \| H<n> \| <why>` row in DONE.md is BLOCKED (an owner decision, never resolved automatically, excuses nothing), a malformed one UNMET; unexcusable (§7.1) |
 | backlog | `rules/backlog.py` | `intake` runs only: the deterministic filing rules (`factory/backlog.py`, §7.3) hold; a brief that would be refused is UNMET (owner producer: the planner is resumed with the reasons), a job without a SHIP line in the newest `DOD-verdict*.md` is the DoD reviewer's; unexcusable |
+| research | `rules/research.py` | the run record's intake card requires research (§6.2.1): the closed researcher's `var/research/<run>/result.json` must exist (owner orchestrator; `unavailable` = a warning); unexcusable |
+| licence | `rules/licence.py` | copied code: every `COPIED` row's licence is known and compatible with the project's; a changed code file with a provenance mark has a row (owner producer); unexcusable (§6.2.1) |
 | verified | `rules/verified.py` | the run's job, once closed, has a `konstant verify` verdict newer than the run start; FAIL = UNMET, BLOCKED = BLOCKED; a board that cannot be read = UNMET (fail closed); `task check --offline` skips the rule with a warning (the evidence the runner closes with uses it, so the verifier's re-run does not wait on its own verdict) |
 | authorship | `rules/authorship.py` | runner mode: EVERY verdict file (superseded cycles too) must have been created by a run of the verifying phase it names (phase manifests, §6.5) and touched by no other phase run, and its content must equal the sha256 the last phase that touched it recorded (F-05: a change outside every phase window); otherwise UNMET `AUTHORSHIP:` (also for a verdict file no phase run created). No re-run can undo it: the loop stops (owner `none`). Inside a parallel group (one shared snapshot) a verdict file is credited by NAME to the member it names. Interactive mode: an unattributed WARNING |
 | cleanup | `rules/cleanup.py` | DONE.md carries `CLEANUP: <what was moved/removed and where>` or `CLEANUP: NONE-NEEDED`; `[gate] cleanup = warn` (default) or `fail` |
 
 Every finding carries an owner (`producer`, `orchestrator`, `verifier:<file>`, `none`) that the
 loop resumes. Rule order is fixed because the repeat-stop compares the FIRST reason: verdicts,
-phases, authorship, judged, backlog, done (+absence, surfaces), cleanup, tests (+exercise),
-lastmile, hygiene, holdouts, verified; the DECLINED filter runs last.
+phases, authorship, judged, backlog, research, done (+absence, surfaces), cleanup, tests
+(+exercise), lastmile, hygiene, licence, holdouts, verified; the DECLINED filter runs last.
 
 What the check trusts (F-06, F-11): only run dirs directly under `<workspace>/var/runs/` (the
 workspace of KONSTANT_HOME / `--config` when the caller has one, else the one the run dir sits
@@ -1243,9 +1308,10 @@ Global: `--as ROLE`, `--json`, `--config PATH`; env `KONSTANT_HOME`. Exit 0 ok, 
 | `job approve ID` | | owner |
 | `job verdict ID PASS|FAIL|BLOCKED [REASON]` | | post a verdict by hand (verify roles; the closer cannot) — `konstant verify` is the normal path |
 | `job lint FILE` | | DoD/PROBE lint (exit 1 when the DoD is missing or a PROBE would be refused) |
-| `task classify TEXT` | | type + why |
+| `task classify TEXT` | | type + why, then the size tier + why (and the agents and cap for fanout/max; §6.2.1) |
 | `task gate TEXT|-` | `--job --out --project --type --harness --cwd --session --file-job` | print gate block, write run record; bind a job (`[job:N]` tag, session, `--file-job`; §6.6) |
 | `task run TEXT|-` | `--job --project --type --out --harness NAME|CMD --max-cycles --max-resumes` | phase runner + loop (§6.5); one run per project (exit 2 when another runs) |
+| `task research RUN` | `--harness --json` | the intake card's research step for an interactive run: the closed researcher once per run, prints its cited summary (§6.2.1); refused inside a task run |
 | `task close RUN` | `--json` | interactive close-out (§6.6): MET -> claim if queued -> close -> verify |
 | `task check RUN` | `--json --offline` | DoD check, gate exit codes; RUN = run dir under `var/runs/`, its record.json or its name (anything else: exit 2) |
 | `task judge` | `--run RUN` or `--out DIR [--project P --base SHA]` | print `# JUDGED: <sha>` and record its args (exit 2 on an empty state) |
@@ -1300,7 +1366,15 @@ command = "claude -p --permission-mode dontAsk --setting-sources project,local -
 stdin = false                  # only for your own template (adapters choose for themselves)
 timeout_s = 3600
 max_parallel = 2
+max_concurrency = 0            # the endpoint's real slots; fan-out cap = this // max_parallel
+                               # typed runs (>= 1); 0 = unknown: one run at a time (§6.2.1)
 env = {}
+
+[triage]                       # §6.2.1, docs/CONCEPTS.md "Triage"
+fanout_min = 3                 # independent parts that make a task `fanout` (2-100)
+prior_limit = 5                # memory hits on the intake card (0-20)
+research = "required"          # required | off: a new task with nothing similar starts with the
+                               # closed researcher; off drops the requirement (doctor WARNs)
 
 [harness.endpoint]             # a local OpenAI-compatible server, for codex and dsh
 base_url = ""

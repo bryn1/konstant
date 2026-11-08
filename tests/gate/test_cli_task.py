@@ -25,7 +25,9 @@ def ws(tmp_path):
 def test_classify_cli(task, line):
     res = subprocess.run([sys.executable, "-m", "konstant", "task", "classify", task],
                          capture_output=True, text=True)
-    assert res.returncode == 0 and res.stdout.strip() == line
+    # the first line is the type and why; since wave L5-T a second line prints the size tier
+    assert res.returncode == 0 and res.stdout.splitlines()[0] == line
+    assert res.stdout.splitlines()[1].startswith("tier=")
 
 
 def test_gate_prints_block_then_task_and_writes_the_record(ws, tmp_path):

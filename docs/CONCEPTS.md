@@ -53,12 +53,14 @@ it**. The other terminal state works the same way: a review-type job is closed b
 from an identity that neither filed, claimed nor closed it (by default the owner or the verifier
 review the orchestrator's jobs).
 
-For the dark factory (level 5) `board init` also mints four **identities**: tokens with their own
-label - `planner`, `dod-reviewer` and `scenario` (role worker) and `factory` (role orchestrator).
+For the dark factory (level 5) `board init` also mints five **identities**: tokens with their own
+label - `planner`, `dod-reviewer`, `scenario` and `researcher` (role worker) and `factory` (role
+orchestrator; `researcher` is the label konstant stores the closed web researcher's summary under,
+"Triage").
 `--as LABEL` acts as one; `board tokens --rotate ROLE --label LABEL` replaces one. The board
 compares labels: a job's requester never approves its own DoD, and the identity that reviewed a
 job's DoD or sealed its holdouts never claims or closes it, the planner of a goal job never
-claims or closes it, and none of the four identities claims or closes work at all (the producer
+claims or closes it, and none of the five identities claims or closes work at all (the producer
 and verifying phases act as `worker`). One model may play every one of these roles: the
 separation is the identity, what each phase is shown, and the jail's file isolation.
 
@@ -122,6 +124,87 @@ kills every process a phase left running before the next phase starts (Linux). A
 that says FAIL sends the work back to the producer, up to 3 cycles. `[harness] max_parallel = 1`
 runs every phase alone, for strict per-phase attribution. One run per project at a time.
 
+## Triage
+
+Before anything plans a task, konstant triages it, by code, in the order the owner's orchestrator
+asks: what type of task is this, how big is it, is it new or a continuation, what has been done
+before, what can be reused, and does it need research first.
+
+**Five size tiers** sit on top of the type (`konstant task classify` prints both, each with its
+reason; `konstant/triage/tiers.py`):
+
+| tier | means | chosen when |
+|---|---|---|
+| `inline` | the orchestrator answers in its own session, no gate | the classifier says `small` |
+| `agent` | one typed run with its workflow | one deliverable |
+| `fanout` | several typed runs in parallel, one per independent part | at least `[triage] fanout_min` (3) parts: list items, distinct file paths, or a count such as "12 modules", counted before the DoD section |
+| `max` | as many parallel typed runs as the endpoint allows | a whole-scope phrase ("the entire codebase", "every module", "all services") or more parts than the cap |
+| `factory` | a long-running goal: goal -> intake -> jobs -> holdouts -> ship, until the goal's acceptance is met or each job used its `max_attempts` | a long-running phrase ("for a week", "until all tests pass", "keep running") AND a mechanical acceptance (PROBE or VERIFY_CMD rows, a DoD section, "until the tests pass") AND a type the factory can ship |
+
+`max` is never unbounded. `[harness] max_concurrency` is the number of requests your endpoint
+serves at once (its slots); a typed run runs up to `[harness] max_parallel` phases at once, so the
+cap is `max_concurrency // max_parallel` typed runs (at least one). Unset, konstant does not know
+the slots and runs one at a time. More agents than slots do not finish sooner: they evict each
+other's prompt cache and every one of them gets slower. The runner also never runs more parallel
+phases than `max_concurrency`. Override any tier with a tag: `[tier:agent]`, `[tier:max]`, ...
+(`[tier:factory]` on a run bound to one job becomes `agent`: a job is one unit of work).
+
+**Which tasks suit the factory.** A goal with a measurable end state and a mechanical acceptance:
+a library that must pass a suite, a CLI whose commands a probe can run, a port that must reach
+parity with the original's tests. Not: open-ended taste work ("make it nicer"), a goal nobody can
+check without a person, documents and reviews (their deliverable is a verdict or prose, not
+something the verifier can run), and `infra` (it ships only by an owner decision). A long-running
+request that fails these rules gets a size tier instead, and the tier says why it is not a
+factory task. `konstant task run` refuses a factory task with the way to file it as a goal; the
+gate block tells an orchestrating session the same.
+
+`fanout` and `max` are carried out by the orchestrating session: it splits the work into the
+parts the intake card names and runs at most the cap at once, one `konstant task gate` per part
+(skill `fan-out`). `konstant task run` works a fanout task as one typed run and says so.
+
+**The intake card** (`konstant/triage/card.py`) is the first step of every non-inline task, done
+by code before any model plans it. It holds:
+
+- the type and tier, each with its reason;
+- **new or continuation**: a run bound to an existing job continues it; an open job or an active
+  goal that shares the task's file paths or keywords makes it a continuation; otherwise it is new;
+- **prior work**: board jobs and goals that share paths or keywords (closed ones are similar work
+  done before) and a memory recall over the shared pool, lessons of verified jobs first;
+- **reuse candidates**: files the task names that exist in the project, project files whose name
+  matches a keyword, catalog skills that match;
+- **research required**: a new task with nothing similar on the board or in memory.
+
+The card is printed after the gate block, put into every phase prompt (not the close-out), kept in
+the run record, and recorded on the job (`job show --json` lists `intake_cards`; the trail gets a
+one-line note). An unreachable board is a warning, as for every gate read: the card says the
+lookup was not done, and research is not required on a lookup that never happened.
+
+**The researcher.** When the card requires research, the plan starts with konstant's closed
+researcher: the `researcher` agent as the `researcher` identity, run before the first phase by the
+runner (an interactive session runs `konstant task research <run>`; the DoD rule `research` is
+UNMET until it ran). It always runs inside konstant's jail, whatever the confinement profile, with
+the network and nothing else: `$HOME` masked, no credential file or variable, no ssh agent, no
+docker socket, no token, the workspace's projects, run records and board DB masked, writable only
+its own dir in the research store `var/research/<run>/`. No producer can read that store (it is in
+the integrity core). Pages it fetches are untrusted data. It writes a summary of rows
+(`SOURCE | S1 | <url> | LICENCE <id> | ...`, `FINDING | <claim> | S1`, `REUSE | ... | S1`, or
+`NOTHING-FOUND | <why>`); konstant keeps only those rows, refuses an uncited finding, a source
+without an http(s) URL or a licence, and any line shaped like an instruction to an agent (an
+injected page), renders the rest itself and stores it in the shared memory pool as `researcher`.
+Producers get that rendering, framed as data, never the raw pages. Without a working jail it does
+not run (recorded as `unavailable`, a warning): it never runs open. `[triage] research = "off"`
+drops the requirement (`doctor` WARNs).
+
+**Copied code needs a recorded compatible licence.** A run that copies code from elsewhere records
+each copy as `COPIED | <path> | <source> | <SPDX id>` in DONE.md or `OUT/LICENSES.md`. The DoD rule
+`licence` refuses a row whose licence is unknown or incompatible with the project's own (read from
+LICENSE, pyproject.toml, package.json or Cargo.toml: permissive sources go anywhere except
+Apache-2.0 into GPL-2.0-only; copyleft only into a project its terms allow; unknown never), and a
+changed code file whose added lines show an outside source (a "copied / adapted / ported from"
+note, a foreign `SPDX-License-Identifier:`, a URL of the run's research sources) without a row.
+DECLINED never excuses it. konstant checks declarations and provenance marks: a silent copy that
+leaves no mark is not detected, and the table is a conservative rule of thumb, not legal advice.
+
 ## DoD check and loop
 
 `konstant task check <run>` reads only files (the run's OUT directory, the project's git state and,
@@ -147,12 +230,15 @@ and 5 for a failure of the check itself. The rules:
   set `[gate] test_cmd` (workspace-wide).
 - **last mile / hygiene / cleanup**: no stray untracked files, no TODO/FIXME markers added, no
   oversized source file without a reason line, and a `CLEANUP:` line.
+- **research**: when the intake card required research, konstant's closed researcher ran for
+  this run ("Triage").
+- **licence**: copied code carries a `COPIED` row with a compatible licence ("Triage").
 - **verified**: the run's job, once closed, has a `konstant verify` verdict.
 
 A DONE.md row `DECLINED | <claim> | job <id>` excuses a finding only when the claim quotes it and
 job `<id>` carries an owner note `DECLINED: <the same claim>` (`bin/konstant --as owner job note
 <id> "DECLINED: ..."`), read from a reachable board. It never excuses the verdicts, phases,
-judged, tests, verified, authorship or holdouts rules: what the verifiers, the tests and the
+judged, tests, verified, authorship, holdouts, research or licence rules: what the verifiers, the tests and the
 holdouts say is not waived by text an agent writes. A producer that believes a holdout contradicts
 the DoD writes `DISPUTE | H<n> | <why>`: the run stops BLOCKED and the owner decides.
 
@@ -403,7 +489,7 @@ integrity = "on"        # on | off (off: level 4 only, with profile = "open"; se
   your keyboard.
 
 **The integrity core holds in every profile** (and always in factory mode): the sealed holdout
-store is unreadable; every token but the phase's own identity's (and the read-only viewer's) is
+store, the memory vault's files and the research store are unreadable; every token but the phase's own identity's (and the read-only viewer's) is
 unreadable; konstant's machinery (the catalog, the generated harness surfaces, `var/`
 bookkeeping, the board DB with the job's verdict history, `.git` of the workspace) is not
 writable; in factory mode the target repository and the other job clones are read-only too. This

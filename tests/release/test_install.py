@@ -179,7 +179,7 @@ def test_install_twice_is_idempotent_then_upgrade_with_from(tmp_path):
     assert '[confinement]' in (old / "konstant.toml").read_text() and \
         'profile = "open"' in (old / "konstant.toml").read_text()
     before = _hashes(old)
-    assert len(before) == 10        # 9 tokens (5 roles + 4 factory identities, LEVEL5 2.2) + konstant.toml
+    assert len(before) == 11        # 10 tokens (5 roles + 5 identities, LEVEL5 2.2, L5-T) + konstant.toml
     second = sh(old, "--yes", env=env)
     assert second.returncode == 0, second.stdout + second.stderr
     assert "kept existing konstant.toml" in second.stdout and "token owner: kept" in second.stdout

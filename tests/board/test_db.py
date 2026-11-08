@@ -9,7 +9,7 @@ from konstant.board import auth, db, migrate
 
 
 def test_migrate_is_idempotent(board):
-    assert migrate.current_version(board.cfg.db_path) == migrate.target_version() == 5
+    assert migrate.current_version(board.cfg.db_path) == migrate.target_version() == 6
     assert migrate.migrate(board.cfg.db_path) == []
 
 
@@ -46,7 +46,7 @@ def test_tokens_store_only_hashes(board):
     for token in board.tokens.values():
         assert token.encode() not in raw
     with db.reading(board.cfg.db_path) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM tokens").fetchone()[0] == 9   # 5 roles + 4 identities
+        assert conn.execute("SELECT COUNT(*) FROM tokens").fetchone()[0] == 10  # 5 roles + 5 identities (L5-T: researcher)
 
 
 def test_token_files_are_private(board):

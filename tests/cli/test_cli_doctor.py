@@ -104,7 +104,7 @@ def test_backup_writes_a_0600_consistent_copy_and_refuses_to_overwrite(ready, tm
     ready.ok("board", "backup", "--to", dest)
     assert oct(dest.stat().st_mode & 0o777) == "0o600"
     with sqlite3.connect(dest) as conn:
-        assert conn.execute("select count(*) from tokens").fetchone()[0] == 9   # roles + identities
+        assert conn.execute("select count(*) from tokens").fetchone()[0] == 10  # roles + identities (L5-T: + researcher)
     res = ready.run("board", "backup", "--to", dest)
     assert res.returncode == 1 and "exists" in res.stderr
     ready.ok("board", "backup")

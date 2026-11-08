@@ -107,10 +107,19 @@ def run(ctx, slug: str, override: str | None = None) -> int:
                            workspace=cfg.home, job=None, mode="runner", gate_cfg=cfg.data["gate"])
     rec.update(cwd=str(out.resolve()), intake=True, goal=slug, target=str(target),
                max_jobs=g["spec"]["limits"]["max_jobs"] or "not limited")
+    from konstant.cli.task_run import max_parallel, research_step
+    from konstant.triage import card as card_mod, tiers
+    cap, src = tiers.cap_of(cfg.data["harness"])
+    tier = tiers.Tier("factory", "a goal taken in by konstant intake", 1, cap, src, 0)
+    rec["tier"] = "factory"
+    rec["card"] = card_mod.build(task=g["spec"]["goal"]["text"], ttype="intake", why="flag",
+                                 tier=tier, project_slug=g["project"], project=target,
+                                 client=viewer, cat=cat, cfg_data=cfg.data, goal=slug)
     record_mod.write(run_dir, rec)
     err(f"konstant intake: goal {slug}: [type:intake] run {run_dir} (factory mode: every phase "
         "jailed; planner and dod-reviewer identities)")
-    pr = PhaseRunner(rec, cat, hs, run_dir=run_dir, max_parallel=cfg.data["harness"]["max_parallel"],
+    research_step(ctx, cat, rec, run_dir, override)
+    pr = PhaseRunner(rec, cat, hs, run_dir=run_dir, max_parallel=max_parallel(cfg.data["harness"]),
                      log=err, isolate=True)
     pr.run_all(cfg.data["gate"]["max_cycles"])
     pr.closeout()

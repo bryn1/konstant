@@ -135,6 +135,11 @@ class PhaseRunner:
                  for i, row in enumerate(self.dod_rows() if closeout else [], 1)]
         body = ["", "## Your profile", self.profile(phase["agent"]).strip(), "",
                 "## The task", r["task"]]
+        if r.get("card") and not closeout:          # computed by konstant before any planning
+            from konstant.triage import card as card_mod
+            body += ["", "## Intake card", card_mod.render(r["card"])]
+            if (r.get("research") or {}).get("summary"):
+                body += ["", r["research"]["summary"].strip()]
         if self.acceptance:
             body += ["", "## Definition of Done", self.acceptance]
         if "holdouts" in r:

@@ -8,7 +8,7 @@ import stat
 from konstant.board import auth
 
 ROLES = ("owner", "orchestrator", "worker", "verifier", "viewer")
-IDENTITIES = ("planner", "dod-reviewer", "scenario", "factory")    # docs/LEVEL5.md 2.2
+IDENTITIES = ("planner", "dod-reviewer", "scenario", "factory", "researcher")  # LEVEL5 2.2, L5-T
 
 
 def test_init_mints_role_and_identity_tokens_private_and_stores_only_hashes(fresh):
@@ -20,7 +20,7 @@ def test_init_mints_role_and_identity_tokens_private_and_stores_only_hashes(fres
     assert all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in secrets.iterdir())
     db = fresh.home / "var" / "board.db"
     conn = sqlite3.connect(db)
-    assert conn.execute("select count(*) from tokens").fetchone()[0] == 9
+    assert conn.execute("select count(*) from tokens").fetchone()[0] == 10
     conn.close()
     raw = b"".join(p.read_bytes() for p in db.parent.glob("board.db*"))
     for p in secrets.iterdir():

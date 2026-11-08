@@ -72,7 +72,7 @@ DOD_REVIEW_STATES = ("waiting_approval", "queued")
 
 # the factory identities do only their own part (docs/LEVEL5.md 2.2 "may"): none of them claims
 # or closes work; the producer and verifying phases act as `worker`
-NON_WORKERS = ("planner", "dod-reviewer", "scenario", "factory")
+NON_WORKERS = ("planner", "dod-reviewer", "scenario", "factory", "researcher")
 
 
 def identity_guard(conn, job, actor: Actor, verb: str) -> None:
@@ -95,7 +95,8 @@ def identity_guard(conn, job, actor: Actor, verb: str) -> None:
     if actor.label in NON_WORKERS:
         raise Refused(403, f"the {actor.label} identity cannot {verb} a job: it does only its "
                            "own part of the factory (planner files, dod-reviewer reviews, "
-                           "scenario seals, factory approves and ships); work is claimed and "
+                           "scenario seals, factory approves and ships, researcher researches); work is "
+                           "claimed and "
                            "closed as worker")
 
 

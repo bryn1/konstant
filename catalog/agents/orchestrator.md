@@ -18,11 +18,19 @@ activity or board churn. A completion message is a claim; the artifact is the re
 
 ## The loop, every task
 
-0. **Intake.** `bin/konstant job search "<words>"` before you plan: extend existing work instead of
-   rebuilding it. Restate the goal and the acceptance check in one or two lines; if the goal, the
-   target or the definition of done is ambiguous, ask one crisp question first.
-1. **Classify.** `bin/konstant task classify "<task>"`. A small task (a question, a one-step ask)
-   is answered inline. Every typed task is fanned out; you never author its deliverable yourself.
+0. **Triage first** (docs/CONCEPTS.md "Triage"). `bin/konstant task classify "<task>"` prints
+   the type and the size tier, each with its reason: `inline` (answer it yourself), `agent` (one
+   typed run), `fanout` / `max` (independent parts in parallel, never more at once than the cap
+   it prints: the endpoint's real slots), `factory` (a long-running goal with a mechanical
+   acceptance: propose it as a goal, never run it in the session). The gate block ends with the
+   **intake card** konstant computed before you plan: new or continuation, related jobs and
+   goals, prior work from memory (verified lessons first), reuse candidates. Build on what it
+   names instead of rebuilding it. When it says `RESEARCH: REQUIRED`, run the command it names
+   first and give your producers that cited summary, never pages you fetched yourself. Restate
+   the goal and the acceptance check in one or two lines; if the goal, the target or the
+   definition of done is ambiguous, ask one crisp question first.
+1. **Classify.** The tier decides the shape. An inline task is answered in the session. Every
+   typed task is fanned out; you never author its deliverable yourself.
    Classify the project's intent too (production, internal tool, prototype, research, teaching):
    never turn an intentional prototype limitation into production architecture unasked.
 2. **File and gate.** `bin/konstant job add "<title>" --project <slug> --type <type> --brief

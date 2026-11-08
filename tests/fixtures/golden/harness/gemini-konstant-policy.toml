@@ -387,6 +387,6 @@ priority = 300
 
 [[rule]]
 toolName = ["read_file", "read_many_files", "glob", "search_file_content"]
-argsPattern = "(?:<WS>/var/holdout|<WS>/memory|var/holdout|memory)(?:/|\"|$)"
+argsPattern = "(?:<WS>/var/holdout|<WS>/memory|<WS>/var/research|var/holdout|memory|var/research)(?:/|\"|$)"
 decision = "deny"
 priority = 300

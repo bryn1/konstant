@@ -7,6 +7,8 @@ intake from the orchestrator chat, DoD review and the scenario writer: section 4
 are described as built in DESIGN.md §7.1, §7.2, §9.1 and §7.3; "L5-1 as built", "L5-2 as built",
 "L5-2b as built" and "L5-3 as built" in section 8 list where they differ from the text below.
 Wave L5-M (built-in memory, an owner request beside the plan) is in DESIGN.md §7.4 and "L5-M as
+built". Wave L5-T (triage tiers, the intake card, the closed web researcher and the licence gate,
+an owner request of 2026-11-08) is in DESIGN.md §6.2.1, docs/CONCEPTS.md "Triage" and "L5-T as
 built". The owner answered the open questions on 2026-11-01 (section 9); the
 sections they change say so. Everything else on this page is still the plan that the next
 releases build in the waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as
@@ -856,6 +858,7 @@ for what it lands.
 | **L5-2b** confinement profiles (**done**; see "L5-2b as built" below; owner request 2026-11-01) | `[confinement]` profile closed/open + per-capability options + the integrity core, mapped by every adapter and the jail, `confinement show`, doctor rows, `install.sh`/`get.sh --confinement`, `host_agents` (the session's refusing agent-CLI shims) | `jail.py`, `harnesses/*`, `agents/settings.py`, `gate/harness.py`, `cli/dsh.py`, `cli/doctor.py`, `install.sh`, `get.sh` | L5-2 | the open profile's probe on every harness path: host reach yes, core no (factory and level 4); closed red twin; integrity-off red twin |
 | **L5-3** intake + scenario writer (**done**; see "L5-3 as built" below) | intake from the orchestrator chat (4.0: `goal add --from-chat`, `[factory] goal_roles`, `[factory] defaults`), goal files (`goal add/list/show/pause/resume/cancel`), type `intake` + agent `planner`, `DOD-verdict.md`, deterministic filing, approval rule, role agent `scenario-writer`, `holdout/author.py` with the run dir in the store, fake planner / reviewer / scenario modes incl. `weak-dod` | `catalog/types.yaml`, `catalog.py` `ROLE_AGENTS`, `board/dod.py` `lint`, `gate/runner.py`, `gate/rules/authorship.py`, `gate/rules/judged.py`, `agents/generate.py` | L5-2 | B1-B5, B8-B11 |
 | **L5-M** built-in memory (**done**; see "L5-M as built" below; owner request 2026-11-01) | the memory vault (Obsidian-compatible Markdown, its own git repo), the rebuildable recall index (SQLite FTS5, optional local embeddings, optional Chroma), `konstant mcp memory` wired into every harness, `memory` CLI, the integrity rules (one shared pool for every producer, a sealed pool behind one-way glass for the scenario writer and the verifier, each note's source job and `verified` label, store-time holdout scan, memory never evidence, attributed writes, `memory_share`), the board's Memory tab | `machinery.py`, `confinement.py`, `agents/settings.py`, `harnesses/*`, `board/evidence.py`, `verify/shapes.py`, `verify/holdout.py`, `holdout/leak.py`, `board/static/` | L5-3 | each integrity rule red-then-green; full `pytest`; both e2e; release scan CLEAN |
+| **L5-T** triage (**done**; see "L5-T as built" below; owner request 2026-11-08) | size tiers inline/agent/fanout/max/factory on top of the classifier, the fan-out cap from the endpoint's slots, the `[tier:x]` override, the intake card (type, tier, new or continuation, prior work, reuse, research required) before any planning, recorded on the job, the closed `researcher` phase and its store, the licence gate | `gate/classify.py`, `cli/task.py`, `cli/task_run.py`, `gate/runner.py`, `gate/render.py`, `gate/check.py`, `factory/intake.py`, `confinement.py`, `machinery.py`, `board/policy.py`, `harnesses/base.py` | L5-M | each rule red-then-green; full `pytest`; both e2e; release scan CLEAN |
 | **L5-R1** independent review 1 | review only, by someone who built none of L5-1..3: try to reach `verified` past holdouts, read the store from every harness, leak through feedback, transcripts, the board or run records, forge identities, weaken a generated DoD; one reproduction per finding | the adversarial fake harness, as the first two reviews did | L5-3 | report with severity per finding |
 | **L5-F1** fixes 1 | one red-then-green test per finding under `tests/review/` (`test_H<nn>_...`); zero open P0/P1 | — | L5-R1 | all A and B rows green again |
 | **L5-4** ship + rollback | `ship`, `ship list`, targets `github` (push + PR create/merge, revert-PR rollback, the secret scan before a push, a `gh` stand-in for tests; Q2) / `branch` / `apply` / `command`, `[ship] decision_types = ["infra"]` (Q4), the guard on both sides, plumbing-only ref moves, post-ship checks with the regression set, rollback + tree check, the follow-up job after a rollback, halt on a failed rollback, decision rules (5.4), table `ships`, fake modes `ship-break`, `self-ship` | `gate/rules/common.py` git plumbing, `verify/probe.py` `run_line`, `verify/holdout.py`, `board/api/` | L5-F1 | C1-C12 |
@@ -1092,6 +1095,56 @@ wave's evidence file). Where it touches sections 2-3 above:
   home; a real `claude -p` with the default command, scripted by a loopback stand-in for the Messages
   API (no model call), loaded the server, called `kb_recall` and `kb_store` under `dontAsk` and
   wrote a note attributed to `worker`; gemini only by its golden files.
+
+### L5-T as built
+
+Owner, verbatim (typos kept): "all tasks are triaged by the orchestrstor, small task inline? medium
+task use an agent with a fitting workflow? large task, fan out several agents? hughe task, fan out
+as many agents as possible. what tasks needs the full dark factory pipeline and run for one week
+or a month straight? ... the first question the orchestrator asks should be, what type of task is
+this? is this a new task or a continuation task, what has been done before? if a new task, has
+similar work been done before and what to reuse? ... every agent shojmd always look for similar
+work previously done, in none has been done or none found search the internet for things to
+mimic/reverse engineer." The orchestrator's adjustments: "max" is capped by the endpoint's real
+concurrency; the lookup is code before planning, not left to the model; web research runs in a
+closed researcher phase and producers see only its cited summary; copied code needs a recorded
+compatible licence. Landed as DESIGN.md §6.2.1 describes. Where it touches this plan:
+
+- **`factory` is a routing decision, not a new loop.** The factory loop of L5-5 does not exist
+  yet; a task the triage calls `factory` is refused by `task run` (exit 2, before any job is
+  bound or filed) with the way in that exists: `goal add`, then `konstant intake`. The intake run
+  computes the goal's intake card and, when nothing is found, runs the researcher before the
+  planner.
+- **`fanout` and `max` are the orchestrating session's to carry out.** konstant's runner keeps one
+  run per project (section 11: parallel jobs of one project are not in level 5), so `task run`
+  works such a task as one typed run and says so; the gate block tells a session to split the
+  work and run at most the cap at once. What konstant enforces itself: the cap is computed from
+  `[harness] max_concurrency` and never exceeds it, and the runner's parallel phases are capped
+  at `max_concurrency` too.
+- **A fifth identity, `researcher`** (role worker; minted by `board init`): the label konstant
+  stores the researcher's summary under. Its phase holds NO token and has no memory server; the
+  board refuses it claim, close and the intake-card route like the other identities.
+- **The integrity core grew again**: `var/research/` is in `machinery.DIRS` and `SEALED` (masked
+  in every jail, denied by every adapter's rendering), so no producer reads the pages the
+  researcher fetched, and a phase cannot forge the result the DoD rule `research` reads.
+- **Confinement profile `RESEARCH`** (`confinement.for_phase("researcher")`): closed with `$HOME`
+  masked and the network on, whatever the workspace profile, like the scenario writer's forced
+  `CLOSED`. Masking `$HOME` would also hide a harness installed under it, so `jail_layout` keeps
+  the phase program's own directories (`harnesses/base.py exe_roots`): the PATH entry, its
+  resolved file, an npm-style or `versions/` install root and a `#!` interpreter. A harness
+  installed in another layout under `$HOME` may not start there (stated limit, not seen on the
+  build host).
+- **An unreachable board is a warning**, not a reason to research: the card says no lookup was
+  done. Fail-closed here would have turned every offline run into a web search.
+- **Limits stated**: the licence gate reads declarations and provenance marks, it does not detect
+  a silent copy without a mark, and its table is a conservative rule of thumb, not legal advice.
+  The injection screen on research summaries is a pattern list: a summary that passes it is still
+  data, framed as such in every prompt, never instructions. At level 4 a `command`-harness
+  producer is not jailed under the closed profile, so for it "never sees raw pages" rests on the
+  store being outside its prompt, as the holdout store and the vault do (the open profile, factory
+  mode and every adapter's own read denials enforce it).
+- **Not run live**: no model call in this wave. The researcher ran through the real adapter path
+  (`HarnessSet`, the jail) with the fake harness against a local http server.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

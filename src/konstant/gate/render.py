@@ -82,11 +82,36 @@ under OUT/.tmp/); no unfinished-work markers added; changed test files pass; pyt
 passes{exer}.
 {hyg}Check: `{rec['check_cmd']}` (0 MET, 3 UNMET, 4 BLOCKED). Done = MET.
 === END TASK GATE ===
-"""
+""" + card_text(rec)
+
+
+CARD_MARK = "=== INTAKE CARD"
+
+
+def card_text(rec: dict) -> str:
+    """The run's intake card (konstant/triage/card.py), after the block: data, not rule text."""
+    if not rec.get("card"):
+        return ""
+    from konstant.gate.record import konstant_cmd
+    from konstant.triage import card as card_mod
+    cmd = konstant_cmd("task", "research", rec["run_dir"]) if rec.get("mode") == "interactive" \
+        else ""
+    text = card_mod.render(rec["card"], research_cmd=cmd)
+    t = rec["card"]["tier"]["name"]
+    if t in ("fanout", "max"):
+        text += ("\nFAN-OUT: split the work into independent parts (one per file or module the "
+                 f"card names) and run at most {rec['card']['tier']['agents']} part(s) at once, "
+                 "one `konstant task gate` per part; never more than the cap (skill `fan-out`).")
+    elif t == "factory":
+        text += ("\nFACTORY: a long-running goal; propose it as a goal (`konstant goal add - "
+                 "--from-chat`) instead of running these phases in the session, or re-send with "
+                 "[tier:agent] to run it once.")
+    return text + "\n"
 
 
 def block_len(blk: str, rec: dict) -> int:
     """The length BLOCK_BUDGET compares: install-specific paths replaced by fixed tokens."""
+    blk = blk.split(CARD_MARK, 1)[0]          # the budget measures rule text, not the card
     norm = blk.replace(sys.executable, "PY").replace(str(rec.get("run_dir", "")), "RUN")
     return len(norm.replace(str(rec.get("out", "")), "OUT"))
 

@@ -64,6 +64,8 @@ DEFAULTS: dict = {
         "stdin": False,
         "timeout_s": 3600,
         "max_parallel": 2,
+        # the endpoint's real slots: fan-out cap = this // max_parallel runs (triage/tiers.py)
+        "max_concurrency": 0,
         "env": {},
         # a local OpenAI-compatible endpoint (vLLM, llama.cpp, Ollama) for the adapters that can
         # speak to one (codex, dsh); base_url "" = the harness's own provider
@@ -92,6 +94,8 @@ DEFAULTS: dict = {
         # task that names none ([job:N]); the task text is the brief, so it needs a DoD section
         "file_job": False,
     },
+    # triage (konstant/triage/, CONCEPTS "Triage"): research "required" | "off" (doctor WARNs)
+    "triage": {"fanout_min": 3, "prior_limit": 5, "research": "required"},
     # sealed holdout scenarios (docs/LEVEL5.md 3): each default is ONE key, so an owner answer to
     # the open questions (LEVEL5 9) is a config change
     "holdout": {
@@ -251,6 +255,7 @@ def _validate(data: dict, path) -> None:
     check_holdout(data["holdout"], path)
     check_factory(data, path)
     check_memory(data["memory"], path)
+    check_triage(data, path)
     from konstant import confinement
     try:
         confinement.parse(data["confinement"], Path(path).parent)
@@ -284,6 +289,13 @@ def check_factory(data: dict, path) -> None:
     m = data["holdout"]["writer_model"]
     if m and not _MODEL.fullmatch(m):
         raise ConfigError(f"{path}: [holdout] writer_model = {m!r} is not a model name")
+
+
+def check_triage(data: dict, path) -> None:
+    from konstant.triage import tiers
+    why = tiers.check_config(data)
+    if why:
+        raise ConfigError(f"{path}: {why}")
 
 
 MEMORY_ENGINES = ("sqlite", "chroma")

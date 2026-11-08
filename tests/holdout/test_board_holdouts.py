@@ -202,7 +202,7 @@ def test_migration_from_v1_keeps_the_trail_and_its_guards(tmp_path):
                      "VALUES (1, 'code', 't', 'queued', 'x')")
         conn.execute("INSERT INTO trail (job_id, actor, role, kind, body) VALUES "
                      "(1, 'x', 'owner', 'note', 'kept')")
-    assert migrate.migrate(path) == [2, 3, 4, 5]
+    assert migrate.migrate(path) == [2, 3, 4, 5, 6]  # L5-T: 0006_triage
     with db.transaction(path) as conn:
         assert conn.execute("SELECT body FROM trail").fetchone()[0] == "kept"
         assert conn.execute("SELECT holdout_required FROM jobs").fetchone()[0] == 0
@@ -212,4 +212,4 @@ def test_migration_from_v1_keeps_the_trail_and_its_guards(tmp_path):
         with pytest.raises(sqlite3.DatabaseError, match="append-only"):
             with db.transaction(path) as conn:
                 conn.execute(sql)
-    assert json.dumps(migrate.current_version(path)) == "5"
+    assert json.dumps(migrate.current_version(path)) == "6"   # L5-T: 0006_triage

@@ -29,10 +29,26 @@ def _catalog(ctx):
     return catalog_mod.load(catalog_mod.find_root(home, configured))
 
 
+def _cfg_data(ctx) -> dict:
+    try:
+        return ctx.cfg.data
+    except Exception:  # classify works outside a workspace (the defaults)
+        from konstant.config import DEFAULTS
+        return DEFAULTS
+
+
 def cmd_classify(ctx) -> int:
+    from konstant.triage import tiers
     cat = _catalog(ctx)
-    t, why = classify_mod.classify(_task_text(ctx), cat)
-    ctx.out({"type": t or "small", "why": why}, f"{t or 'small'} why={why}")
+    task = _task_text(ctx)
+    t, why = classify_mod.classify(task, cat)
+    t, why, tier = tiers.decide(task, t, why, cat, _cfg_data(ctx))
+    ctx.out({"type": t or "small", "why": why, "tier": tier.name, "tier_why": tier.why,
+             "agents": tier.agents, "cap": tier.cap, "cap_source": tier.cap_source,
+             "parts": tier.parts, "tier_note": tier.note},
+            f"{t or 'small'} why={why}\ntier={tier.name} why={tier.why}"
+            + (f" agents={tier.agents} cap={tier.cap}" if tier.name in ("fanout", "max") else "")
+            + (f"\nNOTE: {tier.note}" if tier.note else ""))
     return EXIT_OK
 
 
@@ -74,25 +90,40 @@ def _job(ctx, job):
 def prepare(ctx, task: str, mode: str):
     """Classify + run record. Returns (catalog, type, why, rec, run_dir) or a small result."""
     a = ctx.args
+    from konstant.triage import tiers
     cat = _catalog(ctx)
     t, why = classify_mod.classify(task, cat)
+    from konstant.cli import task_session
+    bound = bool(a.job or task_session.job_tag(task))
+    t, why, tier = tiers.decide(task, t, why, cat, ctx.cfg.data, bound=bound)
     if a.type:
         if a.type not in cat.types:
             raise ClientError(f"unknown --type {a.type!r}; known: {', '.join(cat.type_names())}", 404)
+        if t is None:                      # --type forces a typed run whatever the tier tag
+            tier = tiers.Tier("agent", "--type forces a typed run", 1, tier.cap,
+                              tier.cap_source, tier.parts, tier.note)
         t, why = a.type, "flag"
+    ctx._tier = tier
     if t is None:
         return cat, None, why, None, None
-    from konstant.cli import task_session
+    if tier.name == "factory" and mode == "runner":
+        raise ClientError(f"tier factory ({tier.why}): a long-running goal is not one task run. "
+                          "File it as a goal (`konstant goal add FILE`, or from the orchestrator "
+                          "chat), then `konstant intake GOAL` turns it into jobs with holdouts; "
+                          "or run it once with [tier:agent]", exit_code=EXIT_USAGE)
     slug = a.project or (task_session.project_for_cwd(ctx, getattr(a, "cwd", None) or "")
                          if getattr(a, "cwd", None) else None)
     ref, how = task_session.resolve_job(ctx, task, t, slug or "")
     job = _job(ctx, ref)
-    project = _project_path(ctx, a.project or (job or {}).get("project") or slug or "")
+    proj_slug = a.project or (job or {}).get("project") or slug or ""
+    project = _project_path(ctx, proj_slug)
     run_dir, stamp, slug = record_mod.new_run_dir(ctx.cfg.home, task)
     out = Path(a.out).resolve() if a.out else record_mod.default_out(project, run_dir, stamp, slug)
     rec = record_mod.build(cat, task, t, why, run_dir=run_dir, out=out, project=project,
                            workspace=ctx.cfg.home, job=int(job["id"]) if job else None, mode=mode,
                            gate_cfg=ctx.cfg.data["gate"])
+    rec["tier"] = tier.name
+    rec["card"] = intake_card(ctx, task, t, why, tier, proj_slug, project, job, how, cat)
     if job:
         rec["acceptance"] = job.get("acceptance") or ""
         rec["job_display"] = job.get("display_id") or str(job["id"])
@@ -111,22 +142,51 @@ def prepare(ctx, task: str, mode: str):
             # bind_clone, LEVEL5 2.4); nothing is written into the target before that
             rec["target"] = rec["project"]
             rec["out_given"] = bool(a.out)
+            record_card(ctx, job, rec["card"], run_dir)
             return cat, t, why, rec, run_dir
+        record_card(ctx, job, rec["card"], run_dir)
     record_mod.write(run_dir, rec)
     return cat, t, why, rec, run_dir
+
+
+def intake_card(ctx, task, t, why, tier, slug, project, job, how, cat) -> dict:
+    """The intake card (konstant/triage/card.py): computed here, by code, before any phase or
+    session plans the task."""
+    from konstant.triage import card as card_mod
+    try:
+        client = ctx.client("viewer")
+    except (ClientError, OSError):
+        client = None
+    card = card_mod.build(task=task, ttype=t, why=why, tier=tier, project_slug=slug,
+                          project=project, job=job, bound_how=how, client=client, cat=cat,
+                          cfg_data=ctx.cfg.data)
+    if card["board"] != "ok":
+        warn("board unreachable: the intake card has no board or memory lookup")
+    return card
+
+
+def record_card(ctx, job: dict, card: dict, run_dir) -> None:
+    """The card on the job (`POST /api/jobs/{ref}/intake-card`); a refusal is a warning."""
+    try:
+        ctx.client().post(f"/api/jobs/{job['id']}/intake-card",
+                          {"card": card, "run": Path(run_dir).name})
+    except ClientError as exc:
+        warn(f"intake card not recorded on job {job.get('display_id') or job['id']}: "
+             f"{exc.message}")
 
 
 def cmd_gate(ctx) -> int:
     task = _task_text(ctx)
     cat, t, why, rec, run_dir = prepare(ctx, task, "interactive")
     if t is None:
-        ctx.out({"type": "small", "why": why}, task)
+        ctx.out({"type": "small", "why": why, "tier": ctx._tier.as_dict()}, task)
         return EXIT_OK
     blk = render.block(rec, cat, harness=ctx.args.harness or _session_harness(ctx))
     if ctx.args.json:
         ctx.out({"type": t, "why": why, "run_dir": str(run_dir), "out": rec["out"],
                  "block": blk, "block_chars": render.block_len(blk, rec), "job": rec["job"],
-                 "job_display": rec.get("job_display"), "project": rec["project"]})
+                 "job_display": rec.get("job_display"), "project": rec["project"],
+                 "tier": rec["card"]["tier"], "card": rec["card"]})
     else:
         print(blk + "\n" + task)
         print(f"konstant task: run record {run_dir}/record.json", file=sys.stderr)
@@ -206,6 +266,44 @@ def cmd_judge(ctx) -> int:
     return EXIT_OK
 
 
+def cmd_research(ctx) -> int:
+    """`konstant task research RUN`: the intake card's research step for an interactive run (the
+    runner does it itself): the closed researcher, once per run; prints the cited summary the
+    session hands its producers (never the raw pages)."""
+    from konstant.client import in_task
+    from konstant.triage import card as card_mod
+    from konstant.triage import research
+    if in_task():
+        print("konstant: task research is the orchestrator's step, not a phase's (it starts a "
+              "harness of its own)", file=sys.stderr)
+        return EXIT_FAIL
+    run = _resolve_run(ctx, ctx.args.run)
+    try:
+        rec = check_mod.load_run(run, home=_home(ctx)).rec
+    except check_mod.CheckUsage as exc:
+        print(f"konstant: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    card = rec.get("card") or {}
+    res = research.load_result(ctx.cfg.home, rec["run_dir"])
+    if not card.get("research_required"):
+        ctx.out({"run": rec["run_dir"], "required": False, "state": None},
+                f"research not required for this run ({card.get('research_why', 'no card')})")
+        return EXIT_OK
+    if res is None:
+        try:
+            client = ctx.client("researcher")
+        except ClientError:
+            client = None
+        res = research.run(ctx.cfg, _catalog(ctx), rec, card_mod.render(card), client=client,
+                           override=getattr(ctx.args, "harness", None),
+                           log=lambda m: print(m, file=sys.stderr))
+    ctx.out({"run": rec["run_dir"], "required": True, "state": res["state"],
+             "reasons": res.get("reasons") or [], "memory": res.get("memory"),
+             "summary": res.get("summary") or ""},
+            res.get("summary") or f"research {res['state']}")
+    return EXIT_OK
+
+
 def cmd_run(ctx) -> int:
     from konstant.cli.task_run import run
     return run(ctx, _task_text(ctx), prepare)
@@ -254,6 +352,11 @@ def register(sub, leaf) -> None:
     p = leafp("close", "close-out of an interactive run: MET -> close the job -> konstant verify",
               cmd_close, text=False)
     p.add_argument("run", help="run dir (or its record.json, or a name under var/runs)")
+    p = leafp("research", "the intake card's research step for a run: the closed web "
+              "researcher, its cited summary", cmd_research, text=False)
+    p.add_argument("run", help="run dir (or its record.json, or a name under var/runs)")
+    p.add_argument("--harness", help="an adapter name or an argv template for the researcher "
+                   "(default: [harness] in konstant.toml)")
     p = leafp("judge", "print the # JUDGED line for a run's deliverable state", cmd_judge, text=False)
     p.add_argument("--run", help="run dir (reads OUT, project and base from its record)")
     p.add_argument("--out", help="OUT dir (without a run record)")

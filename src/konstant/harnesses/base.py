@@ -326,7 +326,39 @@ def factory_ro(ph: Phase) -> list:
     return [ph.workspace / "projects"] if ph.factory else []
 
 
-def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True) -> dict:
+def exe_roots(argv0: str, depth: int = 0) -> list:
+    """What a jail with $HOME masked (home_read = false: the web researcher always) must keep for
+    the phase's own program to start when it is installed under $HOME: the directory of the name
+    on PATH, the directory of the file it resolves to, the root of an npm-style install it lies in
+    (the parent of its outermost `node_modules`) or a `versions/` store, and the same for the
+    interpreter of a `#!` script (`#!/usr/bin/env node` -> node)."""
+    import shutil
+    exe = shutil.which(str(argv0)) if argv0 else None
+    if not exe:
+        return []
+    real = os.path.realpath(exe)
+    out = [os.path.dirname(os.path.abspath(exe)), os.path.dirname(real)]
+    parts = Path(real).parts
+    for i, part in enumerate(parts):
+        if part in ("node_modules", "versions", "lib", "libexec") and i > 1:
+            out.append(str(Path(*parts[:i])))
+            break
+    if depth == 0:
+        try:
+            with open(real, "rb") as fh:
+                first = fh.readline(200)
+        except OSError:
+            first = b""
+        if first.startswith(b"#!"):
+            words = first[2:].decode(errors="replace").split()
+            if words and os.path.basename(words[0]) == "env" and len(words) > 1:
+                words = [w for w in words[1:] if not w.startswith("-")]
+            if words:
+                out += exe_roots(words[0], 1)
+    return list(dict.fromkeys(out))
+
+
+def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True, keep=()) -> dict:
     """jail.wrap's arguments for this phase under its confinement (konstant/confinement.py).
     Always (the integrity core): var/secrets/ masked except the phase identity's token and
     viewer's, the sealed store masked, every machinery path read-only (jail.wrap home=), in
@@ -345,7 +377,7 @@ def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True) -> dict:
     roots += [Path(os.path.expanduser(p)) for p in conf.extra_write]
     hide = phase_hidden(ph)
     if not conf.home_read:
-        hide += home_masks([ws, ph.cwd, *roots])
+        hide += home_masks([ws, ph.cwd, *roots, *keep])
     return dict(rw=roots, hide=hide, home=ws, expose=[secrets / t for t in phase_tokens(ph)],
                 tmpfs=("/tmp",) if phase_private_tmp(ph) else (), cwd=ph.cwd, net=True,
                 ro_binds=[*ro_binds, *prompt_binds(ph)], root_rw=conf.host_write,
@@ -354,6 +386,8 @@ def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True) -> dict:
 
 
 def jailed(argv: list, ph: Phase, rw=(), ro_binds=()) -> list:
-    """The phase inside konstant.jail (jail_layout's shape for its confinement)."""
+    """The phase inside konstant.jail (jail_layout's shape for its confinement); with $HOME
+    masked the phase's own program stays reachable (exe_roots)."""
     from konstant import jail
-    return jail.wrap(argv, **jail_layout(ph, rw, ro_binds))
+    keep = exe_roots(argv[0]) if argv and not ph.conf.home_read else []
+    return jail.wrap(argv, **jail_layout(ph, rw, ro_binds, keep=keep))

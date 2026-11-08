@@ -127,8 +127,8 @@ class Harness:
                      home_base=values.get("home_base"), tokens=values.get("tokens"),
                      hide=tuple(values.get("hide") or ()), wconf=self.conf,
                      # the scenario writer reads memory through its exported view
-                     # (memory/view.py) and holds no token
-                     memory=self.memory)
+                     # (memory/view.py) and holds no token; the web researcher gets none
+                     memory=self.memory if values.get("memory") is None else values["memory"])
 
     def driver(self):
         """The adapter that starts, confines and cleans up a phase: the configured one, or the
@@ -166,7 +166,7 @@ class Harness:
     def run(self, prompt: str, *, agent: str, cwd: Path, run_dir: Path, label: str,
             out: Path | None = None, identity: str = "worker", home_base: Path | None = None,
             tokens: tuple | None = None, hide: tuple = (),
-            extra_env: dict | None = None) -> PhaseResult:
+            extra_env: dict | None = None, memory: bool | None = None) -> PhaseResult:
         if identity not in PHASE_IDENTITIES:
             raise HarnessError(f"a phase acts as one of {', '.join(PHASE_IDENTITIES)}, not "
                                f"{identity!r}")
@@ -178,7 +178,8 @@ class Harness:
             fh.write(prompt)
         values = {"prompt": prompt, "prompt_file": pfile, "agent": agent, "cwd": cwd,
                   "run_dir": run_dir, "workspace": self.workspace, "out": out,
-                  "identity": identity, "home_base": home_base, "tokens": tokens, "hide": hide}
+                  "identity": identity, "home_base": home_base, "tokens": tokens, "hide": hide,
+                  "memory": memory}
         argv = self.argv(values)
         drv, ph = self.driver(), self.phase(values)
         extra = {}

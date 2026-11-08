@@ -21,7 +21,10 @@ WRITE_ROLES = ("owner", "orchestrator", "worker", "verifier")
 # init` as var/secrets/<label>.token. The board's guards compare labels, so each identity is a
 # separate actor even where it shares a role: label -> role.
 IDENTITIES = {"planner": "worker", "dod-reviewer": "worker", "scenario": "worker",
-              "factory": "orchestrator"}
+              "factory": "orchestrator",
+              # the closed web researcher (konstant/triage/research.py): its phase holds no
+              # token; konstant stores its cited summary in the shared memory pool as this label
+              "researcher": "worker"}
 # every token label (= its file stem): the five role tokens (label = role) plus the identities
 LABELS = ROLES + tuple(IDENTITIES)
 # the labels a phase may act as (role worker): the producer/verifying phases' `worker` and the

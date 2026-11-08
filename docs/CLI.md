@@ -521,6 +521,8 @@ positional arguments:
     run       run the phases and the DoD loop
     check     run the mechanical DoD check on a run
     close     close-out of an interactive run: MET -> close the job -> konstant verify
+    research  the intake card's research step for a run: the closed web researcher, its cited
+              summary
     judge     print the # JUDGED line for a run's deliverable state
 
 options:
@@ -638,6 +640,24 @@ options:
                  scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
+```
+
+## `konstant task research`
+
+```
+usage: konstant task research [-h] [--as ROLE] [--json] [--config PATH] [--harness HARNESS] run
+
+positional arguments:
+  run                run dir (or its record.json, or a name under var/runs)
+
+options:
+  -h, --help         show this help message and exit
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
+  --json             print JSON
+  --config PATH      konstant.toml to use
+  --harness HARNESS  an adapter name or an argv template for the researcher (default: [harness] in
+                     konstant.toml)
 ```
 
 ## `konstant task judge`

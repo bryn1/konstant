@@ -70,6 +70,8 @@ class Claude(Adapter):
 
     def argv(self, ph: Phase) -> list:
         argv = build_argv(self.template(ph.model), ph.values, False)
+        if ph.identity == "researcher":
+            argv = with_web(argv, ph)
         return argv if ph.memory else without_memory(argv, ph)
 
     def env(self, ph: Phase) -> dict:
@@ -88,7 +90,12 @@ class Claude(Adapter):
         return [phase_home(ph, "claude")]
 
     def jail_ro_binds(self, ph: Phase) -> list:
-        return [(Path(CREDENTIAL).expanduser(), phase_home(ph, "claude") / ".credentials.json")]
+        # the per-phase files konstant wrote into the run dir, which lies in a masked store for
+        # the scenario writer and the researcher: bound back read-only so the phase can read them
+        own = [(f, f) for f in (ph.run_dir / NO_MCP, ph.run_dir / RESEARCH_SETTINGS)
+               if f.is_file()]
+        return [(Path(CREDENTIAL).expanduser(), phase_home(ph, "claude") / ".credentials.json"),
+                *own]
 
     def confine(self, argv: list, ph: Phase) -> list:
         # the open profile's host_write shares the host /tmp: no short private TMPDIR to nest in
@@ -131,13 +138,55 @@ def without_memory(argv: list, ph: Phase) -> list:
     if "--mcp-config" not in argv:
         return argv
     i = argv.index("--mcp-config") + 1
-    path = ph.run_dir / "konstant-mcp-none.json"
+    path = ph.run_dir / NO_MCP
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('{"mcpServers": {}}\n', encoding="utf-8")
     except OSError:
         return argv
     return argv[:i] + [str(path)] + argv[i + 1:]
+
+
+WEB_TOOLS = ("WebFetch", "WebSearch")
+RESEARCH_SETTINGS = "konstant-research-settings.json"
+NO_MCP = "konstant-mcp-none.json"
+
+
+def with_web(argv: list, ph: Phase) -> list:
+    """The closed researcher's phase only (konstant/triage/research.py): the generated settings
+    plus Claude Code's own web tools in the allow list (every other phase keeps them denied under
+    dontAsk), written into the phase's run dir (bound read-only into its jail: jail_ro_binds) and
+    passed with --settings instead."""
+    if "--settings" not in argv:
+        return argv
+    i = argv.index("--settings") + 1
+    try:
+        data = json.loads(Path(argv[i]).read_text(encoding="utf-8"))
+    except (OSError, ValueError, IndexError):
+        return argv
+    perms = data.setdefault("permissions", {})
+    allow = perms.setdefault("allow", [])
+    allow += [t for t in WEB_TOOLS if t not in allow]
+    # its own work dir lies in the research store (machinery.SEALED, denied to every other
+    # phase): the store's rules go; konstant's jail still masks the store but this phase's dirs
+    perms["deny"] = [r for r in perms.get("deny", []) if "/var/research" not in r]
+    data = _drop(data, "/var/research")
+    path = ph.run_dir / RESEARCH_SETTINGS
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return argv
+    return argv[:i] + [str(path)] + argv[i + 1:]
+
+
+def _drop(obj, needle: str):
+    """`obj` without the strings that contain `needle` (in every nested list)."""
+    if isinstance(obj, dict):
+        return {k: _drop(v, needle) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_drop(v, needle) for v in obj if not (isinstance(v, str) and needle in v)]
+    return obj
 
 
 def without_sandbox(argv: list, ph: Phase) -> list:
