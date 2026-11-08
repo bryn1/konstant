@@ -15,3 +15,6 @@ __pycache__/
 /.dsh/
 /.gemini/
 /memory/
+
+# lock files from tools konstant does not use
+uv.lock
