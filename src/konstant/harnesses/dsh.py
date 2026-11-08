@@ -76,7 +76,7 @@ def sandbox_lines(mode: str) -> list:
             "    defaultPreset: konstant"]
 
 
-def patch(ws, hcfg: dict, header: str, conf=None) -> str:
+def patch(ws, hcfg: dict, header: str, conf=None, memory: bool = True) -> str:
     lines = [f"# {header}", "# konstant's dsh layer: workspace-scoped reach for headless phases "
              "(docs/HARNESSES.md)"] + sandbox_lines(sandbox_mode(conf)) + [
              "- id: agent-instructions", "  config:", "    maxBytes: 65536",
@@ -95,6 +95,8 @@ def patch(ws, hcfg: dict, header: str, conf=None) -> str:
         default = ms[0] if ms else "default"
         lines += ["- id: agent-default-model", "  config:", "    provider: konstant",
                   f"    model: !!js process.env.KONSTANT_MODEL || {_y(default)}"]
+    from konstant.memory import wiring
+    lines += wiring.dsh_lines(ws, memory)       # konstant's memory MCP server (an inserted row)
     return "\n".join(lines) + "\n"
 
 
@@ -164,7 +166,8 @@ class Dsh(Adapter):
 
     def files(self, gen, hcfg: dict) -> dict:
         conf = getattr(gen, "conf", None)
-        return {PATCH: patch(gen.ws, hcfg, gen.header, conf), **dsh_session.files(gen, hcfg)}
+        return {PATCH: patch(gen.ws, hcfg, gen.header, conf, getattr(gen, "memory", True)),
+                **dsh_session.files(gen, hcfg)}
 
     def confine(self, argv: list, ph: Phase) -> list:
         """The phase inside konstant.jail (dsh's sandbox does not confine reads). Writable:

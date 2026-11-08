@@ -106,6 +106,10 @@ class Phase:
     # generated surfaces were rendered from, `conf` what THIS phase gets (wconf.for_phase: the
     # scenario writer always closed, a factory phase never with the docker socket)
     wconf: object = None
+    # [memory] enabled for this phase: codex renders the server on its command line, claude
+    # swaps an empty --mcp-config in when off (konstant/memory/wiring.py); the scenario writer's
+    # server runs on its exported read-only view (memory/view.py)
+    memory: bool = True
 
     @property
     def conf(self):

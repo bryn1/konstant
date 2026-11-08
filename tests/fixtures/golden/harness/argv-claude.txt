@@ -5,6 +5,8 @@ dontAsk
 --setting-sources
 project,local
 --strict-mcp-config
+--mcp-config
+<WS>/.claude/konstant-mcp.json
 --add-dir
 <WS>
 --settings

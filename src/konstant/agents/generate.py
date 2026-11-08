@@ -77,7 +77,7 @@ CLAUDE_ONLY = (".claude/", "CLAUDE.md")
 SHARED_SKILLS = ".agents/skills/"
 # generated files that carry no header (JSON): ours only at a fixed path (and, for a file a user
 # may also keep for other reasons, only while it holds exactly what konstant generates)
-HEADERLESS = (".claude/settings.json", ".gemini/settings.json")
+HEADERLESS = (".claude/settings.json", ".claude/konstant-mcp.json", ".gemini/settings.json")
 
 
 class Generator:
@@ -85,9 +85,10 @@ class Generator:
 
     def __init__(self, cat, workspace: Path, perm: dict | None = None, python: str | None = None,
                  harness: dict | None = None, gate: dict | None = None,
-                 policy: dict | None = None, conf=None):
+                 policy: dict | None = None, conf=None, memory: bool = True):
         self.cat, self.root = cat, Path(cat.root)
         self.conf = conf                                  # [confinement] (None = closed)
+        self.memory = memory                              # [memory] enabled: the MCP server
         self.ws, self.perm, self.python = Path(workspace), perm or {}, python
         self.hcfg = harness or {"name": "claude", "types": {}}
         self.gate, self.policy = gate or {}, policy or {}   # [gate], [board.policy] (dsh session)
@@ -231,9 +232,11 @@ class Generator:
         out.update(self.skill_files(".claude/skills/"))
         try:
             out[".claude/settings.json"] = settings_mod.render(self.ws, self.perm, self.python,
-                                                                 self.conf)
+                                                                 self.conf, self.memory)
         except settings_mod.SettingsError as exc:
             raise GenerateError(str(exc)) from exc
+        from konstant.memory import wiring
+        out[wiring.CLAUDE_CONFIG] = wiring.claude_json(self.ws, self.memory)
         out["CLAUDE.md"] = self.top_doc("CLAUDE.md.tmpl")
         return out
 
@@ -273,10 +276,11 @@ class Generator:
         HEADER, every file in a .claude/skills or .agents/skills dir whose SKILL.md carries HEADER,
         an adapter file that carries HEADER, and the headerless JSON files (HEADERLESS)."""
         from konstant.harnesses.gemini import settings_json
-        found = {p for p in ("CLAUDE.md", "AGENTS.md", ".claude/settings.json")
-                 if (self.ws / p).is_file()}
+        found = {p for p in ("CLAUDE.md", "AGENTS.md", ".claude/settings.json",
+                             ".claude/konstant-mcp.json") if (self.ws / p).is_file()}
         gem = self.ws / ".gemini" / "settings.json"
-        if gem.is_file() and gem.read_text(encoding="utf-8", errors="replace") == settings_json():
+        if gem.is_file() and gem.read_text(encoding="utf-8", errors="replace") in (
+                settings_json(), settings_json(self.ws, True), settings_json(self.ws, False)):
             found.add(".gemini/settings.json")
         for f in (".dsh/konstant.patch.yml", ".dsh/konstant-session.patch.yml",
                   ".dsh/konstant-gate.mjs", ".gemini/konstant-policy.toml"):

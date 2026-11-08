@@ -18,9 +18,25 @@
     <button type="submit">Open</button>
     <p class="muted">Read-only view. The token stays in this browser only.</p>
   </form>
-  <main>
+  <nav id="tabs" aria-label="views" hidden>
+    <button type="button" id="tab-jobs" aria-pressed="true">Jobs</button>
+    <button type="button" id="tab-memory" aria-pressed="false">Memory</button>
+  </nav>
+  <main id="jobs-view">
     <section id="tree" aria-label="jobs"></section>
     <section id="detail" aria-live="polite"></section>
+  </main>
+  <main id="memory-view" hidden>
+    <section aria-label="memory notes">
+      <form id="mem-search" role="search">
+        <label for="mem-q">Search memory</label>
+        <input id="mem-q" type="search" autocomplete="off" placeholder="words to recall">
+        <button type="submit">Recall</button>
+      </form>
+      <p id="mem-meta" class="muted"></p>
+      <ul id="mem-list"></ul>
+    </section>
+    <section id="mem-detail" aria-live="polite"></section>
   </main>
   <p id="error" role="alert"></p>
   <script src="/static/board.js"></script>

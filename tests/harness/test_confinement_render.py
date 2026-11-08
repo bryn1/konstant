@@ -172,7 +172,7 @@ def test_jail_keeps_every_machinery_path_read_only_and_masks_the_core(ws, home, 
     argv = jail.wrap(["true"], **lay)
     assert argv[1] == ("--bind" if conf.open else "--ro-bind") and argv[2:4] == ["/", "/"]
     for p in (*machinery.DIRS, *machinery.FILES):
-        if not p.startswith(("var/secrets", "var/holdout")):
+        if not p.startswith("var/secrets") and p not in machinery.SEALED:   # masked, not ro
             assert effective(argv, os.path.realpath(ws / p)) == "ro", p
     assert effective(argv, os.path.realpath(ws / "projects" / "demo" / "x")) == "rw"  # its clone
     assert effective(argv, os.path.realpath(ws / "projects" / "other")) == "ro"  # target, clones

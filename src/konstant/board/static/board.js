@@ -24,7 +24,7 @@
     return r.json();
   }
 
-  function showLogin() { $("login").hidden = false; $("forget").hidden = true; }
+  function showLogin() { $("login").hidden = false; $("forget").hidden = true; $("tabs").hidden = true; }
 
   function render(jobs) {
     const kids = new Map();
@@ -65,11 +65,61 @@
     $("detail").replaceChildren(box);
   }
 
+  // Memory (read-only): recent notes, recall, one note. The viewer token never sees the
+  // sealed pool (the scenario writer's and the verifier's notes); the board says how many it hides.
+  function noteItem(n) {
+    const li = el("li");
+    const b = el("button", "job");
+    b.type = "button";
+    b.append(el("span", "id", n.pool), el("span", "title", n.title),
+             el("span", "st" + (n.verified ? " verified" : ""), n.trust || ""),
+             el("span", "muted", (n.actor || "unattributed") + "  " + (n.updated || "").slice(0, 10)));
+    b.addEventListener("click", () => showNote(n.path));
+    li.append(b);
+    if (n.snippet) li.append(el("div", "muted snippet", n.snippet));
+    return li;
+  }
+
+  function listNotes(notes, meta) {
+    $("mem-list").replaceChildren(...notes.map(noteItem));
+    $("mem-meta").textContent = meta;
+  }
+
+  async function recentNotes() {
+    const r = await api("/api/memory/notes?limit=50");
+    listNotes(r.notes, r.notes.length + " recent note(s)" + (r.hidden ? "; " + r.hidden +
+              " in pools this token does not read" : "") + (r.shared ? "; shared with the owner's tools" : ""));
+  }
+
+  async function recall(q) {
+    const r = await api("/api/memory/recall?limit=20&q=" + encodeURIComponent(q));
+    listNotes(r.hits, r.hits.length + " note(s) for \u201c" + q + "\u201d (" + r.mode + " recall)");
+  }
+
+  async function showNote(path) {
+    const n = await api("/api/memory/note?path=" + encodeURIComponent(path));
+    const box = el("div");
+    box.append(el("h2", "", n.title),
+               el("p", "muted", n.pool + " - " + (n.meta.actor || "unattributed") + " - " + (n.trust || "") + " - " + n.path
+                  + (n.attributed ? "" : " - not written by konstant")),
+               el("p", "muted", "tags: " + (n.tags.join(", ") || "-") + "   links: " + (n.links.join(", ") || "-")),
+               el("pre", "", n.body));
+    $("mem-detail").replaceChildren(box);
+  }
+
+  function view(name) {
+    const mem = name === "memory";
+    $("jobs-view").hidden = mem; $("memory-view").hidden = !mem;
+    $("tab-jobs").setAttribute("aria-pressed", String(!mem));
+    $("tab-memory").setAttribute("aria-pressed", String(mem));
+    if (mem) recentNotes().catch((e) => { $("error").textContent = e.message; });
+  }
+
   async function load() {
     try {
       const me = await api("/api/whoami");
       $("whoami").textContent = "as " + me.label + " (" + me.role + ")";
-      $("login").hidden = true; $("forget").hidden = false;
+      $("login").hidden = true; $("forget").hidden = false; $("tabs").hidden = false;
       render((await api("/api/jobs?roots=true&limit=10000")).jobs);
       $("error").textContent = "";
     } catch (e) { $("error").textContent = e.message; }
@@ -80,5 +130,12 @@
     token = $("token").value.trim(); store.set(token); load();
   });
   $("forget").addEventListener("click", () => { store.clear(); token = ""; showLogin(); });
+  $("tab-jobs").addEventListener("click", () => view("jobs"));
+  $("tab-memory").addEventListener("click", () => view("memory"));
+  $("mem-search").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const q = $("mem-q").value.trim();
+    (q ? recall(q) : recentNotes()).catch((e) => { $("error").textContent = e.message; });
+  });
   if (token) load(); else showLogin();
 })();

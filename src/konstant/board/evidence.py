@@ -169,6 +169,19 @@ def noop_command(cmd: str) -> bool:
     return argv[0] in _NOOP
 
 
+# a check that runs konstant's memory (the CLI verbs or the MCP server): memory is a hint a model
+# wrote, never evidence (docs/CONCEPTS.md "Memory"); the verifier's re-run cannot reach it either
+MEMORY_CMD = re.compile(r"(?:^|[\s;&|(`/])konstant(?:\s+--?[A-Za-z][\w-]*(?:[ =][^\s-]\S*)?)*"
+                        r"\s+(?:mcp\s+)?memory\b")
+
+
+def memory_problem(cmd) -> Optional[str]:
+    if isinstance(cmd, str) and MEMORY_CMD.search(cmd):
+        return (f"verify_cmd {cmd.strip()!r} reads konstant's memory: memory is never evidence "
+                "(a note is what a model wrote, not what the work does); check the work itself")
+    return None
+
+
 def evidence_problems(payload) -> list:
     """Rule 1: every failing field, named at once."""
     if not isinstance(payload, dict):
@@ -180,6 +193,8 @@ def evidence_problems(payload) -> list:
     elif noop_command(cmd):
         out.append(f"verify_cmd {cmd.strip()!r} checks nothing (a no-op or a bare echo exits 0 "
                    "whatever the work): name the check that was run")
+    elif memory_problem(cmd):
+        out.append(memory_problem(cmd))
     code = payload.get("verify_exit")
     if type(code) is not int:
         out.append("verify_exit is missing: the evidence needs a 'VERIFY_EXIT=0' line captured "

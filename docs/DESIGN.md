@@ -1,4 +1,4 @@
-# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b and L5-3 landed)
+# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b, L5-3 and L5-M landed)
 
 konstant is a self-contained workspace for running coding agents with discipline: a local job
 board (**board**), a deterministic **task gate** that turns a task into phases run by one agent
@@ -13,7 +13,9 @@ only by the verifier. Wave L5-2 added factory mode (§7.2): every phase of a hol
 in konstant's jail on any harness, per-identity tokens the board compares, and job clones with a
 read-only target. Wave L5-3 added intake (§7.3): goals (from a file or the owner's orchestrator
 chat) turned into board jobs by a planner phase, a DoD review by another identity, deterministic
-filing and approval, and holdouts written by a scenario-writer phase.
+filing and approval, and holdouts written by a scenario-writer phase. Wave L5-M added built-in
+memory (§7.4): an Obsidian-compatible Markdown vault with its own git history, a rebuildable
+recall index, one MCP server for every harness, held to the integrity core.
 
 References of the form F-nn and G-nn name findings of the two independent security reviews of
 v0.1; docs/CONCEPTS.md "Security reviews" summarises them, and each has a test under `tests/review/`.
@@ -58,16 +60,17 @@ konstant-0.1.0/
     catalog.py                 # load + validate catalog/types.yaml, agents, skills, workflows
     cli/                       # argparse front end: main, board, project, job, task (+ task_run,
                                # task_session), verify, holdout, goal (goal, intake, chat), agents,
-                               # dsh, confinement, doctor
+                               # dsh, confinement, doctor, memory (memory + `mcp memory`)
     board/
       app.py                   # FastAPI app factory, static read-only UI
       api/                     # deps (auth deps, serialisation), projects, jobs (file/read),
                                # lifecycle (claim..move, dod-review), verify (verdict), trail,
                                # tokens routes,
                                # holdouts (seal + list commitments; the verdict's holdout hooks),
-                               # goals (file/confirm/read goals, the intake state)
+                               # goals (file/confirm/read goals, the intake state),
+                               # memory (recall, notes, store, the write log, reindex)
       db.py  migrate.py  migrations/0001_init.sql  0002_holdouts.sql  0003_workdir.sql
-                               0004_goals.sql
+                               0004_goals.sql  0005_memory.sql
       dod.py                   # DoD extraction from a brief (required) + DoD row lint (warnings)
       policy.py                # role sets + switches from konstant.toml, fail-closed defaults
       transitions.py           # the job state machine (one table)
@@ -85,6 +88,10 @@ konstant-0.1.0/
               holdouts.py backlog.py
     verify/   probe.py  shapes.py  native.py  procenv.py  rerun.py  verifier.py
               holdout.py                     # materialise the pinned commit, jailed no-net runs (§7.1)
+    memory/   note.py vault.py index.py      # the vault (notes, its own git repo), the recall index
+              embed.py chroma.py guard.py    # local embeddings, optional Chroma, the integrity rules
+              service.py mcp.py wiring.py    # board operations, the MCP server, per-harness wiring
+              doctor.py                      # (§7.4)
     holdout/  lint.py  store.py  leak.py     # scenario format + lint, seal/check, leak scan (§7.1)
               author.py                      # the scenario writer's phase (§7.3)
     factory/  clone.py  doctor.py            # job clones, factory doctor rows (§7.2)
@@ -108,7 +115,7 @@ konstant-0.1.0/
     templates/CLAUDE.md.tmpl  AGENTS.md.tmpl  agent.md.tmpl  skill.md.tmpl
               operate.md.tmpl  # the "how to operate konstant" table both top docs include
   release/patterns.toml      # generic public-safety patterns (IPs, emails, token shapes, paths)
-  tests/  unit, board, cli, gate, verify, catalog, release, holdout, factory, fixtures/,
+  tests/  unit, board, cli, gate, verify, catalog, release, holdout, factory, memory, fixtures/,
           e2e/{fresh_install.sh, one_line.sh, dsh_session.sh}
   docs/   DESIGN.md  QUICKSTART.md  CLI.md  CONCEPTS.md  HARNESSES.md  DSH.md
   .github/workflows/ci.yml   # CI (export-ignore)
@@ -130,6 +137,10 @@ konstant-0.1.0/
                              # during the phase, drafts/ + home/) of the scenario writer (§7.3)
   var/factory/goals/<id>.toml  events.jsonl  notify.log  chat/<session>.json
                              # goal copies, factory events, chat cursors (machinery; §7.3)
+  memory/                    # the memory VAULT (§7.4): <identity>/*.md, <identity>/facts/*.md,
+                             # its own git repo memory/.git; machinery: no phase reads or writes it
+  var/memory/index.db        # the recall index (a cache; `memory reindex` rebuilds it)
+  var/memory/chroma/         # only with [memory] engine = "chroma" (optional extra)
   var/logs/  var/backups/  var/board.pid
   projects/<slug>/           # default home of user projects (git repos)
   .claude/agents/<agent>.md  .claude/skills/<skill>/SKILL.md  .claude/settings.json
@@ -176,6 +187,7 @@ supported, but the generated surfaces only apply inside it (stated in QUICKSTART
 | `holdouts` (v2) | `id, job_id, hid, kind(proof/regression), sha256, author_label, sealed_at, trail_id, generation, state(sealed/burned/retired)` | a COMMITMENT per scenario (sha256 of the file; its canary is the salt), never content; no delete; commitment columns immutable; `state` only moves forward from `sealed` (DB triggers) |
 | `runs` | `id, job_id, run_dir, type, started_at, finished_at, result(MET/UNMET/BLOCKED/ERROR)` | links task runs to jobs; written by `task run --job` through `POST /api/jobs/{ref}/runs`; `GET /api/jobs/{ref}` returns the job's `verifications` and `runs` |
 | `goals` (v4) | `id, slug, project_id, spec_text, spec_json, spec_sha256, source(file/chat), session, status(proposed/active/paused/done/stopped/withdrawn), intake(none/planning/filing/filed/refused), created_by, created_at, updated_at` | spec columns immutable (trigger); slug unique among non-withdrawn goals; `filed` is final (a goal is taken in once); no delete |
+| `memory_writes` (v5) | `id, path, pool, actor, role, kind(fact/note), state(stored/refused), reason, sha256, commit_sha, run, job_id, at` | every write konstant made to the memory vault and every write it refused (§7.4); append-only (triggers); `actor`/`role` from the token; a note is ATTRIBUTED while its file hashes to its latest `stored` row |
 | `tokens` | `id, role, label, sha256 UNIQUE, active, created_at` | `label` is the actor identity (e.g. `orchestrator`, `verifier`; the factory identities `planner`, `dod-reviewer`, `scenario`, `factory`: §5) |
 
 Hierarchy: depth 0 = project root (auto-created by
@@ -748,6 +760,80 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
   never pushed. Webhook, retries, acks and the halt on a failed delivery are wave L5-5.
 - **doctor** rows `scenario writer` and `chat intake`.
 
+### 7.4 Memory (wave L5-M; docs/CONCEPTS.md "Memory")
+
+**Decision** (the cited comparison is in the wave's evidence file): the owner asked for "chromadb
+and obsidian vault ... or if there are better systems for memory". Built: the Obsidian-compatible
+Markdown vault as the source of truth, and **SQLite FTS5 (Python's standard library) as the
+default index**, with optional vectors from a LOCAL OpenAI-compatible embedding endpoint;
+**Chroma stays available as an optional engine** (`[memory] engine = "chroma"`, `pip install
+'konstant[chroma]'`). Why not Chroma by default: measured on the build host, a venv with
+konstant's own dependencies is 49 MB / 25 packages and one with `chromadb` 1.5.9 is 507 MB / 94
+packages (onnxruntime, grpcio, kubernetes, opentelemetry, ...), which breaks the light one-line
+install, and Chroma's default embedding downloads a model (not offline); with the vectors coming
+from the owner's endpoint, an exhaustive cosine over a workspace-sized vault is exact, and Chroma's
+approximate index pays off only at a scale this vault does not reach (INFERRED, not benchmarked). Rejected: basic-memory (AGPL-3.0, ~40 dependencies), Mem0 (needs an LLM to
+decide what is remembered: a model deciding, against principle 5), Letta (an agent server, not a
+store), Zep/Graphiti (cloud service / a graph database plus an LLM).
+
+- **Vault** (`memory/vault.py`, `note.py`): `memory/<pool>/<writer>/<Title>.md` (a named note)
+  and `memory/<pool>/<writer>/facts/<date> <title>.md` (a stored fact), pool `shared` or
+  `sealed`; YAML frontmatter `title, tags,
+  actor, kind, created, updated[, run, job]`; `[[wikilinks]]` and `#tags` parsed as Obsidian
+  does. Its own git repository: every konstant write is ONE commit of exactly that file, built
+  with plumbing under the pinned environment (`hash-object --no-filters`, a temporary index from
+  HEAD, `write-tree`, `commit-tree`, `update-ref`; no template, no hooks: F-04), authored
+  `konstant <identity>`. Files are written atomically, 0600, never through a symlink.
+- **Index** (`memory/index.py`): `var/memory/index.db`, FTS5 (bm25, `unicode61 remove_diacritics
+  2`; the query's words are quoted, so FTS syntax in a query is data) plus a `notes` catalog
+  (pool, actor, sha256, attributed). `sync` follows the vault by stat and hash before every
+  read (notes edited with the owner's own tools are seen); `rebuild` = delete + full sync. With
+  `[memory] embed_endpoint` + `embed_model` each note gets a unit vector (`POST <endpoint>/embeddings`,
+  `memory/embed.py`, urllib) and recall fuses the lexical and the vector ranking (reciprocal rank
+  fusion, k = 60); an endpoint that fails leaves recall lexical and the result's `mode` says why.
+  `engine = "chroma"` keeps the vectors in `var/memory/chroma/` (`memory/chroma.py`); every hit is
+  filtered against the SQLite catalog, so scope is decided in one place. `config.check_memory`
+  refuses chroma without an endpoint, a non-http endpoint, an endpoint without a model.
+- **Board** (`board/api/memory.py`, `memory/service.py`, migration `0005_memory.sql`): the routes
+  of §12's `memory` verbs; the actor is the token's label. A write: redact (`board/redact.py`) ->
+  the store-time scan -> the file in the writer's pool and folder -> commit -> a `memory_writes`
+  row -> the index updated for that file, under one lock.
+- **Integrity** (`memory/guard.py`; owner decision 2026-11-08, one-way glass): every identity but
+  the JUDGES (`scenario`, `verifier`) and the viewer writes the `shared` pool, the judges write
+  only the `sealed` pool; every token reads `shared` (and `notes`, the owner's own folders),
+  only the judges and the owner read `sealed`. The writer and its pool come from the token, never
+  a request field. Each read labels a hit with the job of konstant's latest write of that path
+  (`memory_writes.job_id`, never the frontmatter) and whether the job is `verified`, and sorts
+  verified-job hits first (`service.label`). The scenario writer's phase keeps no token
+  (`memory/view.py`): konstant exports what `scenario` reads (`GET /api/memory/export`) into
+  `<drafts>/.memory/view/`, the phase's server answers from that copy (VIEW mode) and writes
+  `<drafts>/.memory/out/`, which konstant stores as `scenario` after the phase and removes before
+  the drafts are sealed. The scan refuses a canary-shaped string, a note with three or more
+  scenario key lines, and any distinctive literal (`holdout/lint.py` `literals`) of a scenario in
+  the sealed store (sealed, drafts, retired) that its own job's brief and acceptance do not show;
+  an unreadable store refuses every write (fail closed). A refusal is a `memory_writes` row and,
+  when the write names a run whose `record.json` names a job, a `finding` trail row on that job
+  with payload `{"memory_refused": kind}` (the trail route cannot set a payload); the verifier's
+  holdout step (`holdout/leak.py` `memory_findings`) reads canary/scenario as LEAK and literal as
+  LEAK-SUSPECT. `memory/` is in `machinery.DIRS` and `machinery.SEALED`: masked in every jail
+  (the verifier's re-run and holdout runs included), Read/Edit denied by the Claude settings,
+  `deny` in the codex profile, denied to the gemini file tools; probes refuse sealed paths and
+  `/api/memory` URLs; the evidence contract refuses a `VERIFY_CMD` that runs `konstant memory`
+  (`evidence.memory_problem`). Unattributed notes (the file no longer hashes to konstant's latest
+  write, or konstant never wrote it) are served only with `[confinement] memory_share` (§9.1).
+- **MCP** (`memory/mcp.py`, `memory/wiring.py`): `konstant mcp memory`, MCP 2025-06-18 over stdio
+  (newline-delimited JSON-RPC; initialize, ping, tools/list, tools/call; protocol versions
+  2025-06-18, 2025-03-26, 2024-11-05), tools `kb_recall`, `kb_store`, `kb_note`; the client is
+  `konstant.client` with the phase identity's token. Wiring per harness: §9 and docs/HARNESSES.md.
+  The scenario writer's server runs in VIEW mode (above); outside it the server refuses the
+  `scenario` identity.
+- **CLI** `memory recall|store|note|list|show|log|reindex` (the MCP tools' fallback, allowed to
+  phases by the Claude settings and the gemini policy; `memory reindex` is denied there and is
+  the owner's or orchestrator's), `mcp memory`; **doctor** rows `memory`, `memory index`, `memory
+  recall`, `memory share`; **web view** a read-only Memory tab (recent notes, recall, one note;
+  the viewer token never sees the sealed pool, the page says how many it hides; each note shows
+  its trust label).
+
 ## 8. Catalog, generator and generated surfaces
 
 Sources (in git): `catalog/agents/<agent>.md` = frontmatter (`name`, `description`, `tools` hint)
@@ -766,6 +852,7 @@ final-report format.
 | `.claude/agents/<agent>.md` | agent frontmatter + base doctrine + deliverable contract (from types.yaml) + skills list for its type |
 | `.claude/skills/<skill>/SKILL.md` | copied from `catalog/skills/` (plus any `scripts/`) |
 | `.claude/skills/workflow-<type>/SKILL.md` | `catalog/workflows/<type>.md` + rendered phase table |
+| `.claude/konstant-mcp.json` | the memory MCP server (`bin/konstant mcp memory`), passed with `--mcp-config` by the default command (§7.4, `memory/wiring.py`); `{"mcpServers": {}}` with `[memory] enabled = false` |
 | `.claude/settings.json` | workspace-scoped reach (design decision, §9; `agents/settings.py`): Read/Edit allow rules for `//<workspace>/**` only, the konstant verbs a phase needs, local git verbs, the `[permissions] allow` rules of konstant.toml (test runners); deny rules for konstant's own machinery (`bin/`, `.venv/`, `src/`, `.claude/`, `konstant.toml`, token files, board DB, run records) and for the verbs of other roles (`verify`, `job verdict`, `job approve`, `task run`, `board`, `agents sync`); `blockReadsOutsideWorkingDirectories`; `disableBypassPermissionsMode`; the Bash sandbox with writes confined to the workspace, no unsandboxed retry, and the board-talking konstant verbs excluded |
 | `CLAUDE.md` | template: what konstant is, the routing table (type → agent → workflow) rendered from types.yaml, the board loop, "typed task → `konstant task gate` or `konstant task run`" |
 | `AGENTS.md` | the same rules for agents.md-compatible harnesses, profiles inlined by reference to `catalog/agents/` (always generated), with an "Operating konstant (any agent, any model)" section: `--json`, `--help`, the exit codes, the board-first rule and what an agent never runs (any LLM agent can drive konstant from this file alone) |
@@ -826,8 +913,9 @@ install.sh get.sh pyproject.toml konstant.toml`), every generated harness surfac
 .agents/ .dsh/ .gemini/ AGENTS.md CLAUDE.md`), `var/harness/`, `var/secrets/`, the board DB and
 the bookkeeping files under `var/`, run records, and `.git/` (shells that commit get
 `.git/config` + `.git/hooks` read-only), `var/holdout/` and `var/factory/` (goal copies, factory
-events, chat cursors; L5-3). `machinery.SEALED` lists what no phase may
-even READ (the holdout store, §7.1). The Claude settings (deny rules + sandbox `denyWrite`),
+events, chat cursors; L5-3) and `memory/` (the memory vault, written only by the board; L5-M).
+`machinery.SEALED` lists what no phase may even READ (the holdout store, §7.1, and the memory
+vault, §7.4: memory reaches a phase only through the board). The Claude settings (deny rules + sandbox `denyWrite`),
 the codex profile, the gemini policy and the jail's bind rules all read it (`jail.wrap(home=)`
 re-binds every machinery path and all of `var/` read-only inside any writable bind, then reopens
 the narrower writable binds such as OUT); a test checks each entry against each consumer. The
@@ -967,6 +1055,10 @@ from) and `Phase.conf` = `wconf.for_phase(identity, factory)`: the scenario writ
   when the profile writes outside the project, the jail being the boundary; `Harness.check`
   refuses such a dsh phase when the jail cannot wrap it. The session patch puts the unjailed
   session back on `workspace-write`.
+- **memory** (`memory_share`, closed false / open true; §7.4): held by the board for every
+  harness, not by an adapter: with it, notes konstant did not write (the owner's own notes, a
+  konstant note edited by hand) are recalled too; without it only attributed notes are served.
+  `confinement show` prints it beside `host_agents`.
 - **`konstant dsh`** (`cli/dsh.py`): unless `host_agents`, refusing `dsh`/`claude`/`codex`/`gemini`
   shims in `var/harness/dsh/session/bin/` first on the session's PATH (`KONSTANT_SHIM_DIR`;
   `cli/main.py` drops it for konstant's own processes).
@@ -1081,7 +1173,9 @@ without Claude Code or without socat still completes.
 Dependencies: `fastapi`, `uvicorn`, `pydantic>=2`, `PyYAML`, `tomli` (Python 3.10 only) and
 `pytest` (the DoD check's `tests` rule runs `<venv python> -m pytest` over the tests a run wrote;
 found by the fresh-install test, where every code run was UNMET with "No module named pytest").
-The CLI client uses the standard library only, so `bin/konstant job …` stays fast.
+The CLI client uses the standard library only, so `bin/konstant job …` stays fast. Memory adds
+no required dependency (SQLite FTS5 and urllib are in the standard library); the optional extra
+`konstant[chroma]` (`chromadb`) serves `[memory] engine = "chroma"` only.
 
 ## 11. Release process
 
@@ -1163,6 +1257,9 @@ Global: `--as ROLE`, `--json`, `--config PATH`; env `KONSTANT_HOME`. Exit 0 ok, 
 | `goal list` / `goal show ID` / `goal pause\|resume\|cancel ID` | `--status` (list) | goals, one goal with its jobs, status changes (owner; pause also factory) |
 | `intake GOAL` | `--harness` | planner -> DoD review -> filing -> approval -> scenario writer (§7.3; exit 0, 3 refused, 4 authoring BLOCKED, 2 setup) |
 | `chat turn` | `--session TEXT\|-` | one owner message of the orchestrator chat: confirm/withdraw, escalations, the intake block (JSON; the dsh plugin's seam) |
+| `memory recall WORDS` / `memory store TEXT\|-` / `memory note TITLE TEXT\|-` | `--limit --pool` (recall), `--title --tag --link` (store), `--tag --link` (note) | recall from the vault, store a fact, write a named note, as the caller's identity (§7.4) |
+| `memory list` / `memory show PATH` / `memory log` / `memory reindex` | `--limit --pool` | recent notes, one note, the attributed write log, rebuild the index (owner, orchestrator) |
+| `mcp memory` | | the memory MCP server on stdio (tools `kb_recall`, `kb_store`, `kb_note`); every harness's generated config starts it |
 | `agents sync` | `--check --harness NAME` | §8 (configured harnesses only) |
 | `dsh APP [ARGS]` | `--project --dry-run` | start your dsh session (web, tui, headless) with konstant's two layers (§6.6); refused (exit 1) when the session would load a layer from outside the workspace; refusing agent-CLI shims first on its PATH unless `[confinement] host_agents` (§9.1) |
 | `confinement show` | `--json` | the effective `[confinement]` and, per configured harness, how each option is enforced at level 4 and in factory mode (§9.1) |
@@ -1198,7 +1295,7 @@ path = ""                      # empty: <workspace>/catalog, else the source tre
 [harness]
 name = "claude"                # claude | codex | gemini | dsh | command (docs/HARNESSES.md)
 model = ""                     # through the harness's own model key; "" = its default
-command = "claude -p --permission-mode dontAsk --setting-sources project,local --strict-mcp-config --add-dir {workspace} --settings {workspace}/.claude/settings.json {prompt}"
+command = "claude -p --permission-mode dontAsk --setting-sources project,local --strict-mcp-config --mcp-config {workspace}/.claude/konstant-mcp.json --add-dir {workspace} --settings {workspace}/.claude/settings.json {prompt}"
                                # the claude default; changed = your template for any name
 stdin = false                  # only for your own template (adapters choose for themselves)
 timeout_s = 3600
@@ -1262,6 +1359,16 @@ integrity = "on"               # on | off (off: profile open, level 4 only; doct
 # ssh_agent = false            # open: true
 # docker_socket = false        # open: true at level 4; never in factory mode
 # host_agents = false          # the `konstant dsh` session may run host agent launchers
+# memory_share = false         # open: true; notes konstant did not write are recalled too
+
+[memory]                       # built-in memory (§7.4)
+enabled = true
+engine = "sqlite"              # sqlite | chroma (optional extra: pip install 'konstant[chroma]')
+embed_endpoint = ""            # a LOCAL OpenAI-compatible endpoint (.../v1); "" = lexical recall
+embed_model = ""               # its embedding model (set with embed_endpoint, or neither)
+embed_api_key_env = ""         # the variable holding its key, if it wants one
+recall_limit = 8               # 1-50
+max_note_bytes = 32768         # 256-1048576
 
 [verify]
 rerun = true
@@ -1333,6 +1440,18 @@ board at start (a typo must not silently disarm a gate).
   jail's late bind inside a mask, red twin), `test_chat_intake.py` (B11 with the fake harness's
   `inject` mode, the chat marker's refusals, a stopped intake's escalation); the plugin's chat path
   in `plugin.test.mjs`.
+- **Memory (`tests/memory/`, L5-M):** the note format, the vault's one-commit-per-write and
+  symlink refusal, the index (sync, hand edits, rebuild, attribution, FTS syntax as data), hybrid
+  recall against a loopback stand-in embedding endpoint and the lexical fallback, the MCP protocol
+  (handshake, tools, errors, nothing but messages on stdout), every board rule with its red twin
+  (the shared pool across producers, the sealed pool behind one-way glass, the judges reading the
+  shared pool, the verified label and its ranking, token-decided pools, redaction, the store-time scan, the trail finding,
+  an unreadable store, memory_share), the reach of every adapter and the jail (red when `memory`
+  leaves `machinery.SEALED`), probes and the evidence rule (red twins), each harness's wiring, the
+  config checks, the optional Chroma engine (skipped without the extra; run with chromadb in the
+  wave's evidence), the scenario writer's exported view (unit and through `konstant intake`), and holdout jobs whose producer stores a held-out literal or a canary through
+  memory (LEAK-SUSPECT / LEAK at verify). The fresh-install e2e stores, recalls and speaks MCP over
+  stdio to the installed `bin/konstant`.
 - **No leaked boards:** `tests/conftest.py` fails the session (and kills the process) when a
   `konstant board serve` whose cwd lies under the run's basetemp is still alive at the end; board
   fixtures stop their board in a finalizer that also runs when their own setup fails

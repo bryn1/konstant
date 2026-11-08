@@ -26,3 +26,10 @@ button.job:focus-visible { outline: 2px solid var(--accent); }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; background: transparent;
       border: 1px solid var(--line); padding: 8px; }
 #error { color: var(--bad); }
+nav#tabs { display: flex; gap: 8px; margin: 10px 0; }
+nav#tabs button { font: inherit; padding: 2px 10px; border: 1px solid var(--line); border-radius: 9px;
+                  background: transparent; color: var(--fg); cursor: pointer; }
+nav#tabs button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#mem-search { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+#mem-search input { flex: 1 1 12em; min-width: 0; font: inherit; padding: 2px 6px; }
+.snippet { margin: 0 0 6px 4px; overflow-wrap: anywhere; font-size: 13px; }

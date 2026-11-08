@@ -197,6 +197,26 @@ run "$K" --json job show "$J2"
 [ "$(json_field status)" = queued ] || fail "job $J2 is not queued after FAIL"
 echo "job $J2 status: queued"
 
+# --- memory: the vault, the CLI fallback, the MCP server over stdio --------------------------------
+step "memory: store, recall, the MCP server (stdio), the vault's own git history"
+run "$K" memory store "The demo project greets in lower case." --tag e2e
+want_rc 0; want_out '^STORED shared/orchestrator/facts/'
+run "$K" --as worker memory recall greets lower
+want_rc 0; want_out 'lexical recall'; want_out 'demo project greets'
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"e2e","version":"0"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"kb_recall","arguments":{"query":"lower case"}}}' \
+  > "$WORK/mcp.in"
+run sh -c "KONSTANT_IN_TASK=1 KONSTANT_IDENTITY=worker '$K' mcp memory < '$WORK/mcp.in'"
+want_rc 0; want_out '"serverInfo":\{"name":"konstant-memory"'; want_out '"name":"kb_note"'
+want_out 'demo project greets'
+[ "$(printf '%s\n' "$OUT" | wc -l)" -eq 3 ] || fail "the MCP server wrote something besides 3 replies"
+run git -C "$WS/memory" log --format=%an
+want_rc 0; want_out '^konstant orchestrator$'
+run "$K" --as viewer memory log
+want_rc 0; want_out 'stored +orchestrator'
+
 # --- a typed task through the phase runner (fake harness) + the DoD check -------------------------
 step "task run with the fake harness, then task check"
 run "$K" task run "[type:code] add greet()" --project demo

@@ -18,6 +18,16 @@ permissions.konstant.network.enabled=true
 project_root_markers=["konstant.toml"]
 -c
 history.persistence="none"
+-c
+mcp_servers.konstant-memory.command="<WS>/bin/konstant"
+-c
+mcp_servers.konstant-memory.args=["mcp", "memory"]
+-c
+mcp_servers.konstant-memory.env_vars=["KONSTANT_HOME", "KONSTANT_IN_TASK", "KONSTANT_ROLE", "KONSTANT_IDENTITY", "KONSTANT_RUN", "KONSTANT_MEMORY_VIEW", "KONSTANT_MEMORY_OUT"]
+-c
+mcp_servers.konstant-memory.enabled_tools=["kb_recall", "kb_store", "kb_note"]
+-c
+mcp_servers.konstant-memory.default_tools_approval_mode="approve"
 -m
 gpt-5.4-mini
 -

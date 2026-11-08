@@ -107,13 +107,28 @@ class Harness:
         self.adapter, self.model = adapter, model
         self.endpoint, self.allow = dict(endpoint or {}), list(allow or [])
         self.name = name or (adapter.name if adapter is not None else "command")
+        self._memory = None
+
+    @property
+    def memory(self) -> bool:
+        """[memory] enabled of the workspace (read once; an unreadable toml: on, as generated)."""
+        if self._memory is None:
+            from konstant import config
+            try:
+                self._memory = bool(config.load(self.workspace).data["memory"]["enabled"])
+            except config.ConfigError:
+                self._memory = True
+        return self._memory
 
     def phase(self, values: dict) -> Phase:
+        identity = values.get("identity") or "worker"
         return Phase(values, model=self.model, endpoint=self.endpoint, allow=self.allow,
-                     jail=self.jail, factory=self.factory,
-                     identity=values.get("identity") or "worker",
+                     jail=self.jail, factory=self.factory, identity=identity,
                      home_base=values.get("home_base"), tokens=values.get("tokens"),
-                     hide=tuple(values.get("hide") or ()), wconf=self.conf)
+                     hide=tuple(values.get("hide") or ()), wconf=self.conf,
+                     # the scenario writer reads memory through its exported view
+                     # (memory/view.py) and holds no token
+                     memory=self.memory)
 
     def driver(self):
         """The adapter that starts, confines and cleans up a phase: the configured one, or the
@@ -150,7 +165,8 @@ class Harness:
 
     def run(self, prompt: str, *, agent: str, cwd: Path, run_dir: Path, label: str,
             out: Path | None = None, identity: str = "worker", home_base: Path | None = None,
-            tokens: tuple | None = None, hide: tuple = ()) -> PhaseResult:
+            tokens: tuple | None = None, hide: tuple = (),
+            extra_env: dict | None = None) -> PhaseResult:
         if identity not in PHASE_IDENTITIES:
             raise HarnessError(f"a phase acts as one of {', '.join(PHASE_IDENTITIES)}, not "
                                f"{identity!r}")
@@ -176,6 +192,7 @@ class Harness:
                 raise HarnessError("holdouts need a confined phase: konstant's jail is off or "
                                    "unavailable, and a factory phase never runs unconfined")
             argv = drv.confine(argv, ph)
+            extra.update(extra_env or {})
             return self._start(argv, extra, prompt, cwd, run_dir, label, identity)
         finally:
             drv.cleanup(ph)                   # per-phase homes (dsh, factory): nothing persists

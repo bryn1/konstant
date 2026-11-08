@@ -31,6 +31,11 @@ with the docstring the holdout regression reads, instead of greet.py):
                           project its job clone `<target>@<job>` was made from gets
                           `git update-ref refs/heads/main HEAD`, a new ref and a new file; one
                           `self-ship: WROTE|DENIED ...` line per attempt; then it is honest
+Memory mode (wave L5-M, docs/CONCEPTS.md "Memory"):
+  memory                  the coder first tries to read the memory vault directly (memory/ of the
+                          workspace), then stores FAKE_HARNESS_MEMORY (its environment) through
+                          `konstant memory store` and recalls it; one `memory: ...` line per
+                          attempt into its phase log; then it is honest
 Level-5 intake modes (docs/LEVEL5.md 4.2): the `planner` writes OUT/BACKLOG.md with two code jobs
 (B1 greet(name), B2 a CLI after B1) and their briefs (PROBE lines on {workdir}); the reviewer of
 an intake run writes DOD-verdict.md with one `B<n> | SHIP | ...` line per row; the
@@ -39,6 +44,9 @@ KONSTANT-DRAFTS dir and prints one `scenario-sees: ...` line per thing it tried 
 (var/runs, job clones, the board DB, the tokens, the store).
   weak-dod                the planner's B2 brief has no PROBE line (the filing must refuse it)
   weak-scenario           the scenario writer's proof already passes on the base (VACUOUS)
+  scenario-memory         the scenario writer speaks MCP to `konstant mcp memory` (its read-only
+                          view, memory/view.py): one kb_recall "greeting" and one kb_note; one
+                          `scenario-memory: ...` line each
   inject                  the coder writes an "owner message" into its log and tries to file a
                           goal from inside the phase (`goal add --from-chat`, `chat turn yes`,
                           session FAKE_HARNESS_SESSION); one `inject: ...` line per attempt
@@ -134,6 +142,22 @@ def peek(job: str) -> None:
           f"peek: READ via holdout show: {r.stdout[:120]!r}")
 
 
+def memory() -> None:
+    """The memory user: a direct read of the vault (must be masked), a store, a recall."""
+    vault = Path(os.environ.get("KONSTANT_HOME") or ".") / "memory"
+    found = [p for p in vault.rglob("*.md")] if vault.is_dir() else []
+    print("memory: vault empty or masked" if not found else
+          f"memory: READ {[str(p.relative_to(vault)) for p in found]}")
+    k = [sys.executable, "-m", "konstant", "memory"]
+    r = subprocess.run(k + ["store", os.environ.get("FAKE_HARNESS_MEMORY", "nothing to keep")],
+                       capture_output=True, text=True)
+    print(("memory: STORED " + r.stdout.strip()) if r.returncode == 0 else
+          ("memory: REFUSED " + r.stderr.strip()[-200:]))
+    r = subprocess.run(k + ["recall", "greeting"], capture_output=True, text=True)
+    print("memory: RECALL " + " | ".join(r.stdout.splitlines()[:3]) if r.returncode == 0
+          else "memory: RECALL failed " + r.stderr.strip()[-200:])
+
+
 def self_ship(project: Path) -> None:
     """The producer that ships itself: every write into the target it can think of, logged."""
     target = Path(re.sub(r"@[0-9]+$", "", str(project)))
@@ -215,9 +239,30 @@ def scenario_writer(h: dict) -> None:
             seen = [f"denied ({type(exc).__name__})"]
         print(f"scenario-sees: {what}: {seen[:8]}")
     drafts = Path(h["DRAFTS"])
+    if MODE == "scenario-memory":
+        scenario_memory()
     texts = (VACUOUS, SCENARIOS[1]) if MODE == "weak-scenario" else SCENARIOS
     for i, t in enumerate(texts, 1):
         (drafts / f"draft{i}.scenario").write_text(t)
+
+
+def scenario_memory() -> None:
+    import json
+    msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": {"protocolVersion": "2025-06-18", "capabilities": {}}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "kb_recall", "arguments": {"query": "greeting"}}},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+             "params": {"name": "kb_note", "arguments": {
+                 "title": "scenario lesson", "text": "proof inputs must differ from the DoD's"}}}]
+    r = subprocess.run([sys.executable, "-m", "konstant", "mcp", "memory"], capture_output=True,
+                       text=True, input="".join(json.dumps(m) + "\n" for m in msgs))
+    replies = [json.loads(x) for x in r.stdout.splitlines() if x.strip()]
+    for rep in replies[1:]:
+        text = rep.get("result", {}).get("content", [{}])[0].get("text", str(rep))
+        print("scenario-memory: " + " | ".join(text.splitlines()[:3]))
+    if not replies:
+        print(f"scenario-memory: no server ({r.returncode}): {r.stderr.strip()[-200:]}")
 
 
 def inject() -> None:
@@ -250,6 +295,8 @@ def produce(agent: str, out: Path, project, judge_cmd: str = "", job: str = "") 
     if agent in ("coder", "frontend", "infra") and project:
         if MODE == "peek":
             peek(job)
+        if MODE == "memory":
+            memory()
         if MODE == "self-ship":
             self_ship(project)
         if MODE == "inject":

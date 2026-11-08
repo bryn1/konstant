@@ -38,8 +38,14 @@ SETTINGS = ".gemini/settings.json"
 _BASH = re.compile(r"^Bash\((.+?)(?: \*|\*)?\)$")
 
 
-def settings_json() -> str:
+def settings_json(ws=None, enabled: bool = True) -> str:
+    """The generated settings: AGENTS.md as the context file and, for a workspace with memory on,
+    konstant's memory MCP server (konstant/memory/wiring.py; `ws` None: the form without it)."""
+    from konstant.memory import wiring
     data = {"context": {"fileName": ["AGENTS.md"], "loadMemoryFromIncludeDirectories": True}}
+    servers = wiring.gemini_servers(ws, enabled) if ws is not None else {}
+    if servers:
+        data["mcpServers"] = servers
     return json.dumps(data, indent=2) + "\n"
 
 
@@ -59,7 +65,7 @@ def shell_prefixes(ws, allow: list) -> list:
     return list(dict.fromkeys(out))
 
 
-def policy(ws, allow: list, header: str, conf=None) -> str:
+def policy(ws, allow: list, header: str, conf=None, memory: bool = True) -> str:
     """The policy for `conf` (konstant/confinement.py; None = closed): open allows every shell
     command (priority 50, below every deny); the machinery and holdout denies are the integrity
     core and stay unless the owner turned it off."""
@@ -84,6 +90,11 @@ def policy(ws, allow: list, header: str, conf=None) -> str:
                  decision=_q("deny"), priority="200")
     rule(toolName=_q("run_shell_command"), commandRegex=_q(r"konstant.*--as[ =]?(owner|verifier)"),
          decision=_q("deny"), priority="200")
+    if memory:                 # exactly the memory MCP server's tools (memory/wiring.py)
+        from konstant.memory import wiring
+        for tool in wiring.TOOLS:
+            rule(mcpName=_q(wiring.SERVER), toolName=_q(tool), decision=_q("allow"),
+                 priority="100")
     if conf.open:              # the open profile: any command (the denies above still win)
         rule(toolName=_q("run_shell_command"), decision=_q("allow"), priority="50")
     if not conf.integrity:
@@ -97,8 +108,9 @@ def policy(ws, allow: list, header: str, conf=None) -> str:
     rule(toolName='["write_file", "replace"]',
          argsPattern=_q('"file_path":"(?:' + "|".join(paths) + ")"),
          decision=_q("deny"), priority="300")
-    # the sealed holdout store (machinery.SEALED): no file tool reads, lists or searches it
-    # (LEVEL5 3.3); a shell command is outside the policy's reach (the jail covers it)
+    # the sealed paths (machinery.SEALED: the holdout store, the memory vault): no file tool
+    # reads, lists or searches them (LEVEL5 3.3); a shell command is outside the policy's reach
+    # (the jail covers it)
     sealed = [re.escape(str(ws / d)) for d in machinery.SEALED]
     sealed += [re.escape(d) for d in machinery.SEALED]
     if sealed:
@@ -151,8 +163,10 @@ class Gemini(Adapter):
         return [phase_home(ph, "gemini")]
 
     def files(self, gen, hcfg: dict) -> dict:
-        return {SETTINGS: settings_json(), POLICY: policy(gen.ws, gen.perm.get("allow", []),
-                                                           gen.header, getattr(gen, "conf", None))}
+        mem = getattr(gen, "memory", True)
+        return {SETTINGS: settings_json(gen.ws, mem),
+                POLICY: policy(gen.ws, gen.perm.get("allow", []), gen.header,
+                               getattr(gen, "conf", None), mem)}
 
     def reach(self, hcfg: dict, perm: dict, jail: bool = True) -> Reach:
         return Reach(

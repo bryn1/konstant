@@ -126,7 +126,7 @@ The default harness is Claude Code, headless and workspace-scoped:
 
 ```toml
 [harness]
-command = "claude -p --permission-mode dontAsk --setting-sources project,local --strict-mcp-config --add-dir {workspace} --settings {workspace}/.claude/settings.json {prompt}"
+command = "claude -p --permission-mode dontAsk --setting-sources project,local --strict-mcp-config --mcp-config {workspace}/.claude/konstant-mcp.json --add-dir {workspace} --settings {workspace}/.claude/settings.json {prompt}"
 ```
 
 A phase may read and edit files in this folder (not konstant's own files, `catalog/` or any
@@ -161,7 +161,25 @@ With dsh you can also drive the loop yourself from dsh's own web UI, tui or head
 message, runs the DoD loop at the end of the turn and, for a job (`[job:N]` in the message),
 closes it and runs `konstant verify` ([DSH.md](DSH.md)).
 
-## 6. Everyday commands
+## 6. Memory
+
+Every harness konstant starts gets a memory server (`bin/konstant mcp memory`; tools `kb_recall`,
+`kb_store`, `kb_note`); you and any other agent use the same memory from the shell:
+
+```sh
+bin/konstant memory store "The demo project greets in lower case." --tag demo
+bin/konstant memory recall greets                 # lexical, or hybrid with an embedding endpoint
+bin/konstant memory note "Greeter design" - < notes.md   # a named note; [[links]] and #tags work
+bin/konstant memory list                          # recent notes; `memory log`: who wrote what
+```
+
+The notes are plain Markdown in `memory/` (its own git history: `git -C memory log`), so you can
+open that folder in Obsidian. For hybrid recall, point `[memory] embed_endpoint` and
+`embed_model` at a local OpenAI-compatible embedding server. The board's web view has a
+read-only Memory tab. What phases may see of it, and why the scenario writer and the verifier
+keep their notes to themselves: [CONCEPTS.md](CONCEPTS.md), "Memory".
+
+## 7. Everyday commands
 
 ```sh
 bin/konstant job list --tree           # the board as a tree
@@ -174,13 +192,13 @@ bin/konstant doctor
 
 Full reference: [CLI.md](CLI.md).
 
-## 7. Upgrade and uninstall
+## 8. Upgrade and uninstall
 
 Unpack the new release next to the old folder, stop the old board, then:
 
 ```sh
 cd konstant-<new>
-./install.sh --yes --from ../konstant-0.1.0   # backs up the old DB, copies konstant.toml, var/, projects/
+./install.sh --yes --from ../konstant-0.1.0   # backs up the old DB, copies konstant.toml, var/, projects/, memory/
 ```
 
 To uninstall, run `bin/konstant board stop` and delete the folder. konstant writes nothing outside it.

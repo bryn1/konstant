@@ -22,6 +22,11 @@ def _paths(v) -> str:
     return ", ".join(v) if v else "none"
 
 
+# options a harness never sees: the `konstant dsh` session's PATH (host_agents) and what the
+# board serves from the memory vault (memory_share)
+BOARD_HELD = ("host_agents", "memory_share")
+
+
 def jail_how(opt: str, c, name: str = "") -> tuple:
     """How konstant's jail holds option `opt` for a jailed phase (base.jail_layout)."""
     net_off = {"codex": ("enforced", "the jail shares the host network; codex's own profile "
@@ -158,10 +163,14 @@ def matrix(cfg) -> dict:
             jailed = ad.confines(on, factory, cc)
             rows = {o: dict(zip(("enforced", "how"), jail_how(o, cc, name) if jailed
                                 else own_how(name, o, cc)))
-                    for o in conf_mod.OPTIONS if o != "host_agents"}
+                    for o in conf_mod.OPTIONS if o not in BOARD_HELD}
             rows["integrity core"] = dict(zip(("enforced", "how"), core_how(name, jailed, cc)))
             per[mode] = {"jailed": jailed, "options": rows}
         out["harnesses"][name] = per
+    out["memory"] = ("shared with your own tools: notes konstant did not write are recalled too"
+                     if c.memory_share else "konstant's own notes only: a note added or changed "
+                     "in memory/ outside konstant is not served to a phase") + \
+        " (the board holds it for every harness; phases never read memory/ directly)"
     out["host_agents"] = ("the `konstant dsh` session may run the host's agent launchers by name"
                           if c.host_agents else "the `konstant dsh` session's PATH starts with "
                           "refusing dsh/claude/codex/gemini shims")
@@ -177,7 +186,7 @@ def text(m: dict) -> str:
             if not isinstance(val, str) else val
         lines.append(f"{k:<14} {str(val):<22} "
                      f"{v['source']}")
-    lines += ["", f"host agents: {m['host_agents']}"]
+    lines += ["", f"memory: {m['memory']}", f"host agents: {m['host_agents']}"]
     for name, per in m["harnesses"].items():
         for mode, label in (("level4", "level 4"), ("factory", "factory mode")):
             p = per[mode]

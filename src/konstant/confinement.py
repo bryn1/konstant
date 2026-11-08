@@ -80,6 +80,13 @@ OPTIONS = {
         allows="use the docker daemon (its socket, DOCKER_HOST); never in factory mode",
         risks="the docker socket is root on this host: a phase that uses it can read and change "
               "anything, the integrity core included (so factory mode never passes it)"),
+    "memory_share": dict(
+        kind="flag", closed=False, open=True,
+        allows="the memory vault is shared with your own tools: notes you add or edit in "
+               "memory/ yourself (an editor, Obsidian) are recalled by phases as well as the "
+               "notes konstant wrote",
+        risks="anything that can write memory/ outside konstant steers every later phase, "
+              "unattributed; private notes you keep there reach the model"),
     "host_agents": dict(
         kind="flag", closed=False, open=False,
         allows="the orchestrator session started by `konstant dsh` may run the host's own agent "
@@ -110,6 +117,7 @@ class Confinement:
     ssh_agent: bool = False
     docker_socket: bool = False
     host_agents: bool = False
+    memory_share: bool = False
     set_by: tuple = ()              # the options konstant.toml sets (the rest: the profile)
 
     @property

@@ -50,6 +50,11 @@ dsh's sandbox gives every command an empty private `/tmp` (`doctor` WARNs).
 They are generated: edit `catalog/` or `konstant.toml`, then sync again; `agents sync --check`
 names drift.
 
+`.dsh/konstant.patch.yml` also inserts konstant's memory server (an `@deepseek-ai/dsh-mcp-client`
+row, `serverName: konstant-memory`, `bin/konstant mcp memory` over stdio), so every phase and your
+own session get the `mcp__konstant-memory__kb_recall`, `..._kb_store` and `..._kb_note` tools
+([CONCEPTS.md](CONCEPTS.md), "Memory"); your session acts as the orchestrator identity there.
+
 ## Your own dsh session: `bin/konstant dsh`
 
 ```sh

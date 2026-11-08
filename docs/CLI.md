@@ -27,6 +27,8 @@ positional arguments:
     intake       turn a goal into jobs: planner, DoD review, filing, approval, scenario writer
                  (level 5)
     chat         the orchestrator chat as intake (the dsh plugin's seam)
+    memory       the memory vault: recall, store, notes (docs/CONCEPTS.md "Memory")
+    mcp          MCP servers konstant ships (stdio)
     agents       generate and list the agent catalog surfaces
     dsh          start your dsh session (web, tui, headless) with the konstant gate plugin
     confinement  the confinement profile: what phases may see and do, per harness
@@ -944,6 +946,170 @@ options:
   --json             print JSON
   --config PATH      konstant.toml to use
   --session SESSION  the chat session id
+```
+
+## `konstant memory`
+
+```
+usage: konstant memory [-h] ACTION ...
+
+positional arguments:
+  ACTION
+    recall    search memory (lexical, or hybrid with [memory] embed_endpoint)
+    store     store a fact (the shared pool; the judges' sealed one)
+    note      write or replace a named note
+    list      recent notes you may read
+    show      print one note
+    log       who wrote what (stored and refused writes)
+    reindex   rebuild the recall index from the vault (owner, orchestrator)
+
+options:
+  -h, --help  show this help message and exit
+```
+
+## `konstant memory recall`
+
+```
+usage: konstant memory recall [-h] [--as ROLE] [--json] [--config PATH] [--limit LIMIT]
+                              [--pool POOL]
+                              query [query ...]
+
+positional arguments:
+  query
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+  --limit LIMIT
+  --pool POOL    one pool only: shared, sealed (judges, owner), notes
+```
+
+## `konstant memory store`
+
+```
+usage: konstant memory store [-h] [--as ROLE] [--json] [--config PATH] [--title TITLE] [--tag TAG]
+                             [--link LINK]
+                             text
+
+positional arguments:
+  text           the fact, or - for stdin
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+  --title TITLE
+  --tag TAG      a tag (repeatable)
+  --link LINK    a [[wikilink]] target (repeatable)
+```
+
+## `konstant memory note`
+
+```
+usage: konstant memory note [-h] [--as ROLE] [--json] [--config PATH] [--tag TAG] [--link LINK]
+                            title text
+
+positional arguments:
+  title
+  text           the note's Markdown body, or - for stdin
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+  --tag TAG      a tag (repeatable)
+  --link LINK    a [[wikilink]] target (repeatable)
+```
+
+## `konstant memory list`
+
+```
+usage: konstant memory list [-h] [--as ROLE] [--json] [--config PATH] [--limit LIMIT] [--pool POOL]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+  --limit LIMIT
+  --pool POOL
+```
+
+## `konstant memory show`
+
+```
+usage: konstant memory show [-h] [--as ROLE] [--json] [--config PATH] path
+
+positional arguments:
+  path           vault-relative path, e.g. worker/facts/....md
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant memory log`
+
+```
+usage: konstant memory log [-h] [--as ROLE] [--json] [--config PATH] [--limit LIMIT]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+  --limit LIMIT
+```
+
+## `konstant memory reindex`
+
+```
+usage: konstant memory reindex [-h] [--as ROLE] [--json] [--config PATH]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant mcp`
+
+```
+usage: konstant mcp [-h] SERVER ...
+
+positional arguments:
+  SERVER
+    memory    the memory MCP server: kb_recall, kb_store, kb_note
+
+options:
+  -h, --help  show this help message and exit
+```
+
+## `konstant mcp memory`
+
+```
+usage: konstant mcp memory [-h] [--as ROLE] [--json] [--config PATH]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
 ```
 
 ## `konstant agents`

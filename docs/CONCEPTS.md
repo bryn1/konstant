@@ -17,6 +17,7 @@ var/secrets/<role>.token   one token per role, 0600 in a 0700 dir (only sha256 i
 var/runs/<stamp>-<slug>/   task-run records: record.json, phases/*.json + logs
 var/logs/ var/backups/     board log, `board backup` copies
 projects/<slug>/           your projects (git repositories)
+memory/                    the memory vault: Markdown notes, its own git repository ("Memory")
 catalog/                   the source of task types, agents, skills, workflows
 .claude/ CLAUDE.md AGENTS.md   generated from catalog/ by `konstant agents sync`
 ```
@@ -265,6 +266,76 @@ The order is the point: DoD, review and holdouts exist before any producer runs,
 different identity. A job whose holdout authoring fails twice is reported `BLOCKED` and waits
 (its claim needs sealed holdouts).
 
+## Memory
+
+konstant has a built-in memory that every harness uses the same way: notes earlier jobs and
+sessions left (decisions, pitfalls, how something works), recalled before new work starts.
+
+- **The vault is the source of truth**: `memory/` in the workspace, plain Markdown notes with YAML
+  frontmatter, `[[wikilinks]]` and `#tags`, so you can open the folder in Obsidian (or any editor)
+  and read or search it as it is. Two pools, `shared/` and `sealed/` (below), with one folder
+  per writer inside (`shared/worker/`, `shared/planner/`, `sealed/verifier/`, ...).
+  It is its own git repository (`memory/.git`, never mixed with the workspace's or a project's
+  history): every write konstant makes is one commit, authored by the identity that wrote it.
+- **The index is a cache**: `var/memory/index.db`, SQLite full-text search from Python's
+  standard library, rebuilt from the vault at any time (`bin/konstant memory reindex`). Recall
+  is lexical unless you name a LOCAL OpenAI-compatible embedding endpoint; then it is hybrid
+  (text match + vector similarity), and when the endpoint does not answer it falls back to
+  lexical and says so:
+
+  ```toml
+  [memory]
+  embed_endpoint = "http://127.0.0.1:8000/v1"   # vLLM, llama.cpp --embeddings, Ollama
+  embed_model = "<the name it serves>"
+  # engine = "chroma"   # optional: vectors in a local Chroma collection
+  #                     # (pip install 'konstant[chroma]' into .venv; about 0.5 GB)
+  ```
+- **One MCP server for every harness**: `bin/konstant mcp memory` (stdio) with three tools:
+  `kb_recall` (search), `kb_store` (a short fact), `kb_note` (a named note with links and tags).
+  `agents sync` wires it into Claude Code (`--mcp-config`, the tools allowed by name), Codex
+  (`-c mcp_servers...`), Gemini CLI (`mcpServers` + policy rules) and dsh (an MCP client row in
+  the patch); [HARNESSES.md](HARNESSES.md) has the details. Any other agent, or a shell, uses
+  the CLI: `bin/konstant memory recall|store|note|list|show|log`.
+- **The board's web view** has a read-only Memory tab: recent notes, search, one note.
+
+Memory is a channel between jobs: agents learn from each other's notes, through one-way glass
+(owner decision 2026-11-08), and the integrity core covers it:
+
+- **One shared pool.** Every producing identity (the phases acting as `worker`: coder, tester,
+  reviewer, researcher, ...; the planner and the DoD reviewer; the orchestrator, the factory, the
+  owner) reads AND writes `shared/`: each agent recalls every earlier job's notes and lessons.
+- **The sealed pool, behind one-way glass.** The scenario writer and the verifier READ the
+  shared pool but write only `sealed/`, which no producer, planner, orchestrator or viewer token
+  (and so not the web view) ever sees; it is inside the integrity core, like the holdout store.
+  The owner reads both. The scenario writer's phase still holds no token: konstant exports what
+  it may read into its drafts dir before the phase, its memory server recalls from that copy, and
+  konstant stores the notes it wrote into the sealed pool afterwards.
+- **Source and proof on every note.** A note lands in the folder of the identity whose token
+  wrote it (the board takes it from the token, never from the request), with the job it was
+  written for. Recall labels each note `verified job N`, `job N not verified (<status>)`, `no job`
+  or `not written by konstant`, from the board's own records (never from the note's
+  frontmatter), and ranks lessons of verified jobs first: a wrong lesson from a job that never
+  passed is marked as such instead of spreading as truth.
+- **No phase reads the vault directly.** `memory/` is on konstant's machinery list as both
+  unwritable and unreadable (like the holdout store): the jail masks it and every harness's
+  permission rules deny it, so a phase reaches memory only through the board, where the rules
+  above apply.
+- **Nothing sealed enters memory.** Every write is redacted like a board field (tokens, keys,
+  `NAME=secret` assignments) and scanned against the sealed holdout store: a canary, a pasted
+  scenario or a held-out literal of any sealed scenario is refused. A phase's refused write is
+  written on its job's trail, and the verifier counts it as a LEAK (canary, scenario) or a
+  LEAK-SUSPECT (literal) of that job.
+- **Memory is never evidence.** Probes refuse paths into the vault and the memory routes, the
+  board refuses a close whose `VERIFY_CMD` runs `konstant memory`, and the verifier's re-run and
+  holdout runs see an empty `memory/`.
+- **Attributed and reviewable.** Every write and every refusal is a row of the board's
+  append-only `memory_writes` (who, what, which run and job); `bin/konstant memory log` lists
+  them, and `git -C memory log` shows the same history.
+- **Shared with your own tools or not** (`[confinement] memory_share`, open profile: on,
+  closed: off). On: notes you add or edit in `memory/` yourself are recalled too. Off: phases
+  recall only notes konstant wrote, byte for byte; a note changed outside konstant stops being
+  served until it is stored again.
+
 ## Generated surfaces
 
 `konstant agents sync` renders `catalog/` into `.claude/agents/<agent>.md`,
@@ -354,6 +425,7 @@ open level-4 phase gets only its harness's own rules, and `doctor` says so).
 | `credentials` | `[]` | `["*"]` | pass these credential files/folders (e.g. ~/.ssh, a token file) and $VARIABLES through; "*" = every location and variable konstant lists | the phase can act as you on every service those credentials reach |
 | `ssh_agent` | false | true | use your ssh agent (SSH_AUTH_SOCK and its socket) | ssh to every server your agent's keys open, without seeing a key; an ssh login into THIS host leaves konstant's jail |
 | `docker_socket` | false | true | use the docker daemon (its socket, DOCKER_HOST); never in factory mode | the docker socket is root on this host: a phase that uses it can read and change anything, the integrity core included (so factory mode never passes it) |
+| `memory_share` | false | true | the memory vault is shared with your own tools: notes you add or edit in `memory/` yourself (an editor, Obsidian) are recalled by phases as well as the notes konstant wrote | anything that can write `memory/` outside konstant steers every later phase, unattributed; private notes you keep there reach the model |
 | `host_agents` | false | false | the orchestrator session started by `konstant dsh` may run the host's own agent launchers (dsh, claude, codex, gemini) by name | a launcher that loads your personal agent setup (its profiles, servers, passwords) runs outside the workspace's composition and every gate |
 
 `bin/konstant confinement show` prints the effective value and source of every option and, per

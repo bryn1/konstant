@@ -101,6 +101,26 @@ def suspects(scenarios: list, diff: list, brief: str) -> list:
     return out
 
 
+def memory_findings(trail: list) -> tuple:
+    """(LEAK lines, LEAK-SUSPECT lines) from the board's own `finding` rows of refused memory
+    writes (konstant/memory/service.py; payload {"memory_refused": kind}, which the trail route
+    cannot set): a phase of this job tried to store a canary or a whole scenario (it read the
+    store: LEAK), or a held-out literal (LEAK-SUSPECT: teaching to the test, through memory)."""
+    leaks, suspects = [], []
+    for t in trail:
+        payload = t.get("payload") if isinstance(t.get("payload"), dict) else {}
+        kind = payload.get("memory_refused")
+        if t.get("kind") != "finding" or not kind:
+            continue
+        where = f"trail row {t.get('id')} ({t.get('actor')})"
+        if kind in ("canary", "scenario"):
+            leaks.append(f"LEAK: a phase tried to store holdout content ({kind}) in memory: {where}")
+        elif kind == "literal":
+            suspects.append(f"LEAK-SUSPECT: a phase tried to store a held-out literal in memory: "
+                            f"{where}")
+    return leaks, suspects
+
+
 def scan(ws, scenarios: list, *, project, base, commit, runs: list, trail: list,
          brief: str) -> tuple:
     """(LEAK lines, LEAK-SUSPECT lines)."""

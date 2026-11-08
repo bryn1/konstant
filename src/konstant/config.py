@@ -55,9 +55,12 @@ DEFAULTS: dict = {
         # adapter's own command unless you change it here (then your template wins, {model} works)
         # --setting-sources project,local: no user-level settings/hooks; --strict-mcp-config: no
         # user MCP servers (REVIEW F-20)
+        # --mcp-config: konstant's memory server (.claude/konstant-mcp.json, generated) is the
+        # only MCP server a phase gets (docs/CONCEPTS.md "Memory")
         "command": ("claude -p --permission-mode dontAsk --setting-sources project,local "
-                    "--strict-mcp-config --add-dir {workspace} --settings "
-                    "{workspace}/.claude/settings.json {prompt}"),
+                    "--strict-mcp-config --mcp-config {workspace}/.claude/konstant-mcp.json "
+                    "--add-dir {workspace} --settings {workspace}/.claude/settings.json "
+                    "{prompt}"),
         "stdin": False,
         "timeout_s": 3600,
         "max_parallel": 2,
@@ -126,6 +129,19 @@ DEFAULTS: dict = {
     # override the profile (network, home_read, home_write, host_write, extra_read, extra_write,
     # credentials, ssh_agent, docker_socket, host_agents); checked by confinement.parse
     "confinement": {"profile": "closed", "integrity": "on"},
+    # built-in memory (konstant/memory/, docs/CONCEPTS.md "Memory"): the vault memory/ (plain
+    # Markdown, Obsidian-compatible, its own git repo) and a rebuildable recall index. Recall is
+    # lexical (SQLite FTS5) unless a LOCAL OpenAI-compatible embedding endpoint is named; engine
+    # "chroma" needs the optional extra (pip install 'konstant[chroma]') and an endpoint
+    "memory": {
+        "enabled": True,
+        "engine": "sqlite",            # sqlite | chroma
+        "embed_endpoint": "",          # e.g. a loopback URL ending in /v1; "" = lexical recall
+        "embed_model": "",             # the embedding model the endpoint serves
+        "embed_api_key_env": "",       # the variable holding its key; "" = none
+        "recall_limit": 8,
+        "max_note_bytes": 32768,
+    },
     "verify": {
         "rerun": True,
         "rerun_timeout_s": 900,
@@ -234,6 +250,7 @@ def _validate(data: dict, path) -> None:
     check_harness(data["harness"], path)
     check_holdout(data["holdout"], path)
     check_factory(data, path)
+    check_memory(data["memory"], path)
     from konstant import confinement
     try:
         confinement.parse(data["confinement"], Path(path).parent)
@@ -267,6 +284,33 @@ def check_factory(data: dict, path) -> None:
     m = data["holdout"]["writer_model"]
     if m and not _MODEL.fullmatch(m):
         raise ConfigError(f"{path}: [holdout] writer_model = {m!r} is not a model name")
+
+
+MEMORY_ENGINES = ("sqlite", "chroma")
+
+
+def check_memory(m: dict, path) -> None:
+    """[memory] (konstant/memory/): a typo must not silently turn recall into something else."""
+    where = f"{path}: [memory]"
+    if m["engine"] not in MEMORY_ENGINES:
+        raise ConfigError(f"{where} engine = {m['engine']!r}: one of {', '.join(MEMORY_ENGINES)}")
+    url = r"https?://[^\s/\"'\\]+(/[^\s\"'\\]*)?"
+    if m["embed_endpoint"] and not re.fullmatch(url, m["embed_endpoint"]):
+        raise ConfigError(f"{where} embed_endpoint must be an http(s) URL")
+    if bool(m["embed_endpoint"]) != bool(m["embed_model"]):
+        raise ConfigError(f"{where} embed_endpoint and embed_model go together (both set: hybrid "
+                          "recall; both empty: lexical)")
+    if m["embed_model"] and not _MODEL.fullmatch(m["embed_model"]):
+        raise ConfigError(f"{where} embed_model = {m['embed_model']!r} is not a model name")
+    if m["embed_api_key_env"] and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*",
+                                                   m["embed_api_key_env"]):
+        raise ConfigError(f"{where} embed_api_key_env must be an environment variable name")
+    if m["engine"] == "chroma" and not m["embed_endpoint"]:
+        raise ConfigError(f"{where} engine = \"chroma\" needs embed_endpoint + embed_model (its "
+                          "own default embedding downloads a model: konstant stays offline)")
+    for key, lo, hi in (("recall_limit", 1, 50), ("max_note_bytes", 256, 1048576)):
+        if not lo <= m[key] <= hi:
+            raise ConfigError(f"{where} {key} = {m[key]}: must be {lo}-{hi}")
 
 
 def check_holdout(h: dict, path) -> None:

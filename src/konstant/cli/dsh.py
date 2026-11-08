@@ -141,7 +141,8 @@ def refusal(ctx, ws: Path, extra: dict) -> str | None:
                                check_files=True)
         drift = Generator(cat, cfg.home, cfg.data["permissions"], harness=cfg.data["harness"],
                           gate=cfg.session_gate(), policy=cfg.data["board"]["policy"],
-                          conf=cfg.confinement()).check("dsh")
+                          conf=cfg.confinement(),
+                          memory=cfg.data["memory"]["enabled"]).check("dsh")
     except (catalog_mod.CatalogError, GenerateError) as exc:
         return f"the generated dsh surfaces cannot be checked: {exc}"
     if drift:

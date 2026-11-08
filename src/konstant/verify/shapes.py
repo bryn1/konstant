@@ -71,6 +71,12 @@ class Roots:
         if real == var or real.startswith(var + os.sep):
             raise ValueError(f"path {operand} resolves into the workspace's var/ (board, tokens, "
                              "runs): probes never read it")
+        from konstant import machinery
+        for sealed in machinery.sealed(self.home):     # the holdout store, the memory vault
+            s = os.path.realpath(sealed)
+            if real == s or real.startswith(s + os.sep):
+                raise ValueError(f"path {operand} resolves into {sealed.name}/ (a sealed path: the "
+                                 "memory vault is never evidence, the holdout store never read)")
         for root in self.paths:
             r = os.path.realpath(root)
             if real == r or real.startswith(r.rstrip(os.sep) + os.sep):
@@ -178,6 +184,8 @@ def _curl(a: list, roots: Roots) -> Plan:
     parts = urlparse(a[-1])
     if "@" in parts.netloc or parts.hostname not in roots.url_hosts:
         raise ValueError(f"url host {parts.hostname!r} is not in [verify] url_hosts")
+    if parts.path.rstrip("/").startswith("/api/memory"):
+        raise ValueError("url reads the board's memory routes: memory is never evidence")
     return Plan("curl", a, native=("curl", (a[-1], len(a) == 7)))
 
 

@@ -41,3 +41,13 @@
   config:
     provider: konstant
     model: !!js process.env.KONSTANT_MODEL || "local-model"
+- insert:
+    - id: konstant-memory
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: konstant-memory
+        transport: stdio
+        command: "<WS>/bin/konstant"
+        args: ["mcp", "memory"]
+        env:
+          KONSTANT_HOME: "<WS>"

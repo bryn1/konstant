@@ -5,7 +5,9 @@ Status: **plan, being built**. Wave L5-1 (pillar A, sealed holdouts: section 3),
 closed and per-capability options around an integrity core: section 2.1) and wave L5-3 (pillar B,
 intake from the orchestrator chat, DoD review and the scenario writer: section 4) have landed and
 are described as built in DESIGN.md §7.1, §7.2, §9.1 and §7.3; "L5-1 as built", "L5-2 as built",
-"L5-2b as built" and "L5-3 as built" in section 8 list where they differ from the text below. The owner answered the open questions on 2026-11-01 (section 9); the
+"L5-2b as built" and "L5-3 as built" in section 8 list where they differ from the text below.
+Wave L5-M (built-in memory, an owner request beside the plan) is in DESIGN.md §7.4 and "L5-M as
+built". The owner answered the open questions on 2026-11-01 (section 9); the
 sections they change say so. Everything else on this page is still the plan that the next
 releases build in the waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as
 each part lands, and this page stays the roadmap until level 5 is reached.
@@ -853,6 +855,7 @@ for what it lands.
 | **L5-2** confinement + identities (**done**; see "L5-2 as built" below) | generalised `Adapter.confine` for every harness in factory mode, one exposed identity token per phase, labelled worker tokens, board label guards, job clones + target read-only, `jobs.workdir` and the `{workdir}` probe substitution (`verify/probe.py`, `verifier.project_dir`), `Adapter.relocatable_home`, doctor `factory` rows, live smoke of a jailed claude phase (records whether Claude's sandbox nests) | `harnesses/base.py`, `claude.py`, `codex.py`, `gemini.py`, `command.py`, `board/auth.py`, `board/api/lifecycle.py`, `board/transitions.py`, `cli/task_run.py`, `cli/doctor.py` | L5-1 | A4 on every adapter, B6, B7, C9 |
 | **L5-2b** confinement profiles (**done**; see "L5-2b as built" below; owner request 2026-11-01) | `[confinement]` profile closed/open + per-capability options + the integrity core, mapped by every adapter and the jail, `confinement show`, doctor rows, `install.sh`/`get.sh --confinement`, `host_agents` (the session's refusing agent-CLI shims) | `jail.py`, `harnesses/*`, `agents/settings.py`, `gate/harness.py`, `cli/dsh.py`, `cli/doctor.py`, `install.sh`, `get.sh` | L5-2 | the open profile's probe on every harness path: host reach yes, core no (factory and level 4); closed red twin; integrity-off red twin |
 | **L5-3** intake + scenario writer (**done**; see "L5-3 as built" below) | intake from the orchestrator chat (4.0: `goal add --from-chat`, `[factory] goal_roles`, `[factory] defaults`), goal files (`goal add/list/show/pause/resume/cancel`), type `intake` + agent `planner`, `DOD-verdict.md`, deterministic filing, approval rule, role agent `scenario-writer`, `holdout/author.py` with the run dir in the store, fake planner / reviewer / scenario modes incl. `weak-dod` | `catalog/types.yaml`, `catalog.py` `ROLE_AGENTS`, `board/dod.py` `lint`, `gate/runner.py`, `gate/rules/authorship.py`, `gate/rules/judged.py`, `agents/generate.py` | L5-2 | B1-B5, B8-B11 |
+| **L5-M** built-in memory (**done**; see "L5-M as built" below; owner request 2026-11-01) | the memory vault (Obsidian-compatible Markdown, its own git repo), the rebuildable recall index (SQLite FTS5, optional local embeddings, optional Chroma), `konstant mcp memory` wired into every harness, `memory` CLI, the integrity rules (one shared pool for every producer, a sealed pool behind one-way glass for the scenario writer and the verifier, each note's source job and `verified` label, store-time holdout scan, memory never evidence, attributed writes, `memory_share`), the board's Memory tab | `machinery.py`, `confinement.py`, `agents/settings.py`, `harnesses/*`, `board/evidence.py`, `verify/shapes.py`, `verify/holdout.py`, `holdout/leak.py`, `board/static/` | L5-3 | each integrity rule red-then-green; full `pytest`; both e2e; release scan CLEAN |
 | **L5-R1** independent review 1 | review only, by someone who built none of L5-1..3: try to reach `verified` past holdouts, read the store from every harness, leak through feedback, transcripts, the board or run records, forge identities, weaken a generated DoD; one reproduction per finding | the adversarial fake harness, as the first two reviews did | L5-3 | report with severity per finding |
 | **L5-F1** fixes 1 | one red-then-green test per finding under `tests/review/` (`test_H<nn>_...`); zero open P0/P1 | — | L5-R1 | all A and B rows green again |
 | **L5-4** ship + rollback | `ship`, `ship list`, targets `github` (push + PR create/merge, revert-PR rollback, the secret scan before a push, a `gh` stand-in for tests; Q2) / `branch` / `apply` / `command`, `[ship] decision_types = ["infra"]` (Q4), the guard on both sides, plumbing-only ref moves, post-ship checks with the regression set, rollback + tree check, the follow-up job after a rollback, halt on a failed rollback, decision rules (5.4), table `ships`, fake modes `ship-break`, `self-ship` | `gate/rules/common.py` git plumbing, `verify/probe.py` `run_line`, `verify/holdout.py`, `board/api/` | L5-F1 | C1-C12 |
@@ -1052,6 +1055,43 @@ Landed as DESIGN.md §7.3 describes. Where it differs from sections 2-4 above, a
   intake on that model takes longer than an hour (planner, a DoD review that FIXed a real bug in a
   brief, a second planner cycle; the scenario writer's first drafts were refused by the held-out
   lint and its second set sealed), so the live runs were time-boxed and recorded partially.
+
+### L5-M as built
+
+Owner, verbatim (typos kept): "an addition to everything, my experience is that chromadb and
+obsidian vault is a good idea to have, or if there are better systems for memory". Landed as
+DESIGN.md §7.4 describes (the decision and its reasons are there; the cited comparison is in the
+wave's evidence file). Where it touches sections 2-3 above:
+
+- **`machinery.SEALED` grew**: it lists the memory vault `memory/` beside the holdout store, and
+  `machinery.DIRS` lists it as well: no phase reads or writes the vault's files on any harness or
+  in any jail; memory reaches a phase only through the board, which enforces the pools (2.2: the
+  token's label decides).
+- **One-way glass (owner decision 2026-11-08)**: agents must be able to learn from each other's
+  memory. Every producing identity reads and writes one shared pool; the scenario writer and the
+  verifier read it but write only a sealed pool no producer reads; every hit carries its source
+  job and whether that job reached `verified`, verified lessons first. This WIDENS 3.4: the
+  scenario writer's context now includes the shared pool, i.e. lessons producers of earlier jobs
+  wrote (the section-10 risk "a same-model scenario writer is steered by the producer of an
+  earlier job" gains a channel). What still holds: its phase reads no token (konstant exports its
+  view before the phase, `memory/view.py`), it never sees a job clone, OUT or a verdict, and its
+  scenarios must still fail on the base and stay out of the brief (3.2).
+- **Memory is a leak channel the verifier reads** (3.5): a refused memory write of a phase (a
+  canary, a whole scenario, a held-out literal) is a `finding` on its job's trail that only the
+  board can write; the holdout step counts it as LEAK (the set burns) or LEAK-SUSPECT (the round
+  fails), exactly as a canary in the diff or a literal on an added line.
+- **Memory is never evidence** (1, F-02): probes refuse sealed paths and the board's memory
+  routes; the evidence contract refuses a `VERIFY_CMD` that runs `konstant memory`; re-runs and
+  holdout runs see an empty `memory/`.
+- **Open/closed decides sharing with the owner's own tools** (2.1): the new option
+  `memory_share` (closed false, open true) serves notes konstant did not write; without it a file
+  dropped into `memory/` (by the owner's editor or anything else) never reaches a phase.
+- **Not run live**: no harness ran a model in this wave. The MCP server was exercised over stdio
+  (tests and the fresh-install e2e); codex's keys were parsed by the installed `codex mcp list`
+  with a scratch home; the dsh row was composed by the real dsh's `--dump-config` with a scratch
+  home; a real `claude -p` with the default command, scripted by a loopback stand-in for the Messages
+  API (no model call), loaded the server, called `kb_recall` and `kb_store` under `dontAsk` and
+  wrote a note attributed to `worker`; gemini only by its golden files.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

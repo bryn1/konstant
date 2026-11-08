@@ -185,9 +185,12 @@ def test_install_twice_is_idempotent_then_upgrade_with_from(tmp_path):
     assert "kept existing konstant.toml" in second.stdout and "token owner: kept" in second.stdout
     assert _hashes(old) == before
 
+    (old / "memory" / "owner").mkdir(parents=True)                 # the memory vault (L5-M)
+    (old / "memory" / "owner" / "Kept.md").write_text("---\ntitle: Kept\n---\nkept\n")
     new = _copy_release_tree(tmp_path / "new")
     up = sh(new, "--yes", "--from", str(old), env=env)
     assert up.returncode == 0, up.stdout + up.stderr
     assert _hashes(new) == before
+    assert (new / "memory" / "owner" / "Kept.md").read_text().endswith("kept\n")
     assert list((old / "var" / "backups").glob("board-*.db")), "the old DB was not backed up"
     assert sh(new, "--yes", "--from", str(old), env=env).returncode == 1   # new already has a DB

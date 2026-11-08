@@ -16,10 +16,13 @@ V = {"prompt": "do {agent} it", "prompt_file": "/r/p.md", "agent": "coder", "cwd
 def test_default_command_is_workspace_scoped():
     assert DEFAULTS["harness"]["command"] == harness.DEFAULT_COMMAND
     argv = build_argv(harness.DEFAULT_COMMAND, V, False)
-    assert argv[:9] == ["claude", "-p", "--permission-mode", "dontAsk", "--setting-sources",
-                        "project,local", "--strict-mcp-config", "--add-dir", V["workspace"]]
-    assert argv[9] == "--settings"
-    assert argv[10] == "/w/.claude/settings.json" and argv[-1] == "do {agent} it"
+    assert argv[:11] == ["claude", "-p", "--permission-mode", "dontAsk", "--setting-sources",
+                         "project,local", "--strict-mcp-config",
+                         # the ONLY MCP server: konstant's memory (wave L5-M)
+                         "--mcp-config", "/w/.claude/konstant-mcp.json",
+                         "--add-dir", V["workspace"]]
+    assert argv[11] == "--settings"
+    assert argv[12] == "/w/.claude/settings.json" and argv[-1] == "do {agent} it"
 
 
 def test_placeholders_are_one_pass_and_one_argv_item():

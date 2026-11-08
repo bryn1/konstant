@@ -69,7 +69,8 @@ class Claude(Adapter):
                 "only ~/.claude/.credentials.json bound in, read-only")
 
     def argv(self, ph: Phase) -> list:
-        return build_argv(self.template(ph.model), ph.values, False)
+        argv = build_argv(self.template(ph.model), ph.values, False)
+        return argv if ph.memory else without_memory(argv, ph)
 
     def env(self, ph: Phase) -> dict:
         if not self.jails(ph):
@@ -122,6 +123,21 @@ def user_level() -> tuple:
                 f"{mem} is not a settings source and loads into every phase")
     return ("enforced", "user settings, hooks and MCP servers skipped; no user-level "
             "~/.claude/CLAUDE.md memory present")
+
+
+def without_memory(argv: list, ph: Phase) -> list:
+    """A phase without memory (the scenario writer; [memory] enabled = false): --mcp-config names
+    an empty server list instead, so with --strict-mcp-config the phase has no MCP server."""
+    if "--mcp-config" not in argv:
+        return argv
+    i = argv.index("--mcp-config") + 1
+    path = ph.run_dir / "konstant-mcp-none.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"mcpServers": {}}\n', encoding="utf-8")
+    except OSError:
+        return argv
+    return argv[:i] + [str(path)] + argv[i + 1:]
 
 
 def without_sandbox(argv: list, ph: Phase) -> list:

@@ -26,7 +26,7 @@ usage: ./install.sh [--port N] [--harness "<cmd>"] [--confinement closed|open] [
   --wheels DIR    offline install from pre-downloaded wheels (pip --no-index --find-links DIR);
                   make DIR on a machine with network and a current pip (>= 23):
                     python3 -m pip download -d DIR <this folder> setuptools wheel
-  --from OLD      upgrade: copy konstant.toml, var/ and projects/ from an older konstant folder
+  --from OLD      upgrade: copy konstant.toml, var/, projects/ and memory/ from an older konstant folder
                   (its board must be stopped; its DB is backed up first)
   --yes           do not ask for confirmation
 EOF
@@ -178,7 +178,7 @@ if [ -n "$FROM" ]; then
     KONSTANT_HOME="$FROM" "$HERE/.venv/bin/python" -m konstant board backup \
       || die "backup of $FROM/var/board.db failed; nothing was copied"
   fi
-  for item in konstant.toml var projects; do
+  for item in konstant.toml var projects memory; do
     if [ -e "$FROM/$item" ]; then cp -a "$FROM/$item" "$HERE/" && say "copied $item from $FROM"; fi
   done
 fi
@@ -218,8 +218,9 @@ else:
               "# name = \"claude\"   # claude | codex | gemini | dsh | command (docs/HARNESSES.md)",
               "# default: Claude Code, headless, workspace-scoped (see docs/CONCEPTS.md)",
               '# command = "claude -p --permission-mode dontAsk --setting-sources project,local '
-              '--strict-mcp-config --add-dir {workspace} --settings '
-              '{workspace}/.claude/settings.json {prompt}"', ""]
+              '--strict-mcp-config --mcp-config {workspace}/.claude/konstant-mcp.json '
+              '--add-dir {workspace} --settings {workspace}/.claude/settings.json {prompt}"',
+              ""]
 lines += ["[permissions]",
           "# extra Claude Code rules for headless phases, e.g. your test runner:",
           '# allow = ["Bash(pytest *)", "Bash(python -m pytest *)", "Bash(npm test *)"]', ""]
@@ -230,6 +231,12 @@ lines += ["[confinement]",
           "# other identities' tokens, konstant's machinery) holds in both. See",
           "# docs/CONCEPTS.md \"Confinement profiles\" and `bin/konstant confinement show`.",
           f"profile = {json.dumps(conf)}", ""]
+lines += ["[memory]",
+          "# the memory vault memory/ (Markdown, Obsidian-compatible, its own git repo) and its",
+          "# recall index; lexical recall unless a LOCAL OpenAI-compatible embedding endpoint is",
+          "# named (docs/CONCEPTS.md \"Memory\"):",
+          "# embed_endpoint = \"http://127.0.0.1:8000/v1\"", "# embed_model = \"<served name>\"",
+          ""]
 path = sys.argv[1]
 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
 with os.fdopen(fd, "w") as fh:

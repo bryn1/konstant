@@ -231,7 +231,7 @@ def check_agents(rep: Report, cfg) -> None:
         harnesses.check_types(cfg.data["harness"], cat)
         gen = Generator(cat, cfg.home, cfg.data["permissions"], harness=cfg.data["harness"],
                         gate=cfg.session_gate(), policy=cfg.data["board"]["policy"],
-                        conf=cfg.confinement())
+                        conf=cfg.confinement(), memory=cfg.data["memory"]["enabled"])
         drift = gen.check()
     except (catalog_mod.CatalogError, GenerateError, harnesses.HarnessError) as exc:
         rep.add("FAIL", "agents", f"{exc}")
@@ -364,6 +364,9 @@ def cmd_doctor(ctx) -> int:
             rep.add(*row)
         from konstant.holdout.store import doctor_row
         rep.add(*doctor_row(cfg))
+        from konstant.memory.doctor import rows as memory_rows
+        for row in memory_rows(cfg):
+            rep.add(*row)
         from konstant.factory.doctor import intake_rows, rows as factory_rows
         for row in factory_rows(cfg) + intake_rows(cfg):
             rep.add(*row)

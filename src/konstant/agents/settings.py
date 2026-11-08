@@ -16,8 +16,10 @@ sandboxing docs (DESIGN §9 names them).
   more agents (task run, board, agents sync), and `--as owner|verifier` anywhere on a konstant
   command line. Deny rules are evaluated before allow rules, so they carve holes in the
   workspace allow.
-- the sealed holdout store (machinery.SEALED, var/holdout/): Read denied for the file tools and
-  read-denied in the sandbox, next to var/secrets/ (docs/LEVEL5.md 3.3).
+- the sealed paths (machinery.SEALED: the holdout store var/holdout/ and the memory vault
+  memory/): Read denied for the file tools and read-denied in the sandbox, next to var/secrets/
+  (docs/LEVEL5.md 3.3). Memory is reached through the `konstant-memory` MCP server, whose three
+  tools are allowed by name (konstant/memory/wiring.py), or the `konstant memory` verbs.
 - permissions.blockReadsOutsideWorkingDirectories: file tools refuse reads outside the working
   directories (the phase's project dir + the workspace via `--add-dir`).
 - permissions.disableBypassPermissionsMode: no session in this workspace may skip permissions.
@@ -46,9 +48,11 @@ SCHEMA = "https://json.schemastore.org/claude-code-settings.json"
 # konstant verbs a phase agent may run (board bookkeeping + the gate's own judge/check)
 # (`job *` includes `job verdict` / `job approve`; the deny list below removes them, deny wins)
 KONSTANT_ALLOW = ("job", "task classify", "task gate", "task check", "task judge",
-                  "project list", "agents list", "version")
+                  "project list", "agents list", "version", "memory recall", "memory store",
+                  "memory note", "memory list", "memory show", "memory log")
 # konstant verbs that act as another role or start more agents: never from inside a session
-KONSTANT_DENY = ("task run", "verify", "job verdict", "job approve", "board", "agents sync")
+KONSTANT_DENY = ("task run", "verify", "job verdict", "job approve", "board", "agents sync",
+                 "memory reindex")
 # (no `init`: `git init <path>` writes anywhere; a project is initialised by `project add`)
 GIT_ALLOW = ("status", "diff", "log", "show", "add", "commit", "restore", "mv", "rm",
              "rev-parse", "ls-files", "branch", "switch", "stash")
@@ -98,8 +102,12 @@ def _konstant_forms(workspace: Path, python: str) -> list:
             shlex.join([python, "-m", "konstant"])]
 
 
-def render(workspace: Path, perm: dict, python: str | None = None, conf=None) -> str:
-    """The settings for `conf` (konstant/confinement.py; None = closed, the 0.1.0 reach)."""
+def render(workspace: Path, perm: dict, python: str | None = None, conf=None,
+           memory: bool = True) -> str:
+    """The settings for `conf` (konstant/confinement.py; None = closed, the 0.1.0 reach).
+    `memory` ([memory] enabled): allow exactly the memory MCP server's tools
+    (konstant/memory/wiring.py), the server `--mcp-config` names."""
+    from konstant.memory import wiring
     from konstant import confinement
     conf = conf or confinement.CLOSED
     workspace = Path(workspace)
@@ -114,6 +122,7 @@ def render(workspace: Path, perm: dict, python: str | None = None, conf=None) ->
     allow += [f"Bash({workspace}/.venv/bin/python -m pytest *)"]
     allow += [r for r in perm.get("allow", []) if r not in allow]
     allow += reach_allow(conf)
+    allow += wiring.claude_allow(memory)
     deny = []
     if conf.integrity:
         deny += [f"Read({ws}/var/secrets/**)"]

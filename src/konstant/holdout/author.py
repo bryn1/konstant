@@ -115,6 +115,7 @@ def author(cfg, cat, job: dict, goal_text: str, target: Path, client, need: int,
     -> {"sealed": [rows], "attempts": n} or {"blocked": reason, "attempts": n}.
     AuthorRefused for a setup refusal (no jail, a non-relocatable harness)."""
     from konstant.agents.generate import Generator
+    from konstant.memory import view
     from konstant.verify.holdout import confined
     why = confined(cfg)
     if why:
@@ -132,12 +133,18 @@ def author(cfg, cat, job: dict, goal_text: str, target: Path, client, need: int,
         run_dir = jd / "runs" / f"{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}-a{attempt}"
         run_dir.mkdir(parents=True, mode=0o700)
         text = prompt(profile, job, goal_text, target, drafts, need, feedback)
+        # memory (owner decision 2026-11-08): it reads the shared pool through an exported copy and
+        # writes only the sealed pool, collected below; its phase still holds no token
+        mem_env = view.prepare(client, drafts) if cfg.data["memory"]["enabled"] else {}
         log(f"konstant holdout: scenario writer for job {job['display_id']} (attempt {attempt}, "
             f"{harness.name}; run dir {run_dir})")
         res = harness.run(text, agent=ROLE, cwd=drafts, run_dir=run_dir,
                           label=f"scenario-a{attempt}", out=None, identity=IDENTITY,
-                          home_base=home, tokens=(), hide=tuple(masked(cfg, target)))
+                          home_base=home, tokens=(), hide=tuple(masked(cfg, target)),
+                          extra_env=mem_env)
         shutil.rmtree(home, ignore_errors=True)
+        if mem_env:
+            view.collect(client, drafts, log)
         files = sorted(p for p in drafts.glob("*.scenario") if p.is_file() and not p.is_symlink())
         if res.rc != 0 and not files:
             reasons = [f"the scenario writer exited {res.rc} and wrote no draft"]

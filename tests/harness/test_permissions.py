@@ -95,7 +95,7 @@ def gen(ws, name, **over):
 
 def test_dsh_patch_maps_the_reach(ws, home):
     rows = {r["id"]: r for r in yaml.safe_load(_strip_js(gen(ws, "dsh").render()[
-        ".dsh/konstant.patch.yml"]))}
+        ".dsh/konstant.patch.yml"])) if "id" in r}         # (+ the memory server's insert row)
     assert rows["sandbox-policy"]["config"]["mode"] == "workspace-write"
     assert rows["approval"]["config"]["policy"] == "never"
     assert rows["permission"]["config"]["defaultPreset"] == "konstant"
@@ -113,7 +113,7 @@ def test_dsh_patch_endpoint_provider_lists_every_dsh_model(ws, home):
                                                 "api_key_env": "MYKEY"},
                types={"review": {"model": "b2"}, "docs": {"name": "codex", "model": "c3"}}
                ).render()[".dsh/konstant.patch.yml"]
-    rows = {r["id"]: r for r in yaml.safe_load(_strip_js(text))}
+    rows = {r["id"]: r for r in yaml.safe_load(_strip_js(text)) if "id" in r}
     prov = rows["llm-pi-ai"]["config"]["providers"]["konstant"]
     assert prov["baseURL"] == "http://127.0.0.1:8000/v1" and prov["apiKeyEnv"] == "MYKEY"
     assert [m["id"] for m in prov["models"]] == ["a1", "b2"]
@@ -132,7 +132,8 @@ def gemini_rules(ws, **over):
 
 def test_gemini_policy_allows_konstant_verbs_git_and_the_test_runner(ws, home):
     rules = gemini_rules(ws)
-    allow = {r["commandPrefix"] for r in rules if r["decision"] == "allow"}
+    allow = {r["commandPrefix"] for r in rules if r["decision"] == "allow" and
+             "commandPrefix" in r}                       # (+ the memory MCP tools by mcpName)
     assert {"bin/konstant job", f"{ws}/bin/konstant task check", "git status",
             "npm test"} <= allow
     assert not any(p.startswith("git init") for p in allow)

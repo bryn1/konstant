@@ -4,5 +4,29 @@
       "AGENTS.md"
     ],
     "loadMemoryFromIncludeDirectories": true
+  },
+  "mcpServers": {
+    "konstant-memory": {
+      "command": "<WS>/bin/konstant",
+      "args": [
+        "mcp",
+        "memory"
+      ],
+      "env": {
+        "KONSTANT_HOME": "<WS>",
+        "KONSTANT_IN_TASK": "$KONSTANT_IN_TASK",
+        "KONSTANT_ROLE": "$KONSTANT_ROLE",
+        "KONSTANT_IDENTITY": "$KONSTANT_IDENTITY",
+        "KONSTANT_RUN": "$KONSTANT_RUN",
+        "KONSTANT_MEMORY_VIEW": "$KONSTANT_MEMORY_VIEW",
+        "KONSTANT_MEMORY_OUT": "$KONSTANT_MEMORY_OUT"
+      },
+      "includeTools": [
+        "kb_recall",
+        "kb_store",
+        "kb_note"
+      ],
+      "trust": false
+    }
   }
 }

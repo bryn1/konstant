@@ -140,6 +140,8 @@ class Codex(Adapter):
                 prov["env_key"] = ep["api_key_env"]
             a += ["-c", f"model_providers.konstant={inline_table(prov)}",
                   "-c", 'model_provider="konstant"']
+        from konstant.memory import wiring
+        a += wiring.codex_args(ph.workspace, ph.memory)
         if ph.model:
             a += ["-m", ph.model]
         return a + ["-"]

@@ -214,7 +214,9 @@ def test_G03_every_machinery_path_has_a_rule_in_every_adapter_and_the_jail(dws):
     ph = Phase({"workspace": dws.home, "cwd": dws.home / "projects/demo", "run_dir": run})
     fs = codex.filesystem(ph)
     for p in (*machinery.DIRS, *machinery.FILES):
-        covered = (fs.get(f"{dws.home / p}/**") == "read" or fs.get(str(dws.home / p)) == "read"
+        # "deny" (a sealed path: memory/) is neither readable nor writable: covered too
+        covered = (fs.get(f"{dws.home / p}/**") in ("read", "deny")
+                   or fs.get(str(dws.home / p)) == "read"
                    or (p.startswith("var") and fs.get(f"{dws.home / 'var'}/**") == "read"))
         assert covered, p
     pol = gemini.policy(dws.home, [], "h")
