@@ -1,4 +1,4 @@
-# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b, L5-3, L5-M, L5-T, L5-F1 and L5-4 landed)
+# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b, L5-3, L5-M, L5-T, L5-F1, L5-4 and L5-5 landed)
 
 konstant is a self-contained workspace for running coding agents with discipline: a local job
 board (**board**), a deterministic **task gate** that turns a task into phases run by one agent
@@ -20,7 +20,12 @@ triage (§6.2.1): size tiers on top of the type, an intake card computed by code
 plans a task (new or continuation, prior work, reuse), a closed web-research phase for tasks with
 nothing similar, and a licence gate for copied code. Wave L5-4 added auto-ship (§7.5): the exact
 commit the verifier passed shipped to a GitHub pull request, a local branch, an apply dir or the
-owner's command, checked after the ship and rolled back by a new commit when it fails.
+owner's command, checked after the ship and rolled back by a new commit when it fails. Wave L5-5
+added the factory loop (§7.6): one long-lived process per workspace that drives goals and jobs
+through intake, attempts, verification and ship on its own, inside budgets (`max_attempts = 3` the
+only required one), escalating only what needs the owner, through a notifier that halts the
+factory when it cannot deliver; every step is an idempotent board transition, so a killed factory
+resumes from the board (an interrupted ship included), and the board's Factory tab shows it.
 
 References of the form F-nn and G-nn name findings of the two independent security reviews of
 v0.1; docs/CONCEPTS.md "Security reviews" summarises them, and each has a test under `tests/review/`.
@@ -45,7 +50,7 @@ workspace. Nothing is written outside it; uninstall = delete the folder.
    recorded verify command the user's own agent already ran.
 
 Non-goals for v0.1: multi-host deployment, a hosted service, any LLM-as-judge, Windows outside WSL,
-PyPI publication, notifications/chat integrations.
+PyPI publication. (Notifications and the chat route came with level 5: §7.3, §7.6.)
 
 ## 2. Layout
 
@@ -64,8 +69,9 @@ konstant-0.1.0/
     client.py                  # stdlib HTTP client (urllib) used by every CLI verb
     catalog.py                 # load + validate catalog/types.yaml, agents, skills, workflows
     cli/                       # argparse front end: main, board, project, job, task (+ task_run,
-                               # task_session), verify, holdout, goal (goal, intake, chat), agents,
-                               # dsh, confinement, doctor, memory (memory + `mcp memory`)
+                               # task_session), verify, holdout, goal (goal, intake, chat), ship,
+                               # factory (the loop's verbs + `notify test`), agents, dsh,
+                               # confinement, doctor, memory (memory + `mcp memory`)
     board/
       app.py                   # FastAPI app factory, static read-only UI
       api/                     # deps (auth deps, serialisation), projects, jobs (file/read),
@@ -74,9 +80,11 @@ konstant-0.1.0/
                                # holdouts (seal + list commitments; the verdict's holdout hooks),
                                # goals (file/confirm/read goals, the intake state),
                                # memory (recall, notes, store, the write log, reindex),
-                               # ships (the board's ship guard, ship records, follow-up, halt)
+                               # ships (the board's ship guard, ship records, follow-up, halt),
+                               # factory (the factory view; escalations, ledger, the halt)
       db.py  migrate.py  migrations/0001_init.sql  0002_holdouts.sql  0003_workdir.sql
                                0004_goals.sql  0005_memory.sql  0006_triage.sql  0007_ships.sql
+                               0008_factory.sql
       dod.py                   # DoD extraction from a brief (required) + DoD row lint (warnings)
       policy.py                # role sets + switches from konstant.toml, fail-closed defaults
       transitions.py           # the job state machine (one table)
@@ -106,6 +114,9 @@ konstant-0.1.0/
               ship.py shiprules.py shiprepo.py   # `konstant ship`: the guard, konstant's own
               targets.py localtarget.py          # ship repository, the four targets, the
               postship.py                        # post-ship checks and rollback (§7.5)
+              loop.py steps.py health.py proc.py # the factory loop: run, plan, heartbeat and
+              budget.py reconcile.py unit.py     # stall, process files; budgets; interrupted
+                                                 # ships; the systemd --user unit (§7.6)
     harnesses/ base.py claude.py codex.py gemini.py dsh.py command.py   # adapters (§9)
                dsh_session.py dsh_gate/{index.ts,build.mjs,konstant-gate.mjs} # dsh session plugin (§6.6)
     jail.py                                  # bubblewrap jail for agent-written code
@@ -146,6 +157,11 @@ konstant-0.1.0/
                              # during the phase, drafts/ + home/) of the scenario writer (§7.3)
   var/factory/goals/<id>.toml  events.jsonl  notify.log  chat/<session>.json
                              # goal copies, factory events, chat cursors (machinery; §7.3)
+  var/factory/chat/inbox/<session>.jsonl  spool/  steps/  heartbeat.json  factory.pid  STOP
+  var/factory/systemd/konstant-factory-<id>.service
+                             # escalations posted into a chat session, undelivered events, the
+                             # loop's step logs, heartbeat, pid, kill switch, the generated unit
+                             # (§7.6); var/locks/factory.lock: one factory per workspace
   var/factory/ship/<slug>.git  # konstant's own ship repository per project (§7.5): what ships
   memory/                    # the memory VAULT (§7.4): <identity>/*.md, <identity>/facts/*.md,
                              # its own git repo memory/.git; machinery: no phase reads or writes it
@@ -200,6 +216,9 @@ supported, but the generated surfaces only apply inside it (stated in QUICKSTART
 | `memory_writes` (v5) | `id, path, pool, actor, role, kind(fact/note), state(stored/refused), reason, sha256, commit_sha, run, job_id, at` | every write konstant made to the memory vault and every write it refused (§7.4); append-only (triggers); `actor`/`role` from the token; a note is ATTRIBUTED while its file hashes to its latest `stored` row |
 | `ships` (v7) | `id, job_id, goal_id, target(github/branch/apply/command), branch, commit_sha, pre_ref, tip_sha, rollback_sha, state(shipping/shipped/failed/rolled_back/rollback_failed), post_json, reason, follow_up_id, actor, created_at, updated_at` | one row per ship attempt (§7.5), written by the board for the `factory` identity after its own guard; commit, base and target fixed, the state only moves forward, results recorded once (triggers); at most one `shipping` row, a job ships once |
 | `shipping_log` (v7) | `id, state(halted/resumed), reason, ship_id, actor, at` | append-only; the newest row says whether shipping is halted (a failed rollback writes `halted`; only the owner resumes) |
+| `budget_ledger` (v8) | `id, goal_id, job_id, kind(wall_s/attempts/task_runs/phases/tokens/cost/rollbacks), amount, ref UNIQUE, actor, at` | what the factory spent (§7.6), written by the `factory` identity only; append-only (triggers); `ref` makes each charge idempotent |
+| `escalations` (v8) | `id, goal_id, job_id, kind(BLOCKED/DECISION/BUDGET_STOP/LEAK/ROLLBACK_FAILED/HALTED), reason, event_id, delivered_at, delivered_to, acked_by, acked_at, created_at` | what needed the owner (§7.6); one OPEN row per (goal, job, kind) (unique partial index): a kind is told once until the owner acknowledges it; no delete, the rest fixed, delivered and acknowledged once (triggers) |
+| `factory_log` (v8) | `id, state(halted/resumed), reason, actor, at` | append-only; the newest row says whether the factory is halted (a notifier that could not deliver, an internal error); only the owner resumes |
 | `intake_cards` (v6) | `id, job_id, run, actor, role, tier, continuation(new/continuation), research_required, card_json, sha256, at` | the intake card of each run bound to a job (§6.2.1), recorded by owner or orchestrator tokens only (`POST /api/jobs/{ref}/intake-card`), the sha256 recomputed by the board; append-only (triggers); `job show` lists them |
 | `tokens` | `id, role, label, sha256 UNIQUE, active, created_at` | `label` is the actor identity (e.g. `orchestrator`, `verifier`; the factory identities `planner`, `dod-reviewer`, `scenario`, `researcher`, `factory`: §5) |
 
@@ -830,8 +849,8 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
 - A stopped `konstant intake` (SIGINT/SIGTERM) records a `BLOCKED` event and the intake state
   `refused` (unless `filed`), exit 128+signal.
 - **Events** (`factory/notify.py`): `var/factory/events.jsonl`, one redacted line per event;
-  escalations also to `[notify] kind` stdout / file (`notify.log`) / chat; outcomes (`FILED`) are
-  never pushed. Webhook, retries, acks and the halt on a failed delivery are wave L5-5.
+  escalations also to `[notify] kind`; outcomes (`FILED`) are never pushed. Webhook, retries,
+  acks, the chat inbox and the halt on a failed delivery: §7.6.
 - **doctor** rows `scenario writer` and `chat intake`.
 
 ### 7.5 Ship and rollback (wave L5-4; docs/LEVEL5.md 5)
@@ -913,8 +932,94 @@ identity (refused inside a task run and in the orchestrator chat). No model take
   passes the guard until `--as owner factory resume-shipping`. An unexpected error while the
   target moves halts shipping too (`HALTED`). Nothing is retried, forced, reset or deleted.
 - Exit codes: 0 shipped (checks passed), 1 refused (nothing moved), 3 rolled back, 4 rollback
-  failed or halted, 2 not found. `ship list`, `factory status` (shipping open/halted, ships by
-  state; the factory loop of L5-5 extends it).
+  failed or halted, 2 not found. `ship list`, `factory status` (§7.6).
+- **An interrupted ship** (the process killed between the board's `shipping` row and the end of
+  the target move, or before its post-ship checks) is reconciled by the factory loop
+  (`factory/reconcile.py`, §7.6), never left blocking every later ship.
+
+### 7.6 The factory loop, budgets, the notifier, the view (wave L5-5; docs/LEVEL5.md 6)
+
+`konstant factory run [GOAL..] [--until-idle | --once] [--dry-run]` (`factory/loop.py`) is the
+dark factory: code only, no model decides. `factory start` runs the same loop in the background.
+
+- **One per workspace** (`factory/proc.py`): the loop holds `var/locks/factory.lock` (flock) for
+  its whole life; a second `factory run|start` exits 2 `a factory already runs (pid N)`. The pid
+  file is trusted only for a live `konstant factory run` whose cwd is this workspace (F-23).
+- **A tick**: (1) the kill switch `var/factory/STOP` (`factory stop`) or SIGTERM/SIGINT: start
+  nothing new, let the running steps finish (graceful drain; a second signal SIGTERMs them), exit
+  0; while STOP exists no factory starts (`factory resume` clears it). (2) A halt (the board's
+  `factory_log`) or an undelivered event in `var/factory/spool/`: SIGTERM the running steps but a
+  ship, drain, exit 4 `notifier failed: factory halted`. (3) Every in-flight ship reconciled
+  (below). (4) The board read and planned (`factory/steps.py`, pure decisions over board records:
+  the goals the loop considers, their `/api/factory/goals/<slug>` views, every job record with its
+  trail, the ships, the open escalations, the shipping halt). (5) The actions run.
+- **Actions** (each an idempotent board transition or a konstant verb with its own guards):
+  `approve` (a filed job left in `waiting_approval`), `intake` (`konstant intake GOAL`; also for a
+  goal cut off in `planning`), `author` (`holdout author JOB`: a queued job whose set was worn,
+  3.6 step 6), `attempt` (`task run TITLE --job N --type T`: claim, clone, phases, close, verify),
+  `verify` (a closed job with no verdict after its close), `ship` (`konstant ship JOB`), `exhaust`
+  (a job that used its `max_attempts`: `POST /api/factory/jobs/{ref}/exhausted`, which counts the
+  attempts from the board's own ledger, -> `blocked` + BLOCKED), `budget` (a goal's limit
+  reached: paused + BUDGET_STOP), `escalate` (BLOCKED for a `blocked` job, a BLOCKED verify, a
+  cut-off filing; LEAK for a verify that found a canary; DECISION for a DONE.md DISPUTE or a job
+  that waits for the owner's `holdout add`), `done` (every job of the goal shipped, or rolled back
+  with a follow-up whose work shipped: `POST /api/factory/goals/{ref}/done`, GOAL_DONE). A job with
+  an open escalation is left alone until the owner acts.
+- **Order**: steps are child processes of `bin/konstant` verbs (logs in `var/factory/steps/`);
+  at most `cap` model steps (intake, author, attempt) at once, `cap` = `triage/tiers.py cap_of`
+  (`[harness] max_concurrency` // `max_parallel`); one ship at a time; jobs of one project
+  serially (a job starts only when no other job of its project holds a clone that is neither
+  shipped nor escalated, and its `after` job's work stands on the target: shipped, or rolled back
+  with a follow-up whose work shipped), so every ship is a fast-forward of its clone's base. A
+  DoD check that ends BLOCKED is another attempt (a verdict FAIL at the cycle cap); one with a
+  DISPUTE row is an owner decision. A job whose clone another process holds locked is waited for,
+  never attempted (so a held lock never burns attempts). Only goal jobs are driven.
+- **Budgets** (`factory/budget.py`, table `budget_ledger` in `0008_factory.sql`, append-only,
+  each charge idempotent by `ref`): `attempts` and `task_runs` are charged BEFORE a job's run
+  starts (a run killed with the host still counts); `wall_s` and `phases` from the finished run's
+  manifests, `tokens` and `cost` from `Adapter.usage(log)` of adapters that `measures()` them
+  (claude with `--output-format json|stream-json` in its command; the others none). A token or
+  cost limit on a harness that cannot measure it refuses the start (exit 2 `budget max_cost_usd
+  cannot be measured on harness command`). The goal's `max_task_runs`, `wall_clock`, `max_tokens`
+  and `max_cost_usd` stop it (paused, BUDGET_STOP, nothing killed mid-phase); `max_rollbacks` stays
+  the ship step's rule, `max_jobs` the filing's. An acknowledged escalation opens a fresh window
+  for the limit that raised it (a goal's ledger after its last acked BUDGET_STOP, a job's attempts
+  after its last acked BLOCKED).
+- **Escalations and the notifier** (`factory/notify.py`, table `escalations`): one OPEN row per
+  (goal, job, kind) (a unique partial index); a repeat is recorded in `events.jsonl` as
+  `suppressed` and not delivered until the owner acknowledges the open one (`factory ack ID`,
+  owner). Kinds `stdout` (stderr), `file` (`notify.log`), `webhook` (POST of `{event, goal, job,
+  display_id, reason, at, board_url}` and nothing else, https or http to a listed loopback host,
+  `[notify] retries`), `chat` (appended to `var/factory/chat/inbox/<session>.jsonl` of the session
+  the goal came from, the `_workspace` inbox for a file goal; `chat turn` shows it at the owner's
+  next message there). A delivery that fails is spooled (`var/factory/spool/<id>.json`) and the
+  loop halts on a non-empty spool; the halt itself goes to stderr and `notify.log` whatever the
+  kind. `factory resume` (owner) redelivers the spool and lifts the halt. `notify test` sends one
+  TEST event.
+- **Interrupted ships** (`factory/reconcile.py`), while no ship holds the ship lock: a `shipping`
+  row whose target is still at its `pre` -> `failed` (the job ships again); whose target is at the
+  shipped commit (github: a merge whose tree is it) -> the local half finished (the local target
+  moved, the worktree rewritten), `shipped`, then the post-ship checks as after a ship; a `shipped`
+  row without checks whose target is at its tip -> the checks; at a commit on the tip with the
+  pre-ship tree -> `rolled_back` + the follow-up; anything else, or an apply/command target it
+  cannot read -> the row ended (`failed` / `rollback_failed`), ALL shipping halted, HALTED.
+- **Health** (`factory/health.py`): `var/factory/heartbeat.json` every tick (pid, tick, state,
+  running steps, ready actions, progress time, the goals' states); older than three ticks the
+  factory is `stale` (status view, `doctor` WARN). Progress = a change of the board's ships, goals
+  or job states, or new output of a running step (its log, its run's phase files); none for
+  `[factory] stall_after_s` while work is ready or running -> BLOCKED `factory stalled: ...`.
+  An internal error halts the factory, escalates HALTED, exit 5.
+- **View** (`board/api/factory.py`, any token reads): `GET /api/factory/status`, `/goals`,
+  `/goals/{ref}` (budget used and limit per kind, jobs with attempts left and sealed-holdout
+  counts, ships, escalations, the last tick), `/escalations`; the factory identity writes
+  escalations, ledger rows, the job budget stop, goal done and the halt (owner resumes). The Factory
+  tab of the static view renders them with `textContent` only.
+- **Long-lived** (`factory/unit.py`): `factory install-unit` writes
+  `var/factory/systemd/konstant-factory-<id>.service` (ExecStart `bin/konstant factory run`,
+  KillMode=mixed so systemd's SIGTERM drains the loop, Restart=on-failure, no restart on exit 2
+  or 4) and prints how to link and enable it; konstant never runs systemctl.
+- **Refused** inside a task run and in the orchestrator chat (`factory status` reads anywhere).
+  `doctor` rows `factory` (running / stale / halted with a spool / the kill switch) and `notifier`.
 
 ### 7.4 Memory (wave L5-M; docs/CONCEPTS.md "Memory")
 
@@ -1416,7 +1521,11 @@ Global: `--as ROLE`, `--json`, `--config PATH`; env `KONSTANT_HOME`. Exit 0 ok, 
 | `holdout list ID` / `holdout check ID` / `holdout show ID HID` | `--control` (check) | commitments and states / commitment + parse (+ negative control) / one file from the store; check and show refused inside a task run |
 | `holdout author ID` | `--harness` | run the scenario writer for one job and seal its drafts (§7.3; exit 4 refused twice, 2 setup) |
 | `ship JOB` / `ship list` | `--dry-run --approve-decision` | ship the verified commit as `factory`: both guards, the target, post-ship checks, rollback (§7.5; exit 0 shipped, 1 refused, 3 rolled back, 4 rollback failed / halted) |
-| `factory status` / `factory resume-shipping` | | shipping open or halted and the ships by state / lift the halt (owner) |
+| `factory run [GOAL..]` | `--until-idle --once --dry-run --harness` | the factory loop in the foreground (§7.6; --until-idle exit 0 every goal done, 4 an escalation or a halt, 2 refused before the start, 5 internal error) |
+| `factory start` / `stop` / `resume` | `--now --wait` (stop) | the loop in the background (one per workspace: exit 2 when one runs) / the kill switch (drain, then exit) / clear it, redeliver the spool and lift a halt (owner) |
+| `factory status` / `factory escalations` / `factory ack ID` | `--open` | the loop, halt, shipping, goals, escalations, last events / the escalations / acknowledge one (owner) |
+| `factory resume-shipping` / `factory install-unit` | | lift the shipping halt (owner) / write (never enable) a systemd --user unit |
+| `notify test` | `--kind --url` | deliver one TEST event through the notifier |
 | `goal add FILE\|-` | `--from-chat --session` | file a goal (owner), or propose one from the owner's chat (§7.3) |
 | `goal list` / `goal show ID` / `goal pause\|resume\|cancel ID` | `--status` (list) | goals, one goal with its jobs, status changes (owner; pause also factory) |
 | `intake GOAL` | `--harness` | planner -> DoD review -> filing -> approval -> scenario writer (§7.3; exit 0, 3 refused, 4 authoring BLOCKED, 2 setup) |
@@ -1505,14 +1614,21 @@ store = "var/holdout"          # or an absolute path outside the workspace (a se
 writer_harness = ""            # the scenario writer's harness ("" = [harness]; never command)
 writer_model = ""              # its model ("" = the same: one model for every role, Q1)
 
-[factory]                      # level-5 intake (§7.3)
+[factory]                      # level-5 intake (§7.3) and the loop (§7.6)
 goal_roles = ["owner"]         # + "orchestrator": goal add --from-chat from the owner's chat
 defaults = { max_attempts = 3, wall_clock = "0", max_task_runs = 0, max_jobs = 0,
              max_rollbacks = 0, max_tokens = 0, max_cost_usd = 0, ship_target = "branch",
              ship_branch = "main", holdout_author = "agent" }   # what a goal file does not name
+tick_s = 10                    # seconds between the loop's ticks (1-3600)
+stall_after_s = 3600           # no progress this long while work is ready -> BLOCKED (stall)
 
-[notify]
-kind = "stdout"                # stdout | file | chat (the dsh orchestrator chat; webhook: L5-5)
+[notify]                       # where escalations go (§7.6); a failed delivery halts the factory
+kind = "stdout"                # stdout | file | webhook | chat (the session the goal came from)
+url = ""                       # webhook: https, or http to a loopback host in url_hosts
+url_hosts = []                 # loopback hosts a plain-http webhook may name
+retries = 2                    # more tries before the event is spooled and the factory halts
+retry_s = 1
+timeout_s = 10
 
 [ship]                         # auto-ship (§7.5); target/branch: the goal, else [factory] defaults
 decision_types = ["infra"]     # jobs of these types never ship unattended (Q4)

@@ -9,9 +9,11 @@ tool result) when `[notify] kind = "chat"`. Deterministic, no model:
    the goal copy, status active, source chat); anything else withdraws it. So a goal starts only
    from a message the owner sent in that session, right after the one-line confirmation (4.0
    step 2); text inside a phase log, a web page or a file is never such a message.
-2. New escalations of this session's goals (and of goals filed from a file) since the session's
-   cursor (var/factory/chat/<session>.json) become lines shown at the start of the turn; new
-   outcomes are summed up in one line (details on request: `konstant goal show`).
+2. The escalations the notifier posted into this session (`[notify] kind = "chat"`: the inbox
+   var/factory/chat/inbox/<session>.jsonl of the session the goal came from, plus the `_workspace`
+   inbox of file goals) since the session's cursor (var/factory/chat/<session>.json) become lines
+   shown at the start of the turn; new outcomes of its goals are summed up in one line (details on
+   request: `konstant goal show`).
 3. A typed task (the classifier) without an explicit `[type:..]` or `[job:..]` tag becomes the
    INTAKE block: the orchestrator turns it into a goal proposal instead of doing the work in the
    chat. A tagged task keeps the level-4 gate.
@@ -104,12 +106,16 @@ def turn(cfg, client, session: str, text: str) -> dict:
     mine = {g["slug"] for g in client.get("/api/goals")["goals"]
             if g.get("session") == session or g.get("source") == "file"}
     seen = _read_cursor(cfg.home, session)
+    # escalations: what the notifier POSTED into this session (the goal came from it) and into
+    # the workspace inbox (a goal filed from a file, an event of no goal), once each
+    posted = notify.read_inbox(cfg.home, session) + notify.read_inbox(cfg.home,
+                                                                     notify.WORKSPACE_INBOX)
+    for e in sorted((e for e in posted if e.get("id", 0) > seen), key=lambda e: e["id"]):
+        where = f" job {e.get('display_id') or e.get('job')}" if e.get("job") else ""
+        out["lines"].append(f"konstant {e['event']}: goal {e.get('goal') or '-'}{where}: "
+                            f"{e['reason']}")
     new = [e for e in notify.read_events(cfg.home) if e.get("id", 0) > seen
            and e.get("goal") in mine]
-    for e in new:
-        if e["kind"] == "escalation":
-            where = f" job {e.get('display_id') or e.get('job')}" if e.get("job") else ""
-            out["lines"].append(f"konstant {e['event']}: goal {e['goal']}{where}: {e['reason']}")
     outcomes = [e for e in new if e["kind"] == "outcome"]
     if outcomes:
         out["lines"].append("konstant outcomes since your last turn: " + "; ".join(

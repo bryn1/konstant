@@ -107,12 +107,52 @@
     $("mem-detail").replaceChildren(box);
   }
 
+  // Factory (read-only, docs/LEVEL5.md 6.4): the loop, goals with their budget and jobs (attempts
+  // left), ships, escalations and the last events. Holdouts appear only as counts.
+  function kv(budget) {
+    return Object.keys(budget).filter((k) => budget[k].limit || k === "max_attempts")
+      .map((k) => k + " " + (budget[k].used === undefined ? "" : budget[k].used + "/") + budget[k].limit).join(", ");
+  }
+
+  function goalBox(g) {
+    const box = el("div", "goal");
+    box.append(el("h3", "", g.goal + " - " + g.status + " (intake " + g.intake + ")"),
+               el("p", "muted", "budget: " + kv(g.budget) + (g.exhausted.length ? " - EXHAUSTED: " + g.exhausted.join("; ") : "")));
+    const ul = el("ul");
+    g.jobs.forEach((j) => ul.append(el("li", "", j.display_id + "  " + j.status + "  attempts left "
+      + j.attempts_left + "/" + j.max_attempts + "  holdouts sealed " + j.holdouts_sealed
+      + (j.ship ? "  ship " + j.ship.id + " " + j.ship.state : "") + "  " + j.title)));
+    box.append(ul);
+    g.ships.forEach((s) => box.append(el("p", "muted", "ship " + s.id + " " + s.state + " " + s.target
+      + " " + (s.branch || "") + " " + (s.commit_sha || "").slice(0, 12) + (s.rollback_sha ? " rollback " + s.rollback_sha.slice(0, 12) : ""))));
+    return box;
+  }
+
+  async function factory() {
+    const st = await api("/api/factory/status");
+    const goals = await api("/api/factory/goals");
+    const f = st.factory;
+    $("fac-state").textContent = "factory " + f.state + (f.pid ? " (pid " + f.pid + ")" : "")
+      + (f.last_tick ? " - last tick " + f.last_tick : "") + (f.state === "stale" ? " - STALE: no heartbeat for three ticks" : "")
+      + (st.halted ? " - HALTED: " + st.halt.reason : "") + " - shipping " + st.shipping
+      + " - " + st.open_escalations + " open escalation(s)" + (st.spooled ? " - " + st.spooled + " undelivered" : "");
+    $("fac-goals").replaceChildren(...(goals.goals.length ? goals.goals.map(goalBox) : [el("p", "muted", "No goals yet.")]));
+    const esc = [];
+    goals.goals.forEach((g) => g.escalations.forEach((e) => esc.push(e)));
+    $("fac-esc").replaceChildren(...esc.map((e) => el("li", e.open ? "" : "muted", e.id + "  " + e.kind + "  "
+      + (e.goal || "-") + (e.display_id ? " job " + e.display_id : "") + "  " + (e.open ? "open" : "acknowledged by " + e.acked_by) + ": " + e.reason)));
+    $("fac-events").replaceChildren(...st.events.slice().reverse().map((e) => el("li", "", e.at + "  " + e.event
+      + "  " + (e.goal || "-") + (e.display_id ? " job " + e.display_id : "") + ": " + e.reason + (e.suppressed ? " (told before)" : ""))));
+  }
+
   function view(name) {
-    const mem = name === "memory";
-    $("jobs-view").hidden = mem; $("memory-view").hidden = !mem;
-    $("tab-jobs").setAttribute("aria-pressed", String(!mem));
-    $("tab-memory").setAttribute("aria-pressed", String(mem));
-    if (mem) recentNotes().catch((e) => { $("error").textContent = e.message; });
+    ["jobs", "memory", "factory"].forEach((v) => {
+      $(v + "-view").hidden = v !== name;
+      $("tab-" + v).setAttribute("aria-pressed", String(v === name));
+    });
+    const fail = (e) => { $("error").textContent = e.message; };
+    if (name === "memory") recentNotes().catch(fail);
+    if (name === "factory") factory().catch(fail);
   }
 
   async function load() {
@@ -132,6 +172,7 @@
   $("forget").addEventListener("click", () => { store.clear(); token = ""; showLogin(); });
   $("tab-jobs").addEventListener("click", () => view("jobs"));
   $("tab-memory").addEventListener("click", () => view("memory"));
+  $("tab-factory").addEventListener("click", () => view("factory"));
   $("mem-search").addEventListener("submit", (ev) => {
     ev.preventDefault();
     const q = $("mem-q").value.trim();

@@ -14,8 +14,9 @@ in every one of them. A phase may never write any of these paths, whatever the h
     and the other bookkeeping files under var/,
   - any .git/ directory (a .git/config or hook edit turns a later git command into arbitrary
     execution; shells that must commit get .git/config and .git/hooks read-only instead),
-  - var/factory/ (the goal copies, the factory's events and the chat cursors: docs/LEVEL5.md 2.3;
-    a phase that edited its goal or an event would steer the factory),
+  - var/factory/ (the goal copies, the factory's events, the chat cursors and inboxes, the
+    notifier spool, the loop's heartbeat, pid and kill switch: docs/LEVEL5.md 2.3, 6; a phase that
+    edited its goal or an event would steer the factory, one that wrote STOP would stop it),
   - memory/ (the memory vault, its own git repository; only the board writes it, attributed to
     the identity whose token asked: konstant/memory/) and var/memory/ (its recall index),
   - var/research/ (the closed researcher's work: its raw pages, transcripts and the summary

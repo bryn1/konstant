@@ -123,11 +123,17 @@ DEFAULTS: dict = {
         "defaults": {"max_attempts": 3, "wall_clock": "0", "max_task_runs": 0, "max_jobs": 0,
                      "max_rollbacks": 0, "max_tokens": 0, "max_cost_usd": 0,
                      "ship_target": "branch", "ship_branch": "main", "holdout_author": "agent"},
+        # the factory loop (factory/loop.py): seconds between ticks, and how long it may make no
+        # progress while work is ready before it escalates a stall (6.4)
+        "tick_s": 10,
+        "stall_after_s": 3600,
     },
-    # where the factory's escalations go (docs/LEVEL5.md 6.3): stdout, file (var/factory/
-    # notify.log) or chat (the gated dsh session shows them at the owner's next turn, 4.0);
-    # webhook arrives with the factory loop (wave L5-5)
-    "notify": {"kind": "stdout"},
+    # where the factory's escalations go (docs/LEVEL5.md 6.3; factory/notify.py): stdout, file
+    # (var/factory/notify.log), webhook (POST to `url`: https, or http to a loopback host listed
+    # in url_hosts) or chat (the orchestrator session the goal came from shows them at the
+    # owner's next turn, 4.0). A delivery that fails after `retries` halts the factory
+    "notify": {"kind": "stdout", "url": "", "url_hosts": [], "retries": 2, "retry_s": 1,
+               "timeout_s": 10},
     # auto-ship (docs/LEVEL5.md 5; factory/ship.py). decision_types: owner decisions at ship time
     # (5.4; owner decision Q4): jobs of these types never ship unattended. The target and branch
     # come from the goal (or [factory] defaults ship_target / ship_branch); the rest fills what a
@@ -275,7 +281,7 @@ def _validate(data: dict, path) -> None:
 
 
 GOAL_ROLES = ("owner", "orchestrator")
-NOTIFY_KINDS = ("stdout", "file", "chat")
+NOTIFY_KINDS = ("stdout", "file", "webhook", "chat")
 
 
 def check_factory(data: dict, path) -> None:
@@ -290,9 +296,22 @@ def check_factory(data: dict, path) -> None:
         goal_mod.check_defaults(data["factory"]["defaults"])
     except goal_mod.GoalError as exc:
         raise ConfigError(f"{path}: [factory] defaults: {exc}") from None
-    if data["notify"]["kind"] not in NOTIFY_KINDS:
-        raise ConfigError(f"{path}: [notify] kind = {data['notify']['kind']!r}: one of "
-                          f"{', '.join(NOTIFY_KINDS)} (webhook arrives with the factory loop)")
+    n = data["notify"]
+    if n["kind"] not in NOTIFY_KINDS:
+        raise ConfigError(f"{path}: [notify] kind = {n['kind']!r}: one of "
+                          f"{', '.join(NOTIFY_KINDS)}")
+    if n["kind"] == "webhook" or n["url"]:
+        from konstant.factory.notify import check_url
+        why = check_url(n["url"], n["url_hosts"])
+        if why:
+            raise ConfigError(f"{path}: [notify] {why}")
+    for key, lo, hi in (("retries", 0, 10), ("retry_s", 0, 300), ("timeout_s", 1, 300)):
+        if not lo <= n[key] <= hi:
+            raise ConfigError(f"{path}: [notify] {key} = {n[key]}: must be {lo}-{hi}")
+    f = data["factory"]
+    for key, lo, hi in (("tick_s", 1, 3600), ("stall_after_s", 1, 30 * 86400)):
+        if not lo <= f[key] <= hi:
+            raise ConfigError(f"{path}: [factory] {key} = {f[key]}: must be {lo}-{hi}")
     check_ship(data["ship"], path)
     w = data["holdout"]["writer_harness"]
     if w and w not in HARNESS_NAMES:

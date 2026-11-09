@@ -1,4 +1,6 @@
 """The harness adapter interface (docs/HARNESSES.md, DESIGN §9).
+reason: ONE interface every adapter implements (start, reach, confinement, usage); split, the
+contract would live in two places.
 
 konstant is the layer ABOVE the harness: it never runs a model loop itself, and the model belongs
 to the harness. An adapter says, for one agent CLI:
@@ -168,6 +170,14 @@ class Adapter:
     def preflight(self, workspace: Path, conf=None) -> str | None:
         """Why no phase may start on this harness (None: fine). Checked once per run, before
         the first phase (dsh: its composed layers, fail closed)."""
+        return None
+
+    def measures(self, hcfg: dict) -> bool:
+        """Its phase logs report tokens and cost (LEVEL5 6.2; else such a budget is refused)."""
+        return False
+
+    def usage(self, log: Path) -> dict | None:
+        """{"tokens", "cost_usd"} the harness reported in the log; None: nothing (no guess)."""
         return None
 
     def confine(self, argv: list, ph: Phase) -> list:

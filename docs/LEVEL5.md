@@ -11,7 +11,8 @@ built". Wave L5-T (triage tiers, the intake card, the closed web researcher and 
 an owner request of 2026-11-08) is in DESIGN.md §6.2.1, docs/CONCEPTS.md "Triage" and "L5-T as
 built". Wave L5-F1 fixed the first level-5 review ("L5-F1 as built"). Wave L5-4 (pillar C, ship,
 post-ship checks and rollback: section 5) is in DESIGN.md §7.5, docs/CONCEPTS.md "Ship" and "L5-4
-as built". The owner answered the open questions on 2026-11-01 (section 9); the
+as built". Wave L5-5 (pillar D, the factory loop, budgets, the notifier and the factory view:
+section 6) is in DESIGN.md §7.6, docs/CONCEPTS.md "Factory" and "L5-5 as built". The owner answered the open questions on 2026-11-01 (section 9); the
 sections they change say so. Everything else on this page is still the plan that the next
 releases build in the waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as
 each part lands, and this page stays the roadmap until level 5 is reached.
@@ -864,7 +865,7 @@ for what it lands.
 | **L5-R1** independent review 1 | review only, by someone who built none of L5-1..3: try to reach `verified` past holdouts, read the store from every harness, leak through feedback, transcripts, the board or run records, forge identities, weaken a generated DoD; one reproduction per finding | the adversarial fake harness, as the first two reviews did | L5-3 | report with severity per finding |
 | **L5-F1** fixes 1 | one red-then-green test per finding under `tests/review/` (`test_H<nn>_...`); zero open P0/P1 | — | L5-R1 | all A and B rows green again |
 | **L5-4** ship + rollback (**done**; see "L5-4 as built" below) | `ship`, `ship list`, targets `github` (push + PR create/merge, revert-PR rollback, the secret scan before a push, a `gh` stand-in for tests; Q2) / `branch` / `apply` / `command`, `[ship] decision_types = ["infra"]` (Q4), the guard on both sides, plumbing-only ref moves, post-ship checks with the regression set, rollback + tree check, the follow-up job after a rollback, halt on a failed rollback, decision rules (5.4), table `ships`, fake modes `ship-break`, `self-ship` | `gate/rules/common.py` git plumbing, `verify/probe.py` `run_line`, `verify/holdout.py`, `board/api/` | L5-F1 | C1-C12 |
-| **L5-5** factory loop + budgets + notifier + view | `factory run/start/stop/status/ack/resume-shipping`, `max_attempts` as the one required limit (Q5), `[notify] kind = "chat"` (4.0), `budget_ledger`, `Adapter.usage`, unmeasurable-budget refusal, `notify` (stdout/file/webhook), `escalations`, `board/api/factory.py`, the Factory tab | `gate/loop.py`, `cli/task_run.py`, `cli/board.py` (pid handling), `board/redact.py`, `board/static/` | L5-4 | D1, D1b, D2-D9 |
+| **L5-5** factory loop + budgets + notifier + view (**done**; see "L5-5 as built" below) | `factory run/start/stop/status/ack/resume-shipping`, `max_attempts` as the one required limit (Q5), `[notify] kind = "chat"` (4.0), `budget_ledger`, `Adapter.usage`, unmeasurable-budget refusal, `notify` (stdout/file/webhook), `escalations`, `board/api/factory.py`, the Factory tab | `gate/loop.py`, `cli/task_run.py`, `cli/board.py` (pid handling), `board/redact.py`, `board/static/` | L5-4 | D1, D1b, D2-D9 |
 | **L5-6** proof of level 5 | `examples/greeter/`, `tests/e2e/factory.sh` (P0-P6), CI job, QUICKSTART "level 5" section, the optional live run recorded | `tests/e2e/fresh_install.sh`, `tests/fixtures/fake_harness.py` | L5-5 | `E2E-FACTORY: PASS`; full `pytest`; release build CLEAN |
 | **L5-R2** independent review 2 | review of the whole factory (ship, rollback, budgets, loop, notifier, view) plus a regression run of F-01..F-35, G-01..G-07 and the L5-R1 findings, on a tarball installed the documented way | — | L5-6 | report |
 | **L5-F2** fixes 2 + release | red-then-green tests per finding, zero open P0/P1, CHANGELOG, a release build; tagging and publication are the owner's step | — | L5-R2 | full `pytest`, `E2E-FACTORY: PASS`, `RESULT: CLEAN` |
@@ -1277,6 +1278,78 @@ pinned binary with an environment it builds (H-01). Where it differs from sectio
   `tests/factory/test_confine_every_harness.py` (L5-2), C11-C12 `tests/ship/test_ship_github.py`;
   goal jobs, the follow-up loop and max_rollbacks in `tests/ship/test_ship_goal.py`; the guard
   units in `tests/ship/test_ship_units.py`.
+
+### L5-5 as built
+
+Landed as DESIGN.md §7.6 describes (code: `factory/loop.py`, `steps.py`, `health.py`, `proc.py`,
+`budget.py`, `reconcile.py`, `unit.py`, `notify.py`, `board/api/factory.py`, `cli/factory.py`,
+migration `0008_factory.sql`, the Factory tab in `board/static/`). It drives the existing verbs
+(`intake`, `holdout author`, `task run --job`, `verify`, `ship`) as child processes: no second
+phase engine, no second ship path. Where it differs from section 6, and why:
+
+- **The kill switch is sticky.** `factory stop` writes `var/factory/STOP`; the loop drains (its
+  running steps finish, nothing new starts) and exits 0, and no `factory run|start` starts while
+  the file exists (exit 2); `factory resume` clears it. A switch the next boot ignored would not
+  be a kill switch (the systemd unit restarts only on a crash). `factory resume` also redelivers
+  the spool and lifts a halt (owner). `--now` SIGTERMs the loop's process group.
+- **`[notify] kind = "chat"` posts into a per-session inbox** (`var/factory/chat/inbox/
+  <session>.jsonl` of the session the goal came from; `_workspace` for a file goal), which `chat
+  turn` (the konstant-gate plugin, on the owner's next message) shows; a dsh session that is idle
+  is not woken (dsh offers konstant no route into an idle session; 4.0 step 3 already says "at the
+  start of the owner's next turn"). Tested with a `konstant dsh` session on the stub dsh whose
+  `run:` action stands in for the plugin; the plugin side is the existing node test.
+- **Only the listed event kinds**: a stall is a `BLOCKED` of no goal (`factory stalled: no
+  progress for Ns ...`), an internal error a `HALTED` (exit 5). `notify test` sends a `TEST`
+  event straight to the notifier (never recorded as an escalation).
+- **Attempts are charged before a run starts** (`attempts` + `task_runs`, idempotent refs), so a
+  run killed with the host counts; `max_task_runs` counts the goal's job attempts (intake runs
+  once per goal and is not counted); `wall_s` is the sum of the runs' phase seconds.
+- **An acknowledged escalation opens a fresh window** for the limit that raised it (a goal's
+  ledger after its last acked BUDGET_STOP, a job's attempts after its last acked BLOCKED): goal
+  limits are immutable, so `goal resume` alone would only pause the goal again.
+- **A BLOCKED DoD check is another attempt** (with `tester-fails-3x` the check ends BLOCKED, "a
+  verdict FAIL after the cycle cap"; D1b's "BLOCKED after its 3rd attempt" needs it retried); a
+  DONE.md `DISPUTE` row is an owner `DECISION` and never retried (3.6 step 7).
+- **The job budget stop** is `POST /api/factory/jobs/{ref}/exhausted` (factory identity; the
+  board counts the attempts from its own ledger and moves `queued|claimed -> blocked`), a guarded
+  route beside the verb table, not a new verb (the table's verbs stay the level-4 set).
+- **Jobs of a project run serially, and a job `after` another waits until that job's work stands
+  on the target** (shipped, or rolled back with a follow-up whose work shipped), stricter than the
+  board's claim rule (`after` verified): a clone is made from the target, so starting earlier would
+  build on code that is not there (or that a rollback took out).
+- **A goal is `done`** (`POST /api/factory/goals/{ref}/done`, factory identity) when every job is
+  shipped, cancelled, or rolled back with a follow-up; a rollback without one (BLOCKED after
+  `max_rollbacks`) leaves the goal not done.
+- **Crash recovery from the board alone**: a filed job left `waiting_approval` is approved, a goal
+  cut off in `planning` is taken in again, a claimed job gets its next attempt, a closed job with
+  no verdict is verified, an interrupted ship is reconciled (`factory/reconcile.py`, the L5-4
+  known gap closed: target at `pre` -> `failed` and shipped again; at the shipped commit ->
+  `shipped` + the post-ship checks; a `shipped` row without checks -> the checks, or `rolled_back`
+  when the target already carries the rollback; anything else, and an apply or command target
+  whose move konstant cannot read -> the row ended, ALL shipping halted, HALTED). A goal cut off
+  while `filing` is not resumed (its run's OUT holds the backlog, but re-filing half a backlog
+  would need the filing window twice): BLOCKED for the owner.
+- **Schema** `0008_factory.sql`: `budget_ledger` (with a unique `ref`), `escalations` (a unique
+  partial index: one open row per (goal, job, kind)) and `factory_log` (the factory halt,
+  append-only like `shipping_log`; not in the plan's table list).
+- **Only goal jobs are driven**; a goal-less holdout job is still shipped by hand (`konstant
+  ship`). Concurrency is across projects only (`cap` from `[harness] max_concurrency`), as
+  section 11 keeps one run per project.
+- **Fake harness**: an honest coder whose task names a "command line" (the planner's B2) also
+  writes the `__main__` entry, so an honest goal can finish; `FAKE_HARNESS_BREAK_JOBS` limits
+  `ship-break` to the named jobs.
+- **Known gaps**: with `max_rollbacks = 0` (not limited) a producer that keeps breaking the
+  shipped state in a way its follow-up's DoD does not catch would get follow-up after follow-up,
+  bounded only by the optional limits (`max_task_runs`, `wall_clock`); `--until-idle` exits 4
+  while a job waits on a clone another process holds locked; an interrupted github ship leaves its
+  pushed `konstant/ship-<n>` branch (and an unmerged pull request) behind when it is reshipped.
+- **Not run live**: no model call, no systemd (the unit is generated and read, never linked or
+  started), no real webhook endpoint (a local HTTP server), no real dsh session (the stub dsh).
+- **Acceptance mapping**: D1, D1b, D2, D3, D8 `tests/factory/test_loop.py`; D4, D5, the chat kind
+  and the one-per-key rule `tests/factory/test_notify.py`; D6, D7, the kill switch, crash and
+  resume, stall, stale heartbeat, the unit `tests/factory/test_factory_process.py`; interrupted
+  ships `tests/factory/test_reconcile.py`; follow-up and worn set `tests/factory/
+  test_loop_rollback.py`; the planner's decisions `tests/factory/test_loop_units.py`.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

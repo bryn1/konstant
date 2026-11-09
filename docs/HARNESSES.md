@@ -90,6 +90,14 @@ bubblewrap, socat and the jail's private `/tmp` (else its sandbox is switched of
 and the jail is the boundary; `doctor` row `claude sandbox`). Without a working jail such a job
 refuses to start (exit 2).
 
+**Usage for budgets** (`Adapter.measures` / `Adapter.usage`, docs/LEVEL5.md 6.2): a factory goal
+with `max_tokens` or `max_cost_usd` runs only on harnesses whose phase logs report usage, else the
+factory refuses to start (`budget max_cost_usd cannot be measured on harness command`). Today only
+`claude` reports it, and only when its `[harness] command` has `--output-format json` (or
+`stream-json`): konstant reads the final `result` object's `usage` and `total_cost_usd`. codex,
+gemini, dsh and `command` report nothing konstant reads; `max_attempts`, `max_task_runs` and
+`wall_clock` work on every harness.
+
 Read "none" and "partial" literally. With `codex` and with `dsh` (inside konstant's jail) a phase
 cannot read the privileged tokens, but any command may run inside the file boundary and the
 network is open; without the jail a `dsh` phase can read `var/secrets/` and act on the board

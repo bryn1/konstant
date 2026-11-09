@@ -9,8 +9,7 @@ ship JOB              ship the exact commit the verifier passed (as the factory 
   --approve-decision  (--as owner) the owner decides an owner-decision refusal (5.4) for the
                       verified commit, then the factory ships it
 ship list             every ship with its state
-factory status        whether shipping is open or halted, and the ships so far
-factory resume-shipping   (owner) lift the halt a failed rollback set
+(`factory status` and `factory resume-shipping` live in cli/factory.py with the loop.)
 All of it is refused inside a task run and in the orchestrator chat: phases and the chat never
 ship (their tokens could not either).
 """
@@ -18,8 +17,8 @@ from __future__ import annotations
 
 import sys
 
-from konstant.cli.main import EXIT_FAIL, EXIT_OK, EXIT_USAGE
-from konstant.client import ClientError, in_chat, in_task
+from konstant.cli.main import EXIT_FAIL, EXIT_OK
+from konstant.client import in_chat, in_task
 
 
 def _refused_here(what: str) -> bool:
@@ -87,34 +86,6 @@ def cmd_list(ctx) -> int:
     return EXIT_OK
 
 
-def cmd_status(ctx) -> int:
-    c = ctx.client("viewer")
-    try:
-        sh = c.get("/api/factory/shipping")
-        ships = c.get("/api/ships")["ships"]
-    except ClientError as exc:
-        print(f"konstant: {exc.message}", file=sys.stderr)
-        return EXIT_USAGE
-    states = {}
-    for s in ships:
-        states[s["state"]] = states.get(s["state"], 0) + 1
-    res = {**sh, "ships": states}
-    ctx.out(res, f"shipping {sh['shipping']}" + (f" since {sh['since']}: {sh['reason']}"
-                                                 if sh["shipping"] == "halted" else "")
-            + ("; ships: " + ", ".join(f"{k} {v}" for k, v in sorted(states.items()))
-               if states else ""))
-    return EXIT_OK
-
-
-def cmd_resume(ctx) -> int:
-    if _refused_here("factory resume-shipping"):
-        return EXIT_FAIL
-    res = ctx.client(ctx.args.as_role or "owner").post(
-        "/api/factory/shipping", {"action": "resume", "reason": "resumed by the owner"})
-    ctx.out(res, f"shipping {res['shipping']}")
-    return EXIT_OK
-
-
 def register(sub, leaf) -> None:
     s = sub.add_parser("ship", parents=[leaf], help="level 5: ship a verified job's exact commit, "
                        "check the shipped state, roll it back on failure; `ship list`: the ships")
@@ -124,14 +95,6 @@ def register(sub, leaf) -> None:
     s.add_argument("--approve-decision", action="store_true", help="(--as owner) ship past an "
                    "owner decision (5.4) for the verified commit")
     s.set_defaults(func=_dispatch)
-    f = sub.add_parser("factory", help="level 5: the factory's shipping state")
-    fs = f.add_subparsers(dest="factory_cmd", metavar="VERB")
-    fs.required = True
-    p = fs.add_parser("status", parents=[leaf], help="shipping open or halted, ships by state")
-    p.set_defaults(func=cmd_status)
-    p = fs.add_parser("resume-shipping", parents=[leaf], help="(owner) lift the halt a failed "
-                      "rollback set")
-    p.set_defaults(func=cmd_resume)
 
 
 def _dispatch(ctx) -> int:

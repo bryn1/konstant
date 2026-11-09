@@ -369,9 +369,9 @@ def cmd_doctor(ctx) -> int:
         from konstant.memory.doctor import rows as memory_rows
         for row in memory_rows(cfg):
             rep.add(*row)
-        from konstant.factory.doctor import intake_rows, rows as factory_rows
+        from konstant.factory.doctor import intake_rows, loop_rows, rows as factory_rows
         from konstant.triage.doctor import rows as triage_rows
-        for row in factory_rows(cfg) + intake_rows(cfg) + triage_rows(cfg):
+        for row in factory_rows(cfg) + intake_rows(cfg) + loop_rows(cfg) + triage_rows(cfg):
             rep.add(*row)
     counts = {s: sum(r["status"] == s for r in rep.rows) for s in ("PASS", "WARN", "FAIL", "INFO")}
     summary = (f"doctor: {counts['PASS']} PASS, {counts['WARN']} WARN, {counts['FAIL']} FAIL, "

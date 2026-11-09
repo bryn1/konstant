@@ -45,6 +45,9 @@ if [ "${1:-}" = "--one-line" ]; then ONE_LINE=1; shift; fi
 cleanup() {
   local rc=$?
   [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null || true
+  if [ -n "$WS" ] && [ -x "$WS/bin/konstant" ] && [ -f "$WS/var/factory/factory.pid" ]; then
+    "$WS/bin/konstant" factory stop --now --wait 30 >/dev/null 2>&1 || true
+  fi
   if [ -n "$WS" ] && [ -x "$WS/bin/konstant" ] && [ -f "$WS/var/board.pid" ]; then
     "$WS/bin/konstant" board stop >/dev/null 2>&1 || true
   fi
@@ -277,6 +280,31 @@ else
   run "$K" ship list
   want_rc 0; want_out 'shipped'
   echo "projects/greeter main = $C3 (the commit the holdouts ran on)"
+fi
+
+step "level 5: the factory loop (one per workspace), its kill switch, the unit file, the notifier"
+if ! "$WS/.venv/bin/python" -c 'import sys; from konstant import jail; sys.exit(0 if jail.available() else 1)'; then
+  echo "SKIPPED: bubblewrap cannot run here (the factory refuses to start without konstant's jail)"
+else
+  run "$K" factory start
+  want_rc 0; want_out 'factory started \(pid [0-9]+\)'
+  run "$K" factory start
+  want_rc 2; want_out 'a factory already runs \(pid [0-9]+\)'
+  run "$K" --json factory status
+  want_rc 0; [ "$(json_field state)" = running ] || fail "the factory is not running"
+  run "$K" factory stop
+  want_rc 0; want_out 'factory stopped'
+  run "$K" factory status
+  want_rc 0; want_out '^factory stopped'
+  run "$K" factory start
+  want_rc 2; want_out 'kill switch is set'
+  run "$K" factory resume
+  want_rc 0
+  run "$K" factory install-unit
+  want_rc 0; want_out 'ExecStart=.*/bin/konstant factory run'; want_out 'never runs systemctl'
+  run "$K" notify test --kind file
+  want_rc 0; want_out 'delivered to file'
+  grep -q '^TEST -: konstant notify test' "$WS/var/factory/notify.log" || fail "notify.log lacks the test event"
 fi
 
 # --- offline install: a wheel dir made by `pip download`, pip's network blocked (REVIEW F-17) -----

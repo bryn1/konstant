@@ -58,6 +58,37 @@ def rows(cfg) -> list:
     return out
 
 
+def loop_rows(cfg) -> list:
+    """`factory` (the loop: running, stale heartbeat, halted, kill switch) and `notifier`
+    (docs/LEVEL5.md 6.3, 6.4)."""
+    from konstant.factory import notify, proc
+    st = proc.state(cfg.home, cfg.data["factory"]["tick_s"])
+    hb = st["heartbeat"] or {}
+    spool = notify.spooled(cfg.home)
+    if spool:
+        row = ("FAIL", "factory", f"{len(spool)} undelivered escalation(s) in var/factory/spool/:"
+               " the factory is halted until `konstant --as owner factory resume` delivers them")
+    elif st["state"] == "stale":
+        row = ("WARN", "factory", f"the loop (pid {st['pid']}) wrote no heartbeat for three ticks"
+               f" (last {hb.get('at', '?')}): it is hung or overloaded; `factory status`")
+    elif st["state"] in ("running", "draining"):
+        row = ("PASS", "factory", f"the loop runs (pid {st['pid']}, {st['state']}, last tick "
+               f"{hb.get('at', '?')})")
+    else:
+        row = ("INFO", "factory", "the loop is not running (`konstant factory start`, or the "
+               "unit `factory install-unit` writes)" + ("; the kill switch is set: `factory "
+                                                        "resume` clears it" if st["stop"] else ""))
+    n = cfg.data["notify"]
+    where = {"stdout": "the factory process's stderr", "file": "var/factory/notify.log",
+             "webhook": f"POST to {n['url'] or '?'}",
+             "chat": "the orchestrator session the goal came from"}.get(n["kind"], n["kind"])
+    why = notify.check_url(n["url"], n["url_hosts"]) if n["kind"] == "webhook" else None
+    note = ("FAIL", "notifier", why) if why else (
+        "PASS", "notifier", f"escalations go to {where} ({n['retries']} retr(y/ies)); one per "
+        "(goal, job, event) until `factory ack`; a failed delivery halts the factory")
+    return [row, note]
+
+
 def intake_rows(cfg) -> list:
     """The level-5 intake rows (wave L5-3): the scenario writer's harness and the chat intake."""
     return [writer_row(cfg), intake_row(cfg)]

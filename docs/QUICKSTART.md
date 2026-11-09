@@ -161,6 +161,25 @@ With dsh you can also drive the loop yourself from dsh's own web UI, tui or head
 message, runs the DoD loop at the end of the turn and, for a job (`[job:N]` in the message),
 closes it and runs `konstant verify` ([DSH.md](DSH.md)).
 
+## 5b. Level 5: let the factory run a goal
+
+A goal says what you want and its limits (`max_attempts = 3` per job is the only required one);
+the factory plans the jobs, has their DoD reviewed and holdout scenarios sealed, runs them, ships
+what the verifier passed and tells you only what needs you ([CONCEPTS.md](CONCEPTS.md), "Goals
+and intake", "Ship", "Factory"):
+
+```sh
+bin/konstant --as owner goal add goals/greeter.toml
+bin/konstant factory start                 # one loop per workspace, in the background
+bin/konstant factory status                # the loop, goals, budgets, ships, escalations
+bin/konstant factory stop                  # drain and stop; `factory resume` before a new start
+```
+
+Where escalations go is `[notify] kind` (`stdout`, `file`, `webhook`, or `chat`: your dsh
+orchestrator session, [DSH.md](DSH.md)); `bin/konstant notify test` checks it. To keep the factory
+running across restarts, `bin/konstant factory install-unit` writes a systemd user unit and prints
+how to enable it (konstant never enables it for you).
+
 ## 6. Memory
 
 Every harness konstant starts gets a memory server (`bin/konstant mcp memory`; tools `kb_recall`,

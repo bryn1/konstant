@@ -33,7 +33,8 @@ with the docstring the holdout regression reads, instead of greet.py):
                           `self-ship: WROTE|DENIED ...` line per attempt; then it is honest
 Ship modes (docs/LEVEL5.md 5.6, wave L5-4): honest work that passes the verifier, plus
   ship-break               the coder also deletes README.md (the visible DoD and the holdouts do
-                          not read it; a post-ship probe `test -f {workdir}/README.md` does)
+                          not read it; a post-ship probe `test -f {workdir}/README.md` does);
+                          FAKE_HARNESS_BREAK_JOBS=2,5 limits it to those board jobs
   ship-extra               the coder also writes FAKE_HARNESS_EXTRA (a project-relative path)
                           with FAKE_HARNESS_EXTRA_TEXT (default "extra") and commits it: an
                           AGENTS.md, a CI workflow, a token-shaped string, ...
@@ -43,7 +44,8 @@ Memory mode (wave L5-M, docs/CONCEPTS.md "Memory"):
                           `konstant memory store` and recalls it; one `memory: ...` line per
                           attempt into its phase log; then it is honest
 Level-5 intake modes (docs/LEVEL5.md 4.2): the `planner` writes OUT/BACKLOG.md with two code jobs
-(B1 greet(name), B2 a CLI after B1) and their briefs (PROBE lines on {workdir}); the reviewer of
+(B1 greet(name), B2 a CLI after B1) and their briefs (PROBE lines on {workdir}); a coder whose
+prompt names a "command line" (B2) also writes the `__main__` entry; the reviewer of
 an intake run writes DOD-verdict.md with one `B<n> | SHIP | ...` line per row; the
 `scenario-writer` writes two drafts (a proof with a held-out name, a regression) into its
 KONSTANT-DRAFTS dir and prints one `scenario-sees: ...` line per thing it tried to read
@@ -388,6 +390,11 @@ def module_body() -> str:
     doc = '"""greeter: small greetings."""\n\n\n' if MODULE == "greeter" else ""
     ret = '"hello world"' if MODE == "overfit" else 'f"hello {name}"'
     body = f'{doc}def greet(name="world"):\n    return {ret}\n'
+    task = PROMPT.split("## The task\n", 1)[1].split("\n", 1)[0] if "## The task\n" in PROMPT \
+        else ""
+    if "command line" in task.lower():         # the planner's B2: a CLI entry (factory loop)
+        body += ('\n\nif __name__ == "__main__":\n    import sys\n'
+                 '    print(greet(*sys.argv[1:2]))\n')
     if MODE == "leak":
         body += f"# {os.environ.get('FAKE_HARNESS_CANARY', 'no-canary')}\n"
     if MODE in COPY_MODES:
@@ -434,8 +441,9 @@ def produce(agent: str, out: Path, project, judge_cmd: str = "", job: str = "") 
             extra.write_text(os.environ.get("FAKE_HARNESS_EXTRA_TEXT", "extra") + "\n")
             if (project / ".git").exists():
                 git(project, "add", "-f", os.environ["FAKE_HARNESS_EXTRA"])
+        breaks = os.environ.get("FAKE_HARNESS_BREAK_JOBS", "")
         if MODE == "ship-break" and (project / "README.md").exists() and \
-                (project / ".git").exists():
+                (project / ".git").exists() and (not breaks or job in breaks.split(",")):
             git(project, "rm", "-q", "README.md")
         if (project / ".git").exists():
             git(project, "add", f"{MODULE}.py")

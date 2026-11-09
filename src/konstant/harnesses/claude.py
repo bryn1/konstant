@@ -23,6 +23,7 @@ denied and the phase cannot work - fail closed, but useless.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import shutil
 import sys
@@ -70,6 +71,33 @@ class Claude(Adapter):
 
     env_keys = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
                  "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL")
+
+    def measures(self, hcfg: dict) -> bool:
+        """Claude Code reports usage only with `--output-format json` (or stream-json) in the
+        [harness] command: its final `result` object carries `usage` and `total_cost_usd`."""
+        cmds = [hcfg.get("command", "")] + [t.get("command", "") for t in
+                                            (hcfg.get("types") or {}).values()
+                                            if isinstance(t, dict)]
+        return bool(cmds[0]) and all(re.search(r"--output-format[ =](stream-)?json", c)
+                                     for c in cmds if c)
+
+    def usage(self, log: Path) -> dict | None:
+        try:
+            text = Path(log).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        for chunk in [text.strip(), *reversed(text.strip().splitlines())]:
+            try:
+                obj = json.loads(chunk)
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and obj.get("type") == "result" and "usage" in obj:
+                u = obj.get("usage") or {}
+                n = sum(int(u.get(k) or 0) for k in ("input_tokens", "output_tokens",
+                                                     "cache_creation_input_tokens",
+                                                     "cache_read_input_tokens"))
+                return {"tokens": n, "cost_usd": float(obj.get("total_cost_usd") or 0)}
+        return None
 
     def argv(self, ph: Phase) -> list:
         argv = build_argv(self.template(ph.model), ph.values, False)

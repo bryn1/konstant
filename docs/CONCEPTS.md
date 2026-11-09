@@ -334,7 +334,8 @@ no phase can write, with its sha256 on the board; editing your file later change
 just ask your orchestrator in the dsh chat ([DSH.md](DSH.md) "The chat is the intake"): it
 proposes the goal in one line, and your next message `yes` files it.
 
-`bin/konstant intake greeter` then runs, every phase in konstant's jail:
+The factory loop then takes it in (`bin/konstant factory start`; by hand: `bin/konstant intake
+greeter`), every phase in konstant's jail:
 
 1. a **planner** phase (identity `planner`) writes `BACKLOG.md` and one brief per job, each with a
    DoD whose rows `PROBE:` lines settle (paths of the result as `{workdir}/...`);
@@ -355,7 +356,7 @@ different identity. A job whose holdout authoring fails twice is reported `BLOCK
 ## Ship
 
 At level 5 a verified job ships itself ([LEVEL5.md](LEVEL5.md) section 5; `bin/konstant ship
-JOB`, run by the `factory` identity; the factory loop of a later wave will call it). It ships only
+JOB`, run by the `factory` identity; the factory loop calls it, see "Factory"). It ships only
 the exact commit the verifier passed, checks the shipped state, and undoes the ship when that
 state fails.
 
@@ -405,6 +406,47 @@ phase can read them (`~/.config/gh`, `~/.git-credentials` and the token variable
 dropped). Under the open profile a phase holds your environment and host by your choice; the
 ship's push does not use anything a phase set, but an open phase could push with your
 credentials itself (that is the open profile's stated risk, not something the ship step adds).
+
+## Factory
+
+The factory loop is the dark factory itself ([LEVEL5.md](LEVEL5.md) section 6): `bin/konstant
+factory start` (or `factory run` in the foreground, or the systemd unit `factory install-unit`
+writes) runs one loop per workspace that takes each goal in, attempts its jobs one project at a
+time, lets the verifier judge them, ships what passed and starts the next, for as long as there is
+work, days or weeks. No model decides anything in it: it reads the board and runs konstant's own
+verbs (`intake`, `holdout author`, `task run --job`, `verify`, `ship`).
+
+**Budgets.** A job gets `max_attempts` task runs (default 3, the only required limit); after the
+third it is `blocked` and you hear about it once. A goal may also set `max_task_runs`,
+`wall_clock`, `max_tokens` and `max_cost_usd`: when one is reached the goal pauses
+(`BUDGET_STOP`). konstant charges every attempt before it starts and measures the rest from the
+runs; a token or cost limit on a harness that does not report usage is refused before the start,
+never guessed. To grant more, acknowledge the escalation (`factory ack ID`) and resume the goal or
+reopen the job: an acknowledged escalation opens a fresh window for the limit that raised it.
+
+**You are told only what needs you**: `BLOCKED`, `DECISION`, `BUDGET_STOP`, `LEAK`,
+`ROLLBACK_FAILED`, `HALTED`, each once per goal, job and kind until you acknowledge it. Outcomes
+(`SHIPPED`, `ROLLED_BACK`, `GOAL_DONE`) are on the status view and in `var/factory/events.jsonl`,
+never pushed. `[notify] kind` says where: `stdout`, `file` (`var/factory/notify.log`), `webhook`
+(a POST of the event and its one-line redacted reason, nothing else) or `chat` (into the
+orchestrator session the goal came from, shown at your next message there; [DSH.md](DSH.md)). A
+notifier that cannot deliver **halts the factory**: the event waits in `var/factory/spool/`, and
+`bin/konstant --as owner factory resume` delivers it and lets the factory run again. A dark
+factory you cannot hear from does not keep working.
+
+**Stopping and restarting.** `factory stop` sets the kill switch (`var/factory/STOP`): the loop
+starts nothing new, lets its running steps finish and exits; no factory starts while the switch is
+set (`factory resume` clears it). Every step is a board transition or a konstant verb with its own
+guards, so a factory that was killed (or a host that went down) resumes from the board: a claimed
+job gets its next attempt, a closed job without a verdict is verified, and a ship cut off half way
+is reconciled by comparing the target with the ship's record (never left blocking; when konstant
+cannot tell what happened, shipping halts for you). A loop that makes no progress while work is
+ready for `[factory] stall_after_s` tells you so (`factory stalled`), and its heartbeat shows on the
+board's Factory tab and in `doctor` (stale after three ticks).
+
+**The Factory tab** of the board (read-only) shows the loop, each goal's budget used and limit,
+its jobs by state with attempts left, ships, escalations and the last events; `bin/konstant factory
+status --json` prints the same. Holdouts appear only as counts.
 
 ## Memory
 

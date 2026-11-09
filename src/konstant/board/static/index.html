@@ -21,6 +21,7 @@
   <nav id="tabs" aria-label="views" hidden>
     <button type="button" id="tab-jobs" aria-pressed="true">Jobs</button>
     <button type="button" id="tab-memory" aria-pressed="false">Memory</button>
+    <button type="button" id="tab-factory" aria-pressed="false">Factory</button>
   </nav>
   <main id="jobs-view">
     <section id="tree" aria-label="jobs"></section>
@@ -37,6 +38,17 @@
       <ul id="mem-list"></ul>
     </section>
     <section id="mem-detail" aria-live="polite"></section>
+  </main>
+  <main id="factory-view" hidden>
+    <section aria-label="factory state">
+      <p id="fac-state"></p>
+      <h2>Goals</h2>
+      <div id="fac-goals"></div>
+      <h2>Escalations</h2>
+      <ul id="fac-esc"></ul>
+      <h2>Last events</h2>
+      <ul id="fac-events"></ul>
+    </section>
   </main>
   <p id="error" role="alert"></p>
   <script src="/static/board.js"></script>

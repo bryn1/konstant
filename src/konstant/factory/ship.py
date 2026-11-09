@@ -228,7 +228,15 @@ def execute(cfg, client, plan: dict, sid: int, res: dict) -> tuple:
         res.update(state="shipping", reason=why)
         return EXIT_HALTED, res
     client.post(f"/api/ships/{sid}", {"state": "shipped", "tip": tip})
-    res.update(state="shipped", tip=tip)
+    return after_move(cfg, client, plan, sid, tip, res)
+
+
+def after_move(cfg, client, plan: dict, sid: int, tip: str, res: dict) -> tuple:
+    """The target is at `tip` and the ship row says `shipped`: the post-ship checks, then keep it
+    or roll it back (also where a resumed factory continues an interrupted ship: reconcile.py)."""
+    tgt, commit, job = plan["tgt"], plan["commit"], plan["job"]
+    goal = (plan.get("goal") or {}).get("slug", "")
+    res.update(ship=sid, state="shipped", tip=tip)
     post = postship.run(cfg, client, tgt, job, plan["conf"], commit, tip)
     res["post"] = post
     if post["ok"]:

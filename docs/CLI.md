@@ -29,7 +29,8 @@ positional arguments:
     chat         the orchestrator chat as intake (the dsh plugin's seam)
     ship         level 5: ship a verified job's exact commit, check the shipped state, roll it back
                  on failure; `ship list`: the ships
-    factory      level 5: the factory's shipping state
+    factory      level 5: the factory loop, its state and its switches
+    notify       level 5: the factory's notifier
     memory       the memory vault: recall, store, notes (docs/CONCEPTS.md "Memory")
     mcp          MCP servers konstant ships (stdio)
     agents       generate and list the agent catalog surfaces
@@ -997,12 +998,87 @@ usage: konstant factory [-h] VERB ...
 
 positional arguments:
   VERB
-    status         shipping open or halted, ships by state
+    run            the factory loop in the foreground
+    start          the factory loop in the background
+    stop           set the kill switch: drain and exit
+    resume         clear the kill switch; redeliver and lift a halt (owner)
+    status         the loop, halt, shipping, goals, escalations
     resume-shipping
                    (owner) lift the halt a failed rollback set
+    install-unit   write (never enable) a systemd --user unit
+    ack            (owner) acknowledge an escalation
+    escalations    the escalations, with their ids
 
 options:
   -h, --help       show this help message and exit
+```
+
+## `konstant factory run`
+
+```
+usage: konstant factory run [-h] [--as ROLE] [--json] [--config PATH] [--harness HARNESS]
+                            [--until-idle | --once] [--dry-run]
+                            [goal ...]
+
+positional arguments:
+  goal               only these goals (default: every goal)
+
+options:
+  -h, --help         show this help message and exit
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
+  --json             print JSON
+  --config PATH      konstant.toml to use
+  --harness HARNESS  an adapter name or an argv template for every phase
+  --until-idle       exit when no goal has work left (0 all done, 4 an escalation)
+  --once             one tick and its steps
+  --dry-run          print what the first tick would do; change nothing
+```
+
+## `konstant factory start`
+
+```
+usage: konstant factory start [-h] [--as ROLE] [--json] [--config PATH] [--harness HARNESS]
+                              [goal ...]
+
+positional arguments:
+  goal               only these goals (default: every goal)
+
+options:
+  -h, --help         show this help message and exit
+  --as ROLE          act with this role's token, or a factory identity's (planner, dod-reviewer,
+                     scenario, factory) (default [client] default_role)
+  --json             print JSON
+  --config PATH      konstant.toml to use
+  --harness HARNESS  an adapter name or an argv template for every phase
+```
+
+## `konstant factory stop`
+
+```
+usage: konstant factory stop [-h] [--as ROLE] [--json] [--config PATH] [--now] [--wait WAIT]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+  --now          also SIGTERM the loop and its steps
+  --wait WAIT    seconds to wait for the exit
+```
+
+## `konstant factory resume`
+
+```
+usage: konstant factory resume [-h] [--as ROLE] [--json] [--config PATH]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
 ```
 
 ## `konstant factory status`
@@ -1029,6 +1105,78 @@ options:
                  scenario, factory) (default [client] default_role)
   --json         print JSON
   --config PATH  konstant.toml to use
+```
+
+## `konstant factory install-unit`
+
+```
+usage: konstant factory install-unit [-h] [--as ROLE] [--json] [--config PATH]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant factory ack`
+
+```
+usage: konstant factory ack [-h] [--as ROLE] [--json] [--config PATH] id
+
+positional arguments:
+  id
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant factory escalations`
+
+```
+usage: konstant factory escalations [-h] [--as ROLE] [--json] [--config PATH] [--open]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+  --open         only the unacknowledged ones
+```
+
+## `konstant notify`
+
+```
+usage: konstant notify [-h] VERB ...
+
+positional arguments:
+  VERB
+    test      deliver one TEST event
+
+options:
+  -h, --help  show this help message and exit
+```
+
+## `konstant notify test`
+
+```
+usage: konstant notify test [-h] [--as ROLE] [--json] [--config PATH]
+                            [--kind {stdout,file,webhook,chat}] [--url URL]
+
+options:
+  -h, --help                    show this help message and exit
+  --as ROLE                     act with this role's token, or a factory identity's (planner, dod-
+                                reviewer, scenario, factory) (default [client] default_role)
+  --json                        print JSON
+  --config PATH                 konstant.toml to use
+  --kind {stdout,file,webhook,chat}
+  --url URL                     the webhook URL (default [notify] url)
 ```
 
 ## `konstant memory`

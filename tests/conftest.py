@@ -24,8 +24,8 @@ os.environ.setdefault("KONSTANT_ENV_PASSTHROUGH", "FAKE_*,STUB_*,PROBE_*")
 
 
 def board_processes(base: str) -> list:
-    """(pid, cwd) of every `konstant board serve` process whose cwd is under `base` (a deleted
-    cwd reads as `<path> (deleted)`)."""
+    """(pid, cwd) of every `konstant board serve` (and, since L5-5, `konstant factory run`)
+    process whose cwd is under `base` (a deleted cwd reads as `<path> (deleted)`)."""
     out = []
     base = os.path.realpath(base).rstrip("/") + "/"
     for d in Path("/proc").iterdir() if Path("/proc").is_dir() else []:
@@ -37,7 +37,8 @@ def board_processes(base: str) -> list:
         except OSError:
             continue
         words = [a.decode(errors="replace") for a in argv]
-        if "konstant" not in " ".join(words) or "board" not in words or "serve" not in words:
+        if "konstant" not in " ".join(words) or not (
+                ("board" in words and "serve" in words) or ("factory" in words and "run" in words)):
             continue
         path = cwd[:-len(" (deleted)")] if cwd.endswith(" (deleted)") else cwd
         if (path.rstrip("/") + "/").startswith(base):
@@ -56,6 +57,7 @@ def no_board_left_running(tmp_path_factory):
         except OSError:
             pass
     if left:
-        pytest.fail(f"{len(left)} `konstant board serve` process(es) a test started were still "
+        pytest.fail(f"{len(left)} `konstant board serve` / `factory run` process(es) a test started "
+                    "were still "
                     "running at the end of the session (killed now): "
                     + "; ".join(f"pid {p} cwd {c}" for p, c in left), pytrace=False)
