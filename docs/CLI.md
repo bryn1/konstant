@@ -27,6 +27,9 @@ positional arguments:
     intake       turn a goal into jobs: planner, DoD review, filing, approval, scenario writer
                  (level 5)
     chat         the orchestrator chat as intake (the dsh plugin's seam)
+    ship         level 5: ship a verified job's exact commit, check the shipped state, roll it back
+                 on failure; `ship list`: the ships
+    factory      level 5: the factory's shipping state
     memory       the memory vault: recall, store, notes (docs/CONCEPTS.md "Memory")
     mcp          MCP servers konstant ships (stdio)
     agents       generate and list the agent catalog surfaces
@@ -966,6 +969,66 @@ options:
   --json             print JSON
   --config PATH      konstant.toml to use
   --session SESSION  the chat session id
+```
+
+## `konstant ship`
+
+```
+usage: konstant ship [-h] [--as ROLE] [--json] [--config PATH] [--dry-run] [--approve-decision]
+                     JOB|list
+
+positional arguments:
+  JOB|list            the job to ship, or `list` for every ship
+
+options:
+  -h, --help          show this help message and exit
+  --as ROLE           act with this role's token, or a factory identity's (planner, dod-reviewer,
+                      scenario, factory) (default [client] default_role)
+  --json              print JSON
+  --config PATH       konstant.toml to use
+  --dry-run           print the decision and every guard rule; move nothing
+  --approve-decision  (--as owner) ship past an owner decision (5.4) for the verified commit
+```
+
+## `konstant factory`
+
+```
+usage: konstant factory [-h] VERB ...
+
+positional arguments:
+  VERB
+    status         shipping open or halted, ships by state
+    resume-shipping
+                   (owner) lift the halt a failed rollback set
+
+options:
+  -h, --help       show this help message and exit
+```
+
+## `konstant factory status`
+
+```
+usage: konstant factory status [-h] [--as ROLE] [--json] [--config PATH]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
+```
+
+## `konstant factory resume-shipping`
+
+```
+usage: konstant factory resume-shipping [-h] [--as ROLE] [--json] [--config PATH]
+
+options:
+  -h, --help     show this help message and exit
+  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
+                 scenario, factory) (default [client] default_role)
+  --json         print JSON
+  --config PATH  konstant.toml to use
 ```
 
 ## `konstant memory`

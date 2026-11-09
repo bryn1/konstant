@@ -352,6 +352,60 @@ The order is the point: DoD, review and holdouts exist before any producer runs,
 different identity. A job whose holdout authoring fails twice is reported `BLOCKED` and waits
 (its claim needs sealed holdouts).
 
+## Ship
+
+At level 5 a verified job ships itself ([LEVEL5.md](LEVEL5.md) section 5; `bin/konstant ship
+JOB`, run by the `factory` identity; the factory loop of a later wave will call it). It ships only
+the exact commit the verifier passed, checks the shipped state, and undoes the ship when that
+state fails.
+
+| target | ship | rollback |
+|---|---|---|
+| `github` (opt-in; this owner's default) | push `konstant/ship-<n>`, `gh pr create`, `gh pr merge --merge --match-head-commit <commit>`, fetch the merge back | a commit with the pre-ship tree on top, pushed as `konstant/rollback-<n>` and merged through its own pull request |
+| `branch` (the default) | `update-ref` of the project's branch, compare-and-swap | the same revert commit, CAS again |
+| `apply` | the commit's tree into `[ship] apply_dir`, the old one kept as `.prev` | swap `.prev` back |
+| `command` | your `ship_cmd` (`{commit}`, `{branch}`, `{job}`) | your `rollback_cmd` (required) |
+
+Never a force-push, a reset or a branch delete: the shipped commit stays in the history, and a
+rollback is a new commit whose tree equals the tree before the ship.
+
+**What ships is what was verified.** konstant does not push from, or run git in, the job clone a
+phase worked in (its `.git` could carry replace refs, grafts, a planted config or hooks). It copies
+the commit object by object into its own repository (`var/factory/ship/<project>.git`), hashing
+every object itself: content that does not hash to its id refuses the ship. Because a git id is its
+content, the commit that ships is exactly the one the holdouts ran on.
+
+**The guard**, checked by konstant and again by the board: the job is verified, its latest
+verification carries every sealed holdout passed (the set's commitment digest, no LEAK), and the
+holdouts, the evidence `COMMIT=` and the ship name the same commit; the target is still where the
+job's clone started (else `target moved`); the catalog matches its manifest; shipping is not
+halted; one ship at a time; a job ships once. A job without holdouts never ships.
+
+**Owner decisions** (escalation `DECISION`; nothing moves until `bin/konstant --as owner ship JOB
+--approve-decision`): a job type in `[ship] decision_types` (default `["infra"]`); a diff touching
+`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.claude/`, `.agents/`, `.dsh/`, `.gemini/`,
+`.github/workflows/`, `.github/actions/`, `sitecustomize.py`, `usercustomize.py`, a `*.pth` or a
+`conftest.py` outside a test dir; only regression holdouts; a target that moved; and, for `github`
+and `command`, a **secret scan** finding (the release scanner's patterns plus a denylist over the
+added lines and paths; the finding names the path, never the text).
+
+**After the ship** konstant checks the new tip: the goal's `post_probes` and the job's own DoD
+probes (`{workdir}` = the target), the project's tests and every holdout of every job shipped so
+far, in the jail on the tip it materialised itself. Any failure, or a check that cannot run, rolls
+the ship back; the job stays `verified` (it was true of the clone) and a **follow-up job** is
+filed by code: the same brief and holdouts plus the failed post-ship probe as a `PROBE:` row. A
+rollback that fails halts ALL shipping (`factory status` says `halted`) until `bin/konstant --as
+owner factory resume-shipping`; nothing is retried or forced.
+
+**Credentials.** Only the ship step uses your `gh` and git push credentials: konstant's own pinned
+`gh` (`[ship] gh`, an absolute path, else gh in the root-owned system dirs) and its pinned git,
+with an environment it builds itself (your `HOME` for `~/.config/gh`, `GH_TOKEN`/`GITHUB_TOKEN`
+when set, the ssh agent), in the factory process, never in a phase. Under the closed profile no
+phase can read them (`~/.config/gh`, `~/.git-credentials` and the token variables are masked or
+dropped). Under the open profile a phase holds your environment and host by your choice; the
+ship's push does not use anything a phase set, but an open phase could push with your
+credentials itself (that is the open profile's stated risk, not something the ship step adds).
+
 ## Memory
 
 konstant has a built-in memory that every harness uses the same way: notes earlier jobs and

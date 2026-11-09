@@ -1,4 +1,4 @@
-# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b, L5-3, L5-M and L5-T landed)
+# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b, L5-3, L5-M, L5-T, L5-F1 and L5-4 landed)
 
 konstant is a self-contained workspace for running coding agents with discipline: a local job
 board (**board**), a deterministic **task gate** that turns a task into phases run by one agent
@@ -18,7 +18,9 @@ memory (§7.4): an Obsidian-compatible Markdown vault with its own git history, 
 recall index, one MCP server for every harness, held to the integrity core. Wave L5-T added
 triage (§6.2.1): size tiers on top of the type, an intake card computed by code before any model
 plans a task (new or continuation, prior work, reuse), a closed web-research phase for tasks with
-nothing similar, and a licence gate for copied code.
+nothing similar, and a licence gate for copied code. Wave L5-4 added auto-ship (§7.5): the exact
+commit the verifier passed shipped to a GitHub pull request, a local branch, an apply dir or the
+owner's command, checked after the ship and rolled back by a new commit when it fails.
 
 References of the form F-nn and G-nn name findings of the two independent security reviews of
 v0.1; docs/CONCEPTS.md "Security reviews" summarises them, and each has a test under `tests/review/`.
@@ -71,9 +73,10 @@ konstant-0.1.0/
                                # tokens routes,
                                # holdouts (seal + list commitments; the verdict's holdout hooks),
                                # goals (file/confirm/read goals, the intake state),
-                               # memory (recall, notes, store, the write log, reindex)
+                               # memory (recall, notes, store, the write log, reindex),
+                               # ships (the board's ship guard, ship records, follow-up, halt)
       db.py  migrate.py  migrations/0001_init.sql  0002_holdouts.sql  0003_workdir.sql
-                               0004_goals.sql  0005_memory.sql
+                               0004_goals.sql  0005_memory.sql  0006_triage.sql  0007_ships.sql
       dod.py                   # DoD extraction from a brief (required) + DoD row lint (warnings)
       policy.py                # role sets + switches from konstant.toml, fail-closed defaults
       transitions.py           # the job state machine (one table)
@@ -100,6 +103,9 @@ konstant-0.1.0/
     factory/  clone.py  doctor.py            # job clones, factory doctor rows (§7.2)
               goal.py backlog.py intake.py   # goal files, the filing rules, `konstant intake` (§7.3)
               notify.py chat.py              # factory events, the orchestrator chat as intake
+              ship.py shiprules.py shiprepo.py   # `konstant ship`: the guard, konstant's own
+              targets.py localtarget.py          # ship repository, the four targets, the
+              postship.py                        # post-ship checks and rollback (§7.5)
     harnesses/ base.py claude.py codex.py gemini.py dsh.py command.py   # adapters (§9)
                dsh_session.py dsh_gate/{index.ts,build.mjs,konstant-gate.mjs} # dsh session plugin (§6.6)
     jail.py                                  # bubblewrap jail for agent-written code
@@ -118,7 +124,7 @@ konstant-0.1.0/
     templates/CLAUDE.md.tmpl  AGENTS.md.tmpl  agent.md.tmpl  skill.md.tmpl
               operate.md.tmpl  # the "how to operate konstant" table both top docs include
   release/patterns.toml      # generic public-safety patterns (IPs, emails, token shapes, paths)
-  tests/  unit, board, cli, gate, verify, catalog, release, holdout, factory, memory, fixtures/,
+  tests/  unit, board, cli, gate, verify, catalog, release, holdout, factory, memory, ship, fixtures/,
           e2e/{fresh_install.sh, one_line.sh, dsh_session.sh}
   docs/   DESIGN.md  QUICKSTART.md  CLI.md  CONCEPTS.md  HARNESSES.md  DSH.md
   .github/workflows/ci.yml   # CI (export-ignore)
@@ -140,6 +146,7 @@ konstant-0.1.0/
                              # during the phase, drafts/ + home/) of the scenario writer (§7.3)
   var/factory/goals/<id>.toml  events.jsonl  notify.log  chat/<session>.json
                              # goal copies, factory events, chat cursors (machinery; §7.3)
+  var/factory/ship/<slug>.git  # konstant's own ship repository per project (§7.5): what ships
   memory/                    # the memory VAULT (§7.4): <identity>/*.md, <identity>/facts/*.md,
                              # its own git repo memory/.git; machinery: no phase reads or writes it
   var/memory/index.db        # the recall index (a cache; `memory reindex` rebuilds it)
@@ -191,6 +198,8 @@ supported, but the generated surfaces only apply inside it (stated in QUICKSTART
 | `runs` | `id, job_id, run_dir, type, started_at, finished_at, result(MET/UNMET/BLOCKED/ERROR)` | links task runs to jobs; written by `task run --job` through `POST /api/jobs/{ref}/runs`; `GET /api/jobs/{ref}` returns the job's `verifications` and `runs` |
 | `goals` (v4) | `id, slug, project_id, spec_text, spec_json, spec_sha256, source(file/chat), session, status(proposed/active/paused/done/stopped/withdrawn), intake(none/planning/filing/filed/refused), created_by, created_at, updated_at` | spec columns immutable (trigger); slug unique among non-withdrawn goals; `filed` is final (a goal is taken in once); no delete |
 | `memory_writes` (v5) | `id, path, pool, actor, role, kind(fact/note), state(stored/refused), reason, sha256, commit_sha, run, job_id, at` | every write konstant made to the memory vault and every write it refused (§7.4); append-only (triggers); `actor`/`role` from the token; a note is ATTRIBUTED while its file hashes to its latest `stored` row |
+| `ships` (v7) | `id, job_id, goal_id, target(github/branch/apply/command), branch, commit_sha, pre_ref, tip_sha, rollback_sha, state(shipping/shipped/failed/rolled_back/rollback_failed), post_json, reason, follow_up_id, actor, created_at, updated_at` | one row per ship attempt (§7.5), written by the board for the `factory` identity after its own guard; commit, base and target fixed, the state only moves forward, results recorded once (triggers); at most one `shipping` row, a job ships once |
+| `shipping_log` (v7) | `id, state(halted/resumed), reason, ship_id, actor, at` | append-only; the newest row says whether shipping is halted (a failed rollback writes `halted`; only the owner resumes) |
 | `intake_cards` (v6) | `id, job_id, run, actor, role, tier, continuation(new/continuation), research_required, card_json, sha256, at` | the intake card of each run bound to a job (§6.2.1), recorded by owner or orchestrator tokens only (`POST /api/jobs/{ref}/intake-card`), the sha256 recomputed by the board; append-only (triggers); `job show` lists them |
 | `tokens` | `id, role, label, sha256 UNIQUE, active, created_at` | `label` is the actor identity (e.g. `orchestrator`, `verifier`; the factory identities `planner`, `dod-reviewer`, `scenario`, `researcher`, `factory`: §5) |
 
@@ -765,8 +774,8 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
 - **Goal files** (`factory/goal.py`): `[goal] id, project, text`, `[limits]` (only `max_attempts`
   required, default 3, owner decision Q5; `wall_clock`, `max_task_runs`, `max_jobs`,
   `max_rollbacks`, `max_tokens`, `max_cost_usd` optional, 0 = not limited), `[ship]` (target
-  github|branch|apply|command, branch, post_probes, the target's keys; read by L5-4), `[holdout]`
-  (author agent|owner, min_per_job). Missing values come from `[factory] defaults`. Unknown tables or
+  github|branch|apply|command, branch, post_probes, the target's keys; read by `konstant ship`,
+  §7.5), `[holdout]` (author agent|owner, min_per_job). Missing values come from `[factory] defaults`. Unknown tables or
   keys, wrong types and out-of-range values refuse the file (`goal: ...`, one line each).
 - **Filing a goal** (`POST /api/goals`, board/api/goals.py; CLI `goal add FILE|-`): from a file,
   the owner role only, active at once; `--from-chat --session ID`, a role of `[factory]
@@ -824,6 +833,88 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
   escalations also to `[notify] kind` stdout / file (`notify.log`) / chat; outcomes (`FILED`) are
   never pushed. Webhook, retries, acks and the halt on a failed delivery are wave L5-5.
 - **doctor** rows `scenario writer` and `chat intake`.
+
+### 7.5 Ship and rollback (wave L5-4; docs/LEVEL5.md 5)
+
+`konstant ship JOB [--dry-run] [--approve-decision]` (`factory/ship.py`), acting as the `factory`
+identity (refused inside a task run and in the orchestrator chat). No model takes part.
+
+- **What ships is what was verified** (REVIEW L5-R1 H-02, H-07). konstant never pushes from, or
+  runs git in, the job clone. `factory/shiprepo.py` keeps a bare repository per project,
+  `var/factory/ship/<slug>.git` (machinery), created without template or hooks, whose object
+  store borrows the target's as an alternate. The evidence `COMMIT=` reaches it through
+  `import_from_clone`: a throwaway konstant-owned bare repository whose only link to the clone is
+  an alternate on the clone's object dir (no ref, replace ref, graft, shallow, config, hook,
+  attribute or filter of the clone is read; `GIT_NO_REPLACE_OBJECTS=1`, commit-graph and
+  multi-pack index off), then konstant walks commit -> tree + parents -> entries itself and
+  RE-HASHES every object's bytes: content that is not its id refuses the ship. A git id is its
+  content, so the commit in the ship repository is exactly the id the holdouts ran on. The same
+  `transfer()` copies shipped and rollback commits into the local target as loose objects.
+- **The guard, both sides** (`factory/shiprules.py`, shared): the job `verified` with a PASS
+  latest verification carrying every sealed holdout passed, the set's digest and no LEAK;
+  holdout rows, the result's commit, the evidence `COMMIT=` and the commit to ship identical
+  (`refused: holdouts ran on X, the evidence names Y`); the target still at `workdir_base` (code:
+  the remote branch, fetched, and the local target; board: the local target) else `target moved:
+  expected <pre>`; the catalog manifest intact (H-06, `integrity.require`); the goal active;
+  shipping not halted; one ship in flight; a job ships once. The board
+  (`POST /api/jobs/{ref}/ships`, factory identity only) re-runs every rule it can from its own
+  records, the ship repository and the target before it writes a `shipping` row (one such row
+  at a time: a unique index). `--dry-run` prints both sides' rules.
+- **Owner decisions** (5.4; escalation `DECISION`, an `escalation` trail row; nothing moves):
+  a type in `[ship] decision_types` or `ship_mode = decision`; a diff (`diff-tree` in the ship
+  repository) touching `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`, `.claude/`, `.agents/`, `.dsh/`,
+  `.gemini/`, `.github/workflows/`, `.github/actions/`, `sitecustomize.py`, `usercustomize.py`,
+  `*.pth` or a `conftest.py` outside a test dir; only regression holdouts (unless `[ship]
+  regression_only`); a moved target or a dirty target worktree; and for `github` and `command` a
+  **secret scan** finding: `release/patterns.toml` plus the denylist (`[ship] denylist`, else
+  `release/denylist.local.txt` when present) over every changed path and the ADDED lines of every
+  changed text file, reported as `secret scan finding in <path> (<pattern>)`, never the text.
+  `--as owner ship JOB --approve-decision` records an `approval` trail row naming the exact
+  verified commit (`POST /api/jobs/{ref}/ship-decision`, owner role only); both guards then pass
+  the decision rule for that commit only (a moved target is never approved past).
+- **Targets** (`factory/targets.py`): `github` pushes the commit as `konstant/ship-<n>` to
+  `[ship] remote` from the ship repository (pinned git; only file, https and ssh allowed for that
+  call; https credentials through `gh auth git-credential`), `gh pr create --repo [ship]
+  github_repo`, `gh pr merge N --merge --match-head-commit <commit>`, fetches the branch back
+  (its new tip = the merge); a push, create or merge the remote refuses leaves the branch
+  unchanged: state `failed`, `DECISION: target refused`. `branch` copies the objects into the
+  target and `update-ref refs/heads/<branch> <commit> <pre>` (CAS). For both, the local target
+  then moves by CAS too (the next job's clone starts from the shipped state) and, when its
+  checked-out branch is the ship branch, konstant rewrites the changed paths of its worktree from
+  raw objects and `read-tree`s the index (`factory/localtarget.py`: no checkout, filter or hook;
+  refused before the ship when the worktree has local changes on tracked or shipped paths, or the
+  branch is checked out in a linked worktree). `apply` materialises the commit into `[ship]
+  apply_dir` (never inside the machinery or the project), the previous tree kept as `.prev`.
+  `command` runs `ship_cmd` (argv, no shell, `{commit}` `{branch}` `{job}`); without a
+  `rollback_cmd` it may not ship. gh and the push get an environment konstant builds
+  (`targets.own_env`: HOME, the gh token variables when set, the ssh agent, the trusted PATH);
+  `gh` is `[ship] gh` (absolute) or gh on the trusted dirs, never the inherited PATH. Every git
+  call of the ship runs with `shiprepo.git_env` (nothing inherited but HOME and the locale: no
+  `GIT_*` variable of the calling shell). The ship branch must exist in the target (`target`
+  rule: `the target has no branch X (its checked-out branch is Y)`), since the job clone's base
+  is the target's checked-out commit.
+- **Post-ship** (`factory/postship.py`): `merged` (github: the verified commit is an ancestor of
+  the new tip and the tip's tree is its tree), every `[ship] post_probes` + goal `post_probes` +
+  DoD `PROBE:` line with `{workdir}` = the target (its worktree just rewritten to the tip), the
+  project's tests (`[gate] test_cmd`, `auto` = pytest when the tree holds tests) and the
+  **regression set** (every sealed holdout of this job and of every job of the project whose ship
+  stands, commitments checked) in the jail with no network on a materialisation of the tip bound
+  at the target's path. apply and command run the probes. A failed or unrunnable check rolls back.
+- **Rollback**: github and branch add `commit-tree <pre>^{tree} -p <tip>` ("konstant: roll back
+  ship N"), merged through its own pull request `konstant/rollback-<n>` (github) or CAS-moved
+  (branch), then the tip's tree must equal `<pre>^{tree}`; apply swaps `.prev` back; command runs
+  `rollback_cmd`. State `rolled_back`, outcome `ROLLED_BACK`; the job stays `verified`; the board
+  files the **follow-up job** (`POST /api/ships/{id}/follow-up`, factory identity): the original
+  brief + one DoD row + the first failed post-ship probe as a `PROBE:` row, queued,
+  `holdout_required`, the original commitments copied (the factory copies the store files; same
+  bytes, same sha256), the same goal, budget and ship mode. After the goal's `max_rollbacks`, a
+  `BLOCKED` escalation instead. A rollback that fails is `rollback_failed`: the board appends
+  `halted` to `shipping_log` in the same transaction, `ROLLBACK_FAILED` goes out, and no ship
+  passes the guard until `--as owner factory resume-shipping`. An unexpected error while the
+  target moves halts shipping too (`HALTED`). Nothing is retried, forced, reset or deleted.
+- Exit codes: 0 shipped (checks passed), 1 refused (nothing moved), 3 rolled back, 4 rollback
+  failed or halted, 2 not found. `ship list`, `factory status` (shipping open/halted, ships by
+  state; the factory loop of L5-5 extends it).
 
 ### 7.4 Memory (wave L5-M; docs/CONCEPTS.md "Memory")
 
@@ -1324,6 +1415,8 @@ Global: `--as ROLE`, `--json`, `--config PATH`; env `KONSTANT_HOME`. Exit 0 ok, 
 | `holdout add ID` | `--file FILE` (repeatable) | lint + negative control + commitment; moves the files into the store (owner; §7.1; exit 1 refused, 2 no jail) |
 | `holdout list ID` / `holdout check ID` / `holdout show ID HID` | `--control` (check) | commitments and states / commitment + parse (+ negative control) / one file from the store; check and show refused inside a task run |
 | `holdout author ID` | `--harness` | run the scenario writer for one job and seal its drafts (§7.3; exit 4 refused twice, 2 setup) |
+| `ship JOB` / `ship list` | `--dry-run --approve-decision` | ship the verified commit as `factory`: both guards, the target, post-ship checks, rollback (§7.5; exit 0 shipped, 1 refused, 3 rolled back, 4 rollback failed / halted) |
+| `factory status` / `factory resume-shipping` | | shipping open or halted and the ships by state / lift the halt (owner) |
 | `goal add FILE\|-` | `--from-chat --session` | file a goal (owner), or propose one from the owner's chat (§7.3) |
 | `goal list` / `goal show ID` / `goal pause\|resume\|cancel ID` | `--status` (list) | goals, one goal with its jobs, status changes (owner; pause also factory) |
 | `intake GOAL` | `--harness` | planner -> DoD review -> filing -> approval -> scenario writer (§7.3; exit 0, 3 refused, 4 authoring BLOCKED, 2 setup) |
@@ -1421,8 +1514,17 @@ defaults = { max_attempts = 3, wall_clock = "0", max_task_runs = 0, max_jobs = 0
 [notify]
 kind = "stdout"                # stdout | file | chat (the dsh orchestrator chat; webhook: L5-5)
 
-[ship]
-decision_types = ["infra"]     # goal jobs of these types are filed ship_mode = decision (Q4)
+[ship]                         # auto-ship (§7.5); target/branch: the goal, else [factory] defaults
+decision_types = ["infra"]     # jobs of these types never ship unattended (Q4)
+post_probes = []               # PROBE lines every ship checks after it (+ the goal's own)
+github_repo = ""               # OWNER/REPO for `gh --repo` (the goal may name it)
+remote = ""                    # the push URL ("" = https://github.com/<github_repo>.git); never a goal's
+gh = ""                        # absolute path of the gh CLI ("" = gh in the root-owned system dirs)
+apply_dir = ""                 # the apply target's directory
+ship_cmd = ""                  # the command target: argv template, {commit} {branch} {job}
+rollback_cmd = ""              # required for the command target
+denylist = ""                  # extra secret-scan regexes (release/denylist.local.txt when present)
+regression_only = false        # ship a job whose holdouts are all regression (else a decision)
 
 [confinement]                  # what a phase may see and do (§9.1; docs/CONCEPTS.md)
 profile = "closed"             # closed | open
@@ -1484,10 +1586,12 @@ board at start (a typo must not silently disarm a gate).
   → `doctor` → `board start` → `project add demo --init-git` → `job add` → `job claim` →
   `task run --job` (fake harness writes code, tests, verdicts, DONE.md) → `task check` exit 0 →
   job `completed_unverified` → `verify` PASS → job `verified` → a second job closed with a failing
-  probe → `verify` FAIL → job `queued` → an offline install of a second copy from a `pip download`
-  wheel dir with pip's network blocked (skipped, and said so, when no index is reachable to make
-  the dir) → `board stop` → `rm -rf`. Every step asserts output; the transcript is the release
-  check.
+  probe → `verify` FAIL → job `queued` → (since L5-4, when bubblewrap runs) a project with two
+  sealed holdouts, a factory run of its job to `verified`, `ship --dry-run` and `ship` to the
+  project's `main`, which must then be the verified commit → an offline install of a second copy
+  from a `pip download` wheel dir with pip's network blocked (skipped, and said so, when no index
+  is reachable to make the dir) → `board stop` → `rm -rf`. Every step asserts output; the
+  transcript is the release check.
 - **Harnesses (`tests/harness/`):** every adapter's default argv against a golden file
   (`tests/fixtures/golden/harness/`), the generated dsh patch / Gemini settings + policy and the
   AGENTS.md of a workspace without Claude Code (golden), the permission mapping both ways
@@ -1519,6 +1623,17 @@ board at start (a typo must not silently disarm a gate).
   jail's late bind inside a mask, red twin), `test_chat_intake.py` (B11 with the fake harness's
   `inject` mode, the chat marker's refusals, a stopped intake's escalation); the plugin's chat path
   in `plugin.test.mjs`.
+- **Ship (`tests/ship/`, L5-4):** `test_ship_branch.py` (C1-C8, C10 through the real dsh adapter
+  with the fake harness's `ship-break` / `ship-extra` modes: dry-run, ship, level-4 refusal,
+  evidence/holdout commit mismatches on both sides, rollback + follow-up, the regression set across
+  jobs, a moved target, owner decisions and their approval, infra, the command target's halt, a
+  forged object, a replace ref + planted clone config, a dirty worktree, the apply target),
+  `test_ship_github.py` (C11, C12 against a local bare repository and the `gh` stand-in
+  `tests/fixtures/fake_gh.py`: PR create/merge, the revert PR, no force-push in the stand-in's
+  push log, the secret scan, a failed revert merge halting, a refused merge, a moved remote) and
+  `test_ship_units.py` (every rule red/green, the re-hash, the ships triggers, route roles),
+  `test_ship_goal.py` (goal jobs: rollback, a follow-up job that runs the whole loop and ships,
+  max_rollbacks -> BLOCKED, a paused goal refused).
 - **Memory (`tests/memory/`, L5-M):** the note format, the vault's one-commit-per-write and
   symlink refusal, the index (sync, hand edits, rebuild, attribution, FTS syntax as data), hybrid
   recall against a loopback stand-in embedding endpoint and the lexical fallback, the MCP protocol

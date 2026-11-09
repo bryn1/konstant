@@ -128,9 +128,17 @@ DEFAULTS: dict = {
     # notify.log) or chat (the gated dsh session shows them at the owner's next turn, 4.0);
     # webhook arrives with the factory loop (wave L5-5)
     "notify": {"kind": "stdout"},
-    # ship-time owner decisions (docs/LEVEL5.md 5.4; owner decision Q4): jobs of these types are
-    # filed `ship = decision` and never ship unattended
-    "ship": {"decision_types": ["infra"]},
+    # auto-ship (docs/LEVEL5.md 5; factory/ship.py). decision_types: owner decisions at ship time
+    # (5.4; owner decision Q4): jobs of these types never ship unattended. The target and branch
+    # come from the goal (or [factory] defaults ship_target / ship_branch); the rest fills what a
+    # goal does not name. github: `github_repo` (OWNER/REPO, passed to gh as --repo), `remote`
+    # (the push URL; "" = https://github.com/<github_repo>.git), `gh` (an absolute path to the gh
+    # CLI; "" = gh on konstant's trusted program dirs only). `denylist`: an extra file of
+    # case-insensitive regexes for the secret scan before a push (release/denylist.local.txt is
+    # used when present)
+    "ship": {"decision_types": ["infra"], "post_probes": [], "github_repo": "", "remote": "",
+             "gh": "", "apply_dir": "", "ship_cmd": "", "rollback_cmd": "", "denylist": "",
+             "regression_only": False},
     # what a phase may see and do (konstant/confinement.py, docs/CONCEPTS.md "Confinement
     # profiles"): profile closed | open, integrity on | off, and per-capability options that
     # override the profile (network, home_read, home_write, host_write, extra_read, extra_write,
@@ -285,6 +293,7 @@ def check_factory(data: dict, path) -> None:
     if data["notify"]["kind"] not in NOTIFY_KINDS:
         raise ConfigError(f"{path}: [notify] kind = {data['notify']['kind']!r}: one of "
                           f"{', '.join(NOTIFY_KINDS)} (webhook arrives with the factory loop)")
+    check_ship(data["ship"], path)
     w = data["holdout"]["writer_harness"]
     if w and w not in HARNESS_NAMES:
         raise ConfigError(f"{path}: [holdout] writer_harness = {w!r}: one of "
@@ -292,6 +301,19 @@ def check_factory(data: dict, path) -> None:
     m = data["holdout"]["writer_model"]
     if m and not _MODEL.fullmatch(m):
         raise ConfigError(f"{path}: [holdout] writer_model = {m!r} is not a model name")
+
+
+def check_ship(s: dict, path) -> None:
+    """[ship] (factory/ship.py): a typo here must not ship somewhere else."""
+    where = f"{path}: [ship]"
+    if s["github_repo"] and not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",
+                                             s["github_repo"]):
+        raise ConfigError(f"{where} github_repo = {s['github_repo']!r}: OWNER/REPO")
+    if s["gh"] and not os.path.isabs(s["gh"]):
+        raise ConfigError(f"{where} gh must be an absolute path (konstant never takes gh from "
+                          "PATH: a phase could plant one there)")
+    if not all(p.lstrip().startswith("PROBE:") for p in s["post_probes"]):
+        raise ConfigError(f"{where} post_probes must be `PROBE: ...` lines")
 
 
 def check_triage(data: dict, path) -> None:

@@ -241,6 +241,44 @@ run "$K" --json task check "$RUN"
 want_rc 0; want_out '"result": "MET"'
 [ -f "$WS/projects/demo/greet.py" ] || fail "the run did not produce projects/demo/greet.py"
 
+# --- level 5: a holdout job, verified, shipped to its project's branch (docs/LEVEL5.md 5) ---------
+step "level 5: sealed holdouts, a factory run, konstant ship (branch target)"
+if ! "$WS/.venv/bin/python" -c 'import sys; from konstant import jail; sys.exit(0 if jail.available() else 1)'; then
+  echo "SKIPPED: bubblewrap cannot run here (holdouts and ship need konstant's jail)"
+else
+  mkdir -p "$WS/projects/greeter"
+  run git -C "$WS/projects/greeter" init -q -b main
+  want_rc 0
+  run "$K" project add greeter
+  want_rc 0
+  printf '"""greeter: small greetings."""\n\n\ndef greet():\n    return "hello world"\n' > "$WS/projects/greeter/greeter.py"
+  echo greeter > "$WS/projects/greeter/README.md"
+  run git -C "$WS/projects/greeter" add -A
+  run git -C "$WS/projects/greeter" commit -qm base
+  want_rc 0
+  printf 'add greet(name)\n\nDoD:\n- greet(name) greets by name\nPROBE: test -f {workdir}/greeter.py => ^ok$\nVERIFY_CMD: python3 -c "from greeter import greet; assert greet('"'"'world'"'"') == '"'"'hello world'"'"'"\n' > "$WORK/brief3.md"
+  run "$K" --json job add "greet by name" --project greeter --type code --brief "$WORK/brief3.md"
+  want_rc 0
+  J3=$(json_field id)
+  printf "SCENARIO: greet uses the name\nKIND: proof\nRUN: python3 -c \"from greeter import greet; print(greet('Ada'))\"\nEXPECT_EXIT: 0\nEXPECT_OUT: hello Ada\nHINT: other names are used verbatim\n" > "$WORK/h1.scenario"
+  printf "SCENARIO: the default still works\nKIND: regression\nRUN: python3 -c \"from greeter import greet; print(greet().upper())\"\nEXPECT_EXIT: 0\nEXPECT_OUT: HELLO WORLD\nHINT: no argument keeps working\n" > "$WORK/h2.scenario"
+  run "$K" --as owner holdout add "$J3" --file "$WORK/h1.scenario" --file "$WORK/h2.scenario"
+  want_rc 0
+  run env KONSTANT_ENV_PASSTHROUGH='FAKE_*' FAKE_HARNESS_MODULE=greeter "$K" task run "[type:code] add greet(name)" --job "$J3"
+  want_rc 0; want_out 'factory mode: every phase jailed'
+  run "$K" --json job show "$J3"
+  [ "$(json_field status)" = verified ] || fail "job $J3 is not verified"
+  C3=$("$WS/.venv/bin/python" -c 'import json,sys; print(json.loads(sys.argv[1])["evidence"]["commit"])' "$OUT")
+  run "$K" ship "$J3" --dry-run
+  want_rc 0; want_out 'branch main: ship'
+  run "$K" ship "$J3"
+  want_rc 0; want_out 'state: shipped'
+  [ "$(git -C "$WS/projects/greeter" rev-parse main)" = "$C3" ] || fail "main is not the verified commit"
+  run "$K" ship list
+  want_rc 0; want_out 'shipped'
+  echo "projects/greeter main = $C3 (the commit the holdouts ran on)"
+fi
+
 # --- offline install: a wheel dir made by `pip download`, pip's network blocked (REVIEW F-17) -----
 step "offline install from a pip-download wheel dir, network blocked for pip"
 mkdir -p "$WORK/off"

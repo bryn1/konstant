@@ -9,7 +9,9 @@ are described as built in DESIGN.md §7.1, §7.2, §9.1 and §7.3; "L5-1 as buil
 Wave L5-M (built-in memory, an owner request beside the plan) is in DESIGN.md §7.4 and "L5-M as
 built". Wave L5-T (triage tiers, the intake card, the closed web researcher and the licence gate,
 an owner request of 2026-11-08) is in DESIGN.md §6.2.1, docs/CONCEPTS.md "Triage" and "L5-T as
-built". The owner answered the open questions on 2026-11-01 (section 9); the
+built". Wave L5-F1 fixed the first level-5 review ("L5-F1 as built"). Wave L5-4 (pillar C, ship,
+post-ship checks and rollback: section 5) is in DESIGN.md §7.5, docs/CONCEPTS.md "Ship" and "L5-4
+as built". The owner answered the open questions on 2026-11-01 (section 9); the
 sections they change say so. Everything else on this page is still the plan that the next
 releases build in the waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as
 each part lands, and this page stays the roadmap until level 5 is reached.
@@ -861,7 +863,7 @@ for what it lands.
 | **L5-T** triage (**done**; see "L5-T as built" below; owner request 2026-11-08) | size tiers inline/agent/fanout/max/factory on top of the classifier, the fan-out cap from the endpoint's slots, the `[tier:x]` override, the intake card (type, tier, new or continuation, prior work, reuse, research required) before any planning, recorded on the job, the closed `researcher` phase and its store, the licence gate | `gate/classify.py`, `cli/task.py`, `cli/task_run.py`, `gate/runner.py`, `gate/render.py`, `gate/check.py`, `factory/intake.py`, `confinement.py`, `machinery.py`, `board/policy.py`, `harnesses/base.py` | L5-M | each rule red-then-green; full `pytest`; both e2e; release scan CLEAN |
 | **L5-R1** independent review 1 | review only, by someone who built none of L5-1..3: try to reach `verified` past holdouts, read the store from every harness, leak through feedback, transcripts, the board or run records, forge identities, weaken a generated DoD; one reproduction per finding | the adversarial fake harness, as the first two reviews did | L5-3 | report with severity per finding |
 | **L5-F1** fixes 1 | one red-then-green test per finding under `tests/review/` (`test_H<nn>_...`); zero open P0/P1 | — | L5-R1 | all A and B rows green again |
-| **L5-4** ship + rollback | `ship`, `ship list`, targets `github` (push + PR create/merge, revert-PR rollback, the secret scan before a push, a `gh` stand-in for tests; Q2) / `branch` / `apply` / `command`, `[ship] decision_types = ["infra"]` (Q4), the guard on both sides, plumbing-only ref moves, post-ship checks with the regression set, rollback + tree check, the follow-up job after a rollback, halt on a failed rollback, decision rules (5.4), table `ships`, fake modes `ship-break`, `self-ship` | `gate/rules/common.py` git plumbing, `verify/probe.py` `run_line`, `verify/holdout.py`, `board/api/` | L5-F1 | C1-C12 |
+| **L5-4** ship + rollback (**done**; see "L5-4 as built" below) | `ship`, `ship list`, targets `github` (push + PR create/merge, revert-PR rollback, the secret scan before a push, a `gh` stand-in for tests; Q2) / `branch` / `apply` / `command`, `[ship] decision_types = ["infra"]` (Q4), the guard on both sides, plumbing-only ref moves, post-ship checks with the regression set, rollback + tree check, the follow-up job after a rollback, halt on a failed rollback, decision rules (5.4), table `ships`, fake modes `ship-break`, `self-ship` | `gate/rules/common.py` git plumbing, `verify/probe.py` `run_line`, `verify/holdout.py`, `board/api/` | L5-F1 | C1-C12 |
 | **L5-5** factory loop + budgets + notifier + view | `factory run/start/stop/status/ack/resume-shipping`, `max_attempts` as the one required limit (Q5), `[notify] kind = "chat"` (4.0), `budget_ledger`, `Adapter.usage`, unmeasurable-budget refusal, `notify` (stdout/file/webhook), `escalations`, `board/api/factory.py`, the Factory tab | `gate/loop.py`, `cli/task_run.py`, `cli/board.py` (pid handling), `board/redact.py`, `board/static/` | L5-4 | D1, D1b, D2-D9 |
 | **L5-6** proof of level 5 | `examples/greeter/`, `tests/e2e/factory.sh` (P0-P6), CI job, QUICKSTART "level 5" section, the optional live run recorded | `tests/e2e/fresh_install.sh`, `tests/fixtures/fake_harness.py` | L5-5 | `E2E-FACTORY: PASS`; full `pytest`; release build CLEAN |
 | **L5-R2** independent review 2 | review of the whole factory (ship, rollback, budgets, loop, notifier, view) plus a regression run of F-01..F-35, G-01..G-07 and the L5-R1 findings, on a tarball installed the documented way | — | L5-6 | report |
@@ -1200,6 +1202,81 @@ secret-shaped variable left. Existing tests changed: `tests/memory/test_view.py`
 the exact sealed-note path, now opaque by H-03) and the gemini policy golden file (now also
 denies `var/memory`, H-03); `tests/conftest.py`/`tests/cli/conftest.py` pass the stand-ins'
 variables through the new allowlist.
+
+### L5-4 as built
+
+Landed as DESIGN.md §7.5 describes (code: `factory/ship.py`, `shiprules.py`, `shiprepo.py`,
+`targets.py`, `localtarget.py`, `postship.py`, `board/api/ships.py`, `cli/ship.py`, migration
+`0007_ships.sql`). The review's lessons it carries: ship reads nothing of the job clone but object
+bytes, re-hashes every object into konstant's own repository and ships that exact id (H-02, H-07);
+the catalog manifest is a guard rule on both sides (H-06); every git and gh call is konstant's
+pinned binary with an environment it builds (H-01). Where it differs from section 5, and why:
+
+- **A checked-out target branch is shipped, not refused** (5.1 said refused). The job clones'
+  base is the project's checked-out `HEAD` (2.4, L5-2) and C2's `$T` is that project, so a
+  refusal would make the branch target unusable for every project `project add` makes. konstant
+  instead rewrites the changed paths of that worktree itself from raw objects after the CAS and
+  `read-tree`s the index (no checkout, filter or hook), and refuses BEFORE the ship (a `DECISION`)
+  a worktree with local changes on tracked or shipped paths, or a branch checked out in a linked
+  worktree (which it would leave stale).
+- **The github target moves the local target too**, by CAS to the fetched merge, with the same
+  worktree rewrite: the next job's clone must start from the shipped state (rule 4 compares the
+  remote AND the local target with the clone's base). The push URL (`[ship] remote`) and the gh
+  binary (`[ship] gh`, absolute) are operator keys of `konstant.toml`, never goal keys, so a goal
+  confirmed in chat cannot point a push elsewhere; `github_repo` may come from the goal.
+- **C11's "the remote main moves to $C"**: `gh pr merge --merge` makes GitHub's merge commit, so
+  the remote `main` is a merge whose tree is `$C`'s tree and whose second parent is `$C`; the
+  shipped state is that tip, and the post-ship `merged` check asserts exactly this. C5's
+  `log -1 --format=%s main` = `konstant: roll back ship 1` is literal for the branch target; for
+  github it is the subject of the rollback PR's head (`main^2`).
+- **Post-ship `{workdir}` is the target** (its worktree just rewritten to the tip), so a DoD probe
+  of the shape `git -C {workdir} ...` keeps working; the tests and the regression set run on a
+  private materialisation of the tip bound at the target's path, as 3.6 runs holdouts. A
+  goal-less holdout job (filed and sealed by the owner) ships with the workspace's `[ship]` and
+  `[factory] defaults`; its regression set is the project's shipped jobs.
+- **The secret scan runs for `github` and `command`** (5.1 names github): a `command` target is the
+  owner's own deploy or push. It scans every changed path and the added lines of every changed
+  text file. **Decision paths** gained `GEMINI.md` and `.github/actions/` (an action a workflow
+  runs is as much CI as the workflow).
+- **Schema**: `ships` has a fifth state `failed` (the target refused the push, PR or merge and
+  was left as it was) and `follow_up_id`; the halt is an append-only `shipping_log` (newest row
+  wins) rather than a flag, so every halt and resume is on record. The board writes the halt in
+  the same transaction as `rollback_failed`, so it holds even when the factory process dies.
+- **`factory status` and `factory resume-shipping` exist now** (planned for L5-5) because C8 reads
+  the first and the halt needs the second; `factory status` shows only the shipping state and the
+  ships by state; L5-5 extends it with the loop.
+- **The follow-up job** is filed by the board itself (`POST /api/ships/{id}/follow-up`, factory
+  identity, once per rolled-back ship), `queued` without a new approval or DoD review (its brief is
+  the reviewed one plus one code-written row and the failed post-ship probe), with the original
+  commitments copied; its holdout files are copied byte for byte (the same commitments, so no new
+  lint or negative control). A failed check that is not a probe (a holdout of the regression set,
+  the tests) is named in the added DoD row by its redacted reason only; the holdouts themselves
+  carry it.
+- **DISPUTE at ship time** is not a separate rule: a DONE.md DISPUTE row already stops the run
+  BLOCKED (L5-1 as built), so no verified job carries one. **Budget room** (5.2 rule 6) is only the
+  goal's status and `max_rollbacks` (a BLOCKED instead of a follow-up) in this wave; the ledger is
+  L5-5.
+- **Approve-decision** passes the decision rule for the exact verified commit only, all of its
+  reasons at once (type, paths, secret findings); a moved target is never approved past.
+- **Known gap**: a ship interrupted between the board's `shipping` row and the target move (the
+  process killed, the host down) leaves that row in flight, and the guard then refuses every ship
+  (one at a time) until the owner inspects it; there is no recovery verb yet (L5-5's loop owns
+  the factory's own crash recovery). An unexpected error inside the process halts shipping
+  (`HALTED`) instead of guessing.
+- **Found in the fresh-install e2e** (which gained a ship leg: two sealed holdouts, a factory run
+  to `verified`, `ship --dry-run`, `ship`, `main` = the verified commit): `project add
+  --init-git` takes git's default branch name, so a target without the ship branch was reported
+  as `target moved`; it is now named for what it is (`the target has no branch main (its
+  checked-out branch is master)`), and the e2e makes its project on `main` explicitly.
+- **Not run live**: no real GitHub, no network, no model. The github target ran against a local
+  bare repository (an `update` hook as the protected branch: every ref update logged, a
+  non-fast-forward or delete refused) and the `gh` stand-in `tests/fixtures/fake_gh.py` on a
+  pinned path; the real `gh` CLI's `pr merge --match-head-commit` flag and `auth git-credential`
+  helper are used as documented by gh, not exercised here.
+- **Acceptance mapping**: C1-C8 and C10 `tests/ship/test_ship_branch.py`, C9
+  `tests/factory/test_confine_every_harness.py` (L5-2), C11-C12 `tests/ship/test_ship_github.py`;
+  goal jobs, the follow-up loop and max_rollbacks in `tests/ship/test_ship_goal.py`; the guard
+  units in `tests/ship/test_ship_units.py`.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
