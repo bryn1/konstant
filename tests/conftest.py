@@ -13,6 +13,15 @@ from pathlib import Path
 
 import pytest
 
+# The fake harness and the CLI stand-ins are scripted through the environment (FAKE_*, STUB_*)
+# and the confinement probes read PROBE_*; these are a test's "model", the production equivalent
+# of a harness's model keys. A closed phase's environment is an ALLOWLIST (REVIEW L5-R1 H-05), so
+# the test workspaces pass exactly these name prefixes through - the same mechanism (and value)
+# an operator uses via `[harness] env_passthrough` / KONSTANT_ENV_PASSTHROUGH. A real secret a
+# test never names (e.g. a dummy *_SECRET*/*_TOKEN) is still dropped, which is what the H-05
+# tests assert.
+os.environ.setdefault("KONSTANT_ENV_PASSTHROUGH", "FAKE_*,STUB_*,PROBE_*")
+
 
 def board_processes(base: str) -> list:
     """(pid, cwd) of every `konstant board serve` process whose cwd is under `base` (a deleted

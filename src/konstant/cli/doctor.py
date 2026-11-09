@@ -242,6 +242,8 @@ def check_agents(rep: Report, cfg) -> None:
     else:
         rep.add("PASS", "agents", f"generated surfaces for {', '.join(gen.harness_names())} "
                 "match the catalog")
+    from konstant import integrity
+    rep.add(*integrity.doctor_row(cfg))        # the catalog manifest (REVIEW L5-R1 H-06)
 
 
 def _version(exe: str, args) -> str:

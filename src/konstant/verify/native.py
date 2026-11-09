@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from konstant import tools
 from konstant.verify.procenv import git_env
 
 OUTPUT_CAP = 64 * 1024
@@ -84,13 +85,13 @@ def blob_sha256(tree: str, spec: str, timeout: float) -> tuple[int, str]:
     """`git -C TREE blob-sha256 REV:PATH`: sha256 of the COMMITTED blob, git plumbing only."""
     rev, _, path = spec.partition(":")
     env = git_env()
-    head = subprocess.run(["git", "-C", tree, "rev-parse", "--verify", "-q", rev + "^{commit}"],
+    head = subprocess.run([tools.git(), "-C", tree, "rev-parse", "--verify", "-q", rev + "^{commit}"],
                           capture_output=True, text=True, env=env, timeout=timeout,
                           stdin=subprocess.DEVNULL)
     sha = head.stdout.strip()
     if head.returncode != 0 or len(sha) != 40:
         return 5, f"unknown commit {rev}\n"
-    blob = subprocess.run(["git", "-C", tree, "cat-file", "blob", f"{sha}:{path}"],
+    blob = subprocess.run([tools.git(), "-C", tree, "cat-file", "blob", f"{sha}:{path}"],
                           capture_output=True, env=env, timeout=timeout,
                           stdin=subprocess.DEVNULL)
     if blob.returncode != 0:

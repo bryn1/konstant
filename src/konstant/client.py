@@ -125,8 +125,10 @@ class Client:
                               "start it with `konstant board start`") from None
         return json.loads(raw) if raw else {}
 
-    def get(self, path: str, **params) -> dict:
-        return self.request("GET", path, params=params)
+    def get(self, route: str, /, **params) -> dict:
+        """GET `route`; keyword arguments are query parameters (any name, `path` included:
+        `memory show` sends ?path=...; REVIEW L5-R1 H-08)."""
+        return self.request("GET", route, params=params)
 
     def post(self, path: str, body=None) -> dict:
         return self.request("POST", path, body=body if body is not None else {})

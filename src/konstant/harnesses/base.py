@@ -156,6 +156,9 @@ class Adapter:
     def env(self, ph: Phase) -> dict:
         return {}
 
+    # model-key env vars this harness needs: they pass the allowlisted phase env (REVIEW H-05)
+    env_keys: tuple = ()
+
     def prepare(self, ph: Phase) -> None:
         """Create what the phase needs before start (relocated homes, the phase TMPDIR)."""
 
@@ -378,10 +381,14 @@ def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True, keep=()) -> 
     hide = phase_hidden(ph)
     if not conf.home_read:
         hide += home_masks([ws, ph.cwd, *roots, *keep])
+    ro_dirs = factory_ro(ph)
+    if conf.host_write:                           # root writable: konstant's own code/interpreter
+        from konstant import tools                # stays read-only (REVIEW L5-R1 H-01)
+        ro_dirs = ro_dirs + [Path(d) for d in tools.own_dirs()]
     return dict(rw=roots, hide=hide, home=ws, expose=[secrets / t for t in phase_tokens(ph)],
                 tmpfs=("/tmp",) if phase_private_tmp(ph) else (), cwd=ph.cwd, net=True,
                 ro_binds=[*ro_binds, *prompt_binds(ph)], root_rw=conf.host_write,
-                ro_dirs=factory_ro(ph),
+                ro_dirs=ro_dirs,
                 late_ro=[os.path.expanduser(p) for p in conf.extra_read] + conf.cred_paths())
 
 

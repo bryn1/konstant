@@ -582,9 +582,22 @@ loopback (a remote bind needs `[board] allow_remote = true`); request bodies cap
   `~/notes.txt` is readable). Keep secrets in the listed locations or out of reach.
 - **The holdout store `var/holdout/` is unreadable to every phase**: the jail masks it, Claude
   Code's settings and sandbox deny reading it, the codex profile denies it and the gemini policy
-  denies its file tools; a job with holdouts runs only on jailed phases. A process you run
-  yourself, unjailed and as the same OS user, can still read it: for stronger separation put
-  `[holdout] store` outside the workspace, owned by the OS user that runs `konstant verify`.
+  denies its file tools; a job with holdouts runs only on jailed phases. A `[holdout] store` set
+  to an absolute path outside the workspace is masked and read-denied the same way, and `doctor`
+  (and `holdout add`) proves the store is unreadable from inside a phase jail rather than asserting
+  it. A process you run yourself, unjailed and as the same OS user, can still read it: for stronger
+  separation put the store under the OS user that runs `konstant verify`.
+- **A factory run composes only from a recorded catalog.** `konstant agents sync` records a
+  sha256 manifest of `catalog/` (`var/machinery.json`); a factory run refuses to start, and
+  `doctor` FAILs, when `catalog/` differs from it, so a level-4 phase that edited the catalog
+  cannot steer a later factory run's verifying phases — the next run stops until you re-run
+  `agents sync` deliberately.
+- **The leak and memory scans catch common transforms.** Besides a verbatim held-out literal, the
+  diff leak scan and the memory store-time scan match a literal whose case, whitespace or line
+  splits changed, that was reversed, or that was base64/hex/percent-encoded (`holdout/
+  transforms.py`). A custom cipher, compression, or a value split across SEPARATE notes still
+  passes: read prevention (the store and the memory pools are unreadable to producers) is the
+  primary control, this scan the backstop.
 - **Factory mode** (a job with holdouts): every phase runs in the jail whatever the harness, with
   `var/secrets/` masked except the token of the phase's own identity and the viewer token, writes
   limited to its job clone, OUT, a private TMPDIR and a fresh per-phase harness home (claude,
@@ -601,9 +614,24 @@ loopback (a remote bind needs `[board] allow_remote = true`); request bodies cap
   `pyproject.toml`, `konstant.toml`, every generated harness surface (`.claude/`, `.agents/`,
   `.dsh/`, `.gemini/`, `AGENTS.md`, `CLAUDE.md`), `var/harness/` (the relocated harness homes,
   among them the home of your own `konstant dsh` session), `var/secrets/`, the board DB and the
-  bookkeeping files under `var/`, run records, and any `.git/` (a shell that must commit gets
-  `.git/config` and `.git/hooks` read-only). A dsh phase gets a fresh dsh home of its own, removed
-  when it ends, so nothing one phase writes there loads into a later one.
+  bookkeeping files under `var/`, the memory vault `memory/` and its index `var/memory/`, run
+  records, and any `.git/`. A writable repo's `.git/` is bound as its own read-only mount, so a
+  phase cannot rename or replace it to defeat the read-only `.git/config`, `.git/hooks`,
+  `.git/info` and `.git/refs/replace`; only `objects/`, `refs/`, `logs/`, the index and the loose
+  top-level files a commit writes stay writable. A dsh phase gets a fresh dsh home of its own,
+  removed when it ends, so nothing one phase writes there loads into a later one.
+- **konstant runs its own programs from a trusted path, never a phase's.** The programs konstant
+  itself runs (git, bwrap, ls, sh, its own Python) resolve from its venv and the root-owned system
+  directories only (`konstant/tools.py`), never from a `PATH` entry under your home that a phase
+  could write; its git runs with `GIT_NO_REPLACE_OBJECTS=1` and refuses a repository carrying a
+  replace ref, a graft or a shallow file, so a `verified` commit's tree is always its real objects.
+  Under the open profile's host writes, konstant's own code and interpreter are bound read-only too.
+- **A closed phase's environment is an allowlist, not a denylist.** A closed phase, the web
+  researcher and the scenario writer get `PATH`, `HOME`, the locale, `TMPDIR`, konstant's own
+  `KONSTANT_*`, the harness's own model-key variables and the names you list in `[harness]
+  env_passthrough` (or `KONSTANT_ENV_PASSTHROUGH`) — nothing else from your environment, so a host
+  secret with any name never reaches a phase that does not need it. The open profile passes your
+  environment by design (minus the credential denylist).
 - **Unsandboxed phases are not confined.** Without bubblewrap and socat on Linux, Claude Code runs
   Bash unsandboxed (`doctor` WARNs). The allow list still decides which commands start, but an
   allowed test runner executes agent-written code with your rights: it can read your files and

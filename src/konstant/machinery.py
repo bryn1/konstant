@@ -17,13 +17,13 @@ in every one of them. A phase may never write any of these paths, whatever the h
   - var/factory/ (the goal copies, the factory's events and the chat cursors: docs/LEVEL5.md 2.3;
     a phase that edited its goal or an event would steer the factory),
   - memory/ (the memory vault, its own git repository; only the board writes it, attributed to
-    the identity whose token asked: konstant/memory/),
+    the identity whose token asked: konstant/memory/) and var/memory/ (its recall index),
   - var/research/ (the closed researcher's work: its raw pages, transcripts and the summary
     konstant parsed from them: konstant/triage/research.py).
 
 SEALED (docs/LEVEL5.md 2.3, 3.3) lists what no phase may even READ: the holdout store
-var/holdout/, the memory vault memory/ (a phase reaches memory only through the board, which
-enforces the pools: konstant/memory/guard.py) and the research store var/research/ (a producer
+var/holdout/, the memory vault memory/ and its index var/memory/ (a phase reaches memory only
+through the board, which enforces the pools: konstant/memory/guard.py) and the research store var/research/ (a producer
 sees only the researcher's parsed summary, never the pages it fetched). The jail masks them (jail.hidden),
 Claude Code's settings deny Read on them and read-deny them in the sandbox, the codex profile
 denies them and the gemini policy denies its file tools under them. No holdout content is ever
@@ -40,18 +40,23 @@ from konstant.board.policy import LABELS, PHASE_IDENTITIES
 DIRS = ("bin", ".venv", "src", "catalog", "tests",
         ".claude", ".agents", ".dsh", ".gemini",
         ".git", "var/secrets", "var/harness", "var/logs", "var/locks", "var/holdout",
-        "var/factory", "memory", "var/research")
+        "var/factory", "memory", "var/memory", "var/research")
 # workspace-relative files no phase may write
 FILES = ("konstant.toml", "install.sh", "get.sh", "pyproject.toml", "AGENTS.md", "CLAUDE.md",
          "var/board.db", "var/board.db-wal", "var/board.db-shm", "var/board.pid",
-         "var/sessions.json")
+         "var/sessions.json", "var/machinery.json")
 # workspace-relative directories no phase may READ: the sealed holdout store (LEVEL5 2.3), the
-# memory vault (read through the board only, which enforces the pools) and the research store
+# memory vault (read through the board only, which enforces the pools), everything derived from
+# it (var/memory/: the recall index and the optional vectors hold every note's text, the sealed
+# pool's included: REVIEW L5-R1 H-03) and the research store
 # (the closed researcher's raw pages and transcripts: producers get only its parsed, cited
 # summary; konstant/triage/research.py)
-SEALED = ("var/holdout", "memory", "var/research")
-# inside a git repository a shell may commit to: the parts that make git run commands
-GIT_GUARDS = (".git/config", ".git/hooks")
+SEALED = ("var/holdout", "memory", "var/memory", "var/research")
+# inside a git repository a shell may commit to: the parts that make git run commands or rewrite
+# which objects a commit reaches (config: core.hooksPath/sshCommand/filter/alias; hooks; info:
+# grafts; refs/replace, a replace ref). Bound read-only; the whole .git is bound as a mount point
+# so it cannot be renamed away to escape these binds (REVIEW L5-R1 H-07).
+GIT_GUARDS = (".git/config", ".git/hooks", ".git/info", ".git/refs/replace")
 # per run (var/runs/<run>/): the records konstant writes and the DoD check trusts
 RUN_RECORDS = ("record.json", "phases", "prompts", "profiles", "evidence.md")
 # role tokens a phase must never read (it acts as worker; viewer is read-only)
@@ -103,9 +108,33 @@ def dirs(ws) -> list:
     return [Path(ws) / d for d in DIRS]
 
 
+def external_store(ws) -> list:
+    """[the configured holdout store] when konstant.toml's `[holdout] store` names one OUTSIDE
+    the workspace (config.py allows an absolute path there); [] otherwise. It is sealed exactly
+    like var/holdout: masked in every jail and read-denied by every adapter, because a store the
+    same OS user can reach is otherwise readable by every phase (REVIEW L5-R1 H-04). An unreadable
+    or malformed konstant.toml yields [] here; config.load refuses it everywhere else."""
+    try:
+        try:
+            import tomllib as _toml
+        except ImportError:                           # Python 3.10
+            import tomli as _toml
+        raw = _toml.loads((Path(ws) / "konstant.toml").read_text(encoding="utf-8"))
+        store = (raw.get("holdout") or {}).get("store")
+    except (OSError, ValueError, AttributeError):
+        return []
+    if not isinstance(store, str) or not os.path.isabs(store):
+        return []
+    real, home = os.path.realpath(store), os.path.realpath(str(ws))
+    if real == home or real.startswith(home.rstrip("/") + "/"):
+        return []
+    return [Path(real)]
+
+
 def sealed(ws) -> list:
-    """The absolute sealed paths of workspace `ws` (read at call time: tests empty SEALED)."""
-    return [Path(ws) / d for d in SEALED]
+    """The absolute sealed paths of workspace `ws` (read at call time: tests empty SEALED), plus
+    a holdout store configured outside the workspace (external_store)."""
+    return [Path(ws) / d for d in SEALED] + external_store(ws)
 
 
 def files(ws) -> list:

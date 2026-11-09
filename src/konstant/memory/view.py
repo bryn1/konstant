@@ -74,7 +74,7 @@ class ViewClient:
         self.view, self.out = Path(view), Path(out)
         self.index = Index(self.out.parent / "index.db", Vault(self.view))
 
-    def get(self, path: str, **params) -> dict:
+    def get(self, path: str, /, **params) -> dict:
         if path != "/api/memory/recall":
             from konstant.client import ClientError
             raise ClientError(f"{path}: not available to the scenario writer")

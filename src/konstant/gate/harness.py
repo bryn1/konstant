@@ -98,12 +98,14 @@ class Harness:
     def __init__(self, command: str | None, *, stdin: bool = False, timeout_s: int = 3600,
                  env: dict | None = None, workspace: Path, adapter=None, model: str = "",
                  endpoint: dict | None = None, allow: list | None = None, name: str = "",
-                 jail: bool = True, factory: bool = False, conf=None):
+                 jail: bool = True, factory: bool = False, conf=None,
+                 env_passthrough: list | None = None):
         from konstant import confinement
         self.command, self.stdin, self.timeout_s = command, stdin, timeout_s
         self.jail, self.factory = jail, factory
         self.conf = conf or confinement.CLOSED          # the workspace's [confinement]
         self.env, self.workspace = dict(env or {}), Path(workspace)
+        self.env_passthrough = list(env_passthrough or [])
         self.adapter, self.model = adapter, model
         self.endpoint, self.allow = dict(endpoint or {}), list(allow or [])
         self.name = name or (adapter.name if adapter is not None else "command")
@@ -203,8 +205,17 @@ class Harness:
         logs = Path(run_dir) / "phases"
         logs.mkdir(parents=True, exist_ok=True)
         log = logs / f"{label}.log"
-        drop = set(self.conf.for_phase(identity, self.factory).env_drop())
-        host = {k: v for k, v in os.environ.items() if k not in drop}
+        conf = self.conf.for_phase(identity, self.factory)
+        drv = self.driver()
+        keys = tuple(drv.env_keys if drv is not None else ()) + tuple(
+            k for k in [self.endpoint.get("api_key_env")] if k)   # the endpoint key's variable
+        # the allowlist keeps [harness] env_passthrough and, as the same operator-controlled
+        # setting via konstant's own environment, KONSTANT_ENV_PASSTHROUGH (comma-separated names
+        # or NAME* prefixes); a phase cannot change it (it is read from konstant's env, not the
+        # phase's). REVIEW L5-R1 H-05.
+        extra_pass = [n.strip() for n in os.environ.get("KONSTANT_ENV_PASSTHROUGH", "").split(",")
+                      if n.strip()]
+        host = conf.filter_host_env(os.environ, keys, [*self.env_passthrough, *extra_pass])
         env = {**host, **extra, **{k: str(v) for k, v in self.env.items()},
                "KONSTANT_IN_TASK": "1", "KONSTANT_RUN": str(run_dir), "KONSTANT_ROLE": "worker",
                "KONSTANT_IDENTITY": identity, "KONSTANT_HOME": str(self.workspace)}
@@ -244,7 +255,8 @@ def from_choice(choice, hcfg: dict, workspace: Path, allow: list | None = None,
                    env=hcfg["env"], workspace=workspace,
                    adapter=None if choice.template is not None else choice.adapter,
                    model=choice.model, endpoint=hcfg.get("endpoint"), allow=allow,
-                   name=choice.name, jail=jail, factory=factory, conf=conf)
+                   name=choice.name, jail=jail, factory=factory, conf=conf,
+                   env_passthrough=hcfg.get("env_passthrough"))
 
 
 class HarnessSet:
@@ -264,7 +276,8 @@ class HarnessSet:
         if override is not None:                # `task run --harness CMD`: one command for all
             self.default = Harness(override, stdin=hcfg["stdin"], timeout_s=hcfg["timeout_s"],
                                    env=hcfg["env"], workspace=workspace, name="command",
-                                   jail=jail, factory=factory, conf=conf)
+                                   jail=jail, factory=factory, conf=conf,
+                                   env_passthrough=hcfg.get("env_passthrough"))
             self.by_type: dict = {}
             return
         if cat is not None:

@@ -17,7 +17,7 @@ import json
 import os
 from pathlib import Path
 
-from konstant.holdout import lint
+from konstant.holdout import lint, transforms
 from konstant.verify import holdout as runner
 
 SCAN_CAP = 8 * 1024 * 1024          # a bigger file is scanned in its first 8 MiB
@@ -90,12 +90,17 @@ def canaries(scenarios: list, sources: list) -> list:
 
 
 def suspects(scenarios: list, diff: list, brief: str) -> list:
+    """A held-out literal on an added line (verbatim OR under a common transform: case, a split,
+    reversed, base64/hex/url-encoded; holdout/transforms.py, REVIEW L5-R1 H-09). The whole added
+    text of a file is searched as one string, so a literal split across lines is caught too."""
     out = []
+    bfold = transforms.fold(brief or "")
     for sc in scenarios:
-        lits = [x for x in lint.literals(sc) if x not in (brief or "")]
+        lits = [x for x in lint.literals(sc)
+                if x not in (brief or "") and transforms.fold(x) not in bfold]
         for path, old, new in diff:
-            lines = added_lines(old, new)
-            if any(x in ln for x in lits for ln in lines):
+            added = "\n".join(added_lines(old, new))
+            if any(transforms.appears(x, added) for x in lits):
                 out.append(f"LEAK-SUSPECT: a literal of {sc.hid} appears on an added line of "
                            f"{path}")
     return out

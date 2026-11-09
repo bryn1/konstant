@@ -146,6 +146,12 @@ def _run(ctx, task: str, prepare) -> int:
         return _small(ctx, task, why)
     factory = "holdouts" in rec
     if factory:
+        from konstant import integrity
+        drifted = integrity.require(ctx.cfg)
+        if drifted:
+            shutil.rmtree(run_dir, ignore_errors=True)
+            err(f"konstant task: {drifted}")
+            return EXIT_USAGE
         refusal = holdout_confinement(ctx, cat)
         if refusal:
             shutil.rmtree(run_dir, ignore_errors=True)

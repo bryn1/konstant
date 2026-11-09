@@ -29,6 +29,12 @@ class Workspace:
 
     def env(self, **extra) -> dict:
         env = {k: v for k, v in os.environ.items() if not k.startswith("KONSTANT_")}
+        # KONSTANT_ENV_PASSTHROUGH names the test-harness control vars (FAKE_*/STUB_*/PROBE_*) a
+        # closed phase's env allowlist keeps (tests/conftest.py; REVIEW L5-R1 H-05): it is
+        # konstant config, not a per-workspace var, so it survives the KONSTANT_ strip here.
+        passthrough = os.environ.get("KONSTANT_ENV_PASSTHROUGH")
+        if passthrough:
+            env["KONSTANT_ENV_PASSTHROUGH"] = passthrough
         env.update(KONSTANT_HOME=str(self.home), **extra)
         return env
 

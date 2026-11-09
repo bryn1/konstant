@@ -29,7 +29,7 @@ import re
 from pathlib import Path
 
 from konstant.board.policy import LABELS
-from konstant.holdout import lint
+from konstant.holdout import lint, transforms
 
 SHARED, SEALED = "shared", "sealed"
 OWN_NOTES = "notes"
@@ -106,14 +106,17 @@ def scan(text: str, store_root: Path, briefs) -> None:
     except OSError:
         raise StoreRefused("unreadable", "refused: the sealed holdout store cannot be read, so "
                            "the note cannot be checked against it (fail closed)") from None
-    low = text.lower()
     for job, raw in found:
         try:
             sc = lint.parse(raw, "H0")
         except lint.ScenarioError:
             continue
-        public = (briefs(job) or "").lower()
-        if any(x.lower() in low for x in lint.literals(sc) if x.lower() not in public):
+        public = briefs(job) or ""
+        pub_fold = transforms.fold(public)
+        lits = [x for x in lint.literals(sc)
+                if x.lower() not in public.lower() and transforms.fold(x) not in pub_fold]
+        # transforms.appears catches case/whitespace/split/reversed/base64-hex-url (H-09)
+        if any(transforms.appears(x, text) for x in lits):
             raise StoreRefused("literal", "refused: the note carries a literal of a sealed "
-                               "holdout scenario (recorded; for a job's phase the verifier "
-                               "counts it as a LEAK-SUSPECT of that job)")
+                               "holdout scenario (verbatim or transformed; recorded; for a job's "
+                               "phase the verifier counts it as a LEAK-SUSPECT of that job)")

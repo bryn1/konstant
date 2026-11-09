@@ -125,11 +125,12 @@ def verdict_word(path: Path):
 # by konstant itself (worktree_drift), never by `git diff`/`git status` (REVIEW F-04).
 GIT_ISOLATION = ("-c", "safe.directory=*", "-c", "core.fsmonitor=false", "-c",
                  "core.hooksPath=/dev/null", "-c", "protocol.allow=never", "-c",
-                 "core.untrackedCache=false")
+                 "core.untrackedCache=false", "-c", "core.attributesFile=/dev/null")
 
 
 def git_env(base: dict | None = None) -> dict:
-    env = dict(os.environ if base is None else base)
+    from konstant import tools
+    env = tools.env(base)                         # PATH = konstant's trusted dirs (REVIEW H-01)
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GIT_CONFIG_NOSYSTEM="1",
                GIT_CONFIG_GLOBAL=os.devnull, GIT_ATTR_NOSYSTEM="1", GIT_PAGER="cat",
                GIT_NO_REPLACE_OBJECTS="1")
@@ -137,9 +138,10 @@ def git_env(base: dict | None = None) -> dict:
 
 
 def git(top, *args, timeout: int = 120) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *GIT_ISOLATION, "-C", str(top), *args], capture_output=True,
-                          text=True, errors="replace", timeout=timeout, env=git_env(),
-                          stdin=subprocess.DEVNULL)
+    from konstant import tools
+    return subprocess.run([tools.git(), *GIT_ISOLATION, "-C", str(top), *args],
+                          capture_output=True, text=True, errors="replace", timeout=timeout,
+                          env=git_env(), stdin=subprocess.DEVNULL)
 
 
 def _z(out: str) -> list:

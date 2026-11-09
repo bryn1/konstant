@@ -16,6 +16,21 @@
 # passed; the transcript on stdout is the release evidence.
 set -euo pipefail
 
+# Start from a SCRUBBED environment (REVIEW L5-R1 H-05): the e2e never inherits the caller's
+# secrets. Re-exec once under `env -i` keeping only what the run needs; then refuse to go on if
+# anything secret-shaped is still set.
+if [ -z "${KONSTANT_E2E_SCRUBBED:-}" ]; then
+  keep=(KONSTANT_E2E_SCRUBBED=1 "HOME=$HOME" "PATH=$PATH" "LANG=${LANG:-C.UTF-8}")
+  for v in LC_ALL TERM TMPDIR LEFTHOOK PYTHON; do
+    [ -z "${!v:-}" ] || keep+=("$v=${!v}")
+  done
+  exec env -i "${keep[@]}" bash "$(readlink -f "$0")" "$@"
+fi
+if env | cut -d= -f1 | grep -qiE 'secret|token|password|api_?key'; then
+  echo "E2E FAIL: a secret-shaped variable survived the scrub"; exit 1
+fi
+echo "E2E env: scrubbed to $(env | wc -l) variables (no secret-shaped name)"
+
 REPO=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd -P)
 PY=${PYTHON:-python3}
 BUILD_PY="$REPO/.venv/bin/python"

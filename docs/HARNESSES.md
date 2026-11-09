@@ -23,6 +23,10 @@ model = ""             # passed through the harness's own model key; "" = its de
 timeout_s = 3600
 max_parallel = 2
 env = {}               # extra environment for every phase (wins over the adapter's)
+env_passthrough = []   # host variables (NAME or NAME*) a closed phase also keeps: a closed
+                       # phase's env is an allowlist (PATH, HOME, locale, KONSTANT_*, the
+                       # harness's model keys, api_key_env below); every other host variable
+                       # is dropped (docs/CONCEPTS.md "Security model and limits")
 
 [harness.endpoint]     # a local OpenAI-compatible server, for codex and dsh
 base_url = ""          # e.g. "http://127.0.0.1:8000/v1" (vLLM), ":11434/v1" (Ollama), ":8080/v1" (llama.cpp)

@@ -27,12 +27,12 @@ import subprocess
 import tempfile
 from contextlib import contextmanager
 
-from konstant import machinery
+from konstant import machinery, tools
 
 
 @functools.lru_cache(maxsize=None)
 def available() -> bool:
-    exe = shutil.which("bwrap")
+    exe = tools.which("bwrap")
     if not exe or os.environ.get("KONSTANT_NO_JAIL") == "1":
         return False
     try:
@@ -51,7 +51,7 @@ def nests() -> bool:
     private /tmp, and a second bwrap that unshares pid and network inside it."""
     if not available():
         return False
-    exe = shutil.which("bwrap")
+    exe = tools.which("bwrap")
     inner = [exe, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid",
              "--unshare-net", "--die-with-parent", "true"]
     try:
@@ -92,7 +92,7 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
     masks (a credential the profile passes through, an extra_read path under a mask)."""
     if not available():
         return list(argv)
-    a = [shutil.which("bwrap"), "--bind" if root_rw else "--ro-bind", "/", "/", "--dev", "/dev",
+    a = [tools.which("bwrap"), "--bind" if root_rw else "--ro-bind", "/", "/", "--dev", "/dev",
          "--proc", "/proc", "--unshare-pid", "--die-with-parent"]
     if not net:
         a.append("--unshare-net")
@@ -107,6 +107,14 @@ def wrap(argv, *, rw=(), hide=(), expose=(), tmpfs=(), cwd=None, net: bool = Tru
     late = [p for p in roots if any(_inside(p, m) and p != m for m in masked)]
     roots = [p for p in roots if p not in late]
     for p in roots:
+        a += ["--bind", p, p]
+    # a writable repo's .git is bound as its OWN mount point, so a phase cannot rename or replace
+    # it to defeat the read-only config/hooks/info binds below (REVIEW L5-R1 H-07); its contents
+    # stay writable (git porcelain writes index.lock, logs, refs, objects) except those guards.
+    git_mounts = [os.path.join(r, ".git") for r in roots
+                  if os.path.isdir(os.path.join(r, ".git"))
+                  and not os.path.islink(os.path.join(r, ".git"))]
+    for p in git_mounts:
         a += ["--bind", p, p]
     for src, dst in binds:
         a += ["--bind", os.path.realpath(str(src)), os.path.realpath(str(dst))]

@@ -114,6 +114,8 @@ class Dsh(Adapter):
     relocatable_home = True
     home_doc = "DSH_HOME + DSH_AGENTS_HOME: a fresh directory per phase, removed after it"
 
+    env_keys = ()
+
     def argv(self, ph: Phase) -> list:
         return [self.binary, "--profile", "headless", "--patch", str(ph.workspace / PATCH), "-"]
 

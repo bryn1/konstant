@@ -25,11 +25,15 @@ def rows(cfg) -> list:
     from konstant.board.policy import IDENTITIES
     out = []
     on = bool(cfg.data["gate"]["jail"])
-    if on and jail_mod.available():
+    from konstant.holdout import store as store_mod
+    leak = store_mod.jail_proof(cfg) if on and jail_mod.available() else None
+    if leak:                                  # the claim is checked, not asserted (REVIEW H-04)
+        out.append(("FAIL", "factory jail", leak))
+    elif on and jail_mod.available():
         out.append(("PASS", "factory jail", "a job with sealed holdouts runs every phase in "
                     "konstant's jail on any harness (claude, codex, gemini, dsh, command): its "
                     "own job clone writable, the target read-only, only its own identity's token "
-                    "readable, the holdout store masked"))
+                    "readable, the holdout store masked (listed from inside a jail: empty)"))
     else:
         out.append(("WARN", "factory jail", "konstant's jail is " + (
             "off ([gate] jail = false)" if not on else "unavailable (no working bubblewrap)")

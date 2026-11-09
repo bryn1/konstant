@@ -50,6 +50,35 @@ def resolve(project, rev: str) -> str:
     return sha
 
 
+# git features that make the objects a plumbing read sees differ from the real commit: a replace
+# ref swaps one object for another, a graft or shallow file rewrites a commit's parents. Every git
+# konstant runs sets GIT_NO_REPLACE_OBJECTS=1 and grafts are off, but a clone that CARRIES them is
+# refused outright, so `verified` can never name a commit whose real tree failed (REVIEW L5-R1
+# H-02); the clone is konstant's own (factory/clone.py: no replace ref, no graft).
+def git_dir(project) -> str:
+    r = _git(project, "rev-parse", "--git-dir")
+    d = r.stdout.decode().strip()
+    if r.returncode != 0 or not d:
+        raise HoldoutError(f"{project} is not a git repository")
+    return d if os.path.isabs(d) else os.path.join(str(project), d)
+
+
+def refuse_rewrites(project) -> None:
+    """Raise HoldoutError when `project`'s .git carries a replace ref, a graft or a shallow file:
+    they would let a read see a different tree than the commit's real objects."""
+    gd = git_dir(project)
+    r = _git(project, "for-each-ref", "--format=%(refname)", "refs/replace/")
+    refs = [x for x in r.stdout.decode().splitlines() if x.strip()]
+    if refs:
+        raise HoldoutError(f"the repository carries replace ref(s) ({', '.join(refs[:3])}): "
+                           "konstant refuses it (a replace ref makes the verified objects differ "
+                           "from the commit's real tree)")
+    for rel in ("info/grafts", "shallow"):
+        if os.path.exists(os.path.join(gd, rel)):
+            raise HoldoutError(f"the repository carries {rel}: konstant refuses it (it rewrites "
+                               "which objects a commit reaches)")
+
+
 def tree(project, commit: str) -> list:
     """[(mode, oid, path)] of every blob of the commit (plumbing: ls-tree)."""
     r = _git(project, "ls-tree", "-r", "-z", "--full-tree", commit)
@@ -139,10 +168,16 @@ def run_one(sc, tree_dir: Path, project: Path, home, timeout: float) -> dict:
     if not runnable(sc.argv()[0], tree_dir):
         return {"hid": sc.hid, "kind": sc.kind, "passed": False, "unrunnable": True,
                 "timed_out": False, "net": False, "duration_s": 0.0}
-    with jail_mod.session(sc.argv(), home=home, cwd=project, net=False, env=scrub_env(),
+    with jail_mod.session(sc.argv(), home=home, cwd=project, net=False,
+                          env={**scrub_env(), "PYTHONNOUSERSITE": "1"},
                           binds=[(tree_dir, project)]) as (argv, env):
         if argv[:1] == sc.argv()[:1]:
             raise HoldoutError(f"{UNCONFINED}: the jail did not wrap the run")
+        # a private HOME: nothing a phase planted under the user's home (a Python usercustomize,
+        # a ~/.node_modules, an rc file) loads into the program a scenario runs (REVIEW H-01)
+        env["HOME"] = env.get("TMPDIR") or env.get("HOME", "/")
+        env.pop("XDG_CONFIG_HOME", None)
+        env.pop("XDG_DATA_HOME", None)
         proc = subprocess.Popen(argv, cwd=str(project), env=env, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 start_new_session=True)
@@ -168,6 +203,7 @@ def run_set(cfg, scenarios: list, project: Path, commit: str) -> list:
     why = confined(cfg)
     if why:
         raise HoldoutError(why)
+    refuse_rewrites(project)
     tmp = Path(tempfile.mkdtemp(prefix="konstant-holdout-"))
     try:
         materialise(project, commit, tmp)
@@ -260,6 +296,7 @@ def evaluate(client, cfg, job: dict, projects: list) -> dict | None:
                               "the job closed with")
         return res
     try:
+        refuse_rewrites(project)
         commit = resolve(project, commit)
         base = (ev.get("base") or "").strip()
         base = resolve(project, base) if base else None

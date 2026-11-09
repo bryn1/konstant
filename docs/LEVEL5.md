@@ -1146,6 +1146,61 @@ compatible licence. Landed as DESIGN.md §6.2.1 describes. Where it touches this
 - **Not run live**: no model call in this wave. The researcher ran through the real adapter path
   (`HarnessSet`, the jail) with the fake harness against a local http server.
 
+### L5-F1 as built
+
+The first independent review (docs/build/REVIEW-L5-R1.md) found nine issues; this wave fixes the
+CLASS of each, with one red-then-green test per finding under `tests/review/test_level5_r1.py`
+(red on 8f40c31 for the reviewer's reproduction, green after the fix; the allowed twins stay green
+on both).
+
+- **H-01 (P0)** konstant resolves every program IT runs (git, bwrap, ls, sh, its own Python) from
+  a trusted path — its venv plus the root-owned system directories (`konstant/tools.py`) — never
+  from a user-writable `PATH` entry a phase could plant on; `git_env`/`scrub_env` pin that `PATH`.
+  Under the open profile's host writes, konstant's own code and interpreter are bound read-only in
+  the jail too (`tools.own_dirs`). A scenario run gets a private `HOME` and `PYTHONNOUSERSITE=1`,
+  so a planted `usercustomize`/rc file under your home cannot fake its output; konstant's git
+  ignores a global attributes file. NOT changed (stated): an open factory phase still writes the
+  host as the owner chose (the reviewer's first option, clamping `host_write` in factory mode, was
+  not taken); what it plants there is never run by konstant's own processes, but your own later
+  shells and tools (rc files, `~/.config/systemd/user`) do load it — that is the open profile's
+  documented risk, not a hole in "verified".
+- **H-02 (P0)** every git env konstant uses sets `GIT_NO_REPLACE_OBJECTS=1`, and the holdout
+  runner refuses a repository that carries a `refs/replace/*` ref, `info/grafts` or a `shallow`
+  file (`verify/holdout.py refuse_rewrites`), at both the materialise and the evaluate step, so a
+  `verified` commit's tree is always its real objects.
+- **H-03 (P1)** `var/memory` (the recall index and vectors, which hold every note's text) joined
+  `machinery.SEALED` and `DIRS`; a sealed-pool note's file path is now opaque (a random id or a
+  hash of the title, `memory/service.py note_path`), so the phase-readable `memory_writes` rows
+  carry no sealed lesson.
+- **H-04 (P1)** a `[holdout] store` set outside the workspace is masked and read-denied in every
+  jail and adapter (`machinery.external_store`), and `holdout add`/`doctor` PROVE the store is
+  unreadable from inside a phase jail (`holdout/store.py jail_proof`) instead of printing PASS.
+- **H-05 (P1)** a closed phase, the researcher and the scenario writer get an ALLOWLISTED
+  environment (`confinement.filter_host_env`): PATH/HOME/locale/`KONSTANT_*`, the adapter's
+  `env_keys` and `[harness] env_passthrough` only; any other host variable, whatever its name, is
+  dropped. The open profile still passes the host by design.
+- **H-06 (P1)** `agents sync` records a sha256 manifest of `catalog/` (`var/machinery.json`,
+  `konstant/integrity.py`); a factory run refuses, and `doctor` FAILs, on drift, so a level-4
+  phase's catalog edit stops the next factory run instead of steering it.
+- **H-07 (P2)** a writable repo's `.git/` is bound as its own read-only mount point (`jail.py`),
+  so it cannot be renamed or replaced to defeat the read-only `.git/config`, `.git/hooks`,
+  `.git/info` and `.git/refs/replace`; the subpaths a commit writes stay writable.
+- **H-08 (P2)** `Client.get(route, /, **params)` takes `route` positionally, so `memory show PATH`
+  (which passes `?path=`) no longer raises `TypeError`.
+- **H-09 (P3)** the leak and memory store-time scans also match a held-out literal under common
+  transforms — case, whitespace/line splits, split across string pieces, reversed, base64/hex/url
+  encoding (`holdout/transforms.py`); a custom cipher or a value split across separate notes is a
+  stated remaining limit (read prevention is the primary control).
+
+Deviations: none from DESIGN.md's model; `[harness] env_passthrough` (and the equivalent
+`KONSTANT_ENV_PASSTHROUGH`) is a new, documented opt-in an operator uses to name extra host
+variables a closed phase keeps (the test suite passes its stand-ins' `FAKE_*`/`STUB_*`/`PROBE_*`
+this way). The e2e scripts re-exec themselves under `env -i` and refuse to run with a
+secret-shaped variable left. Existing tests changed: `tests/memory/test_view.py` (two asserts of
+the exact sealed-note path, now opaque by H-03) and the gemini policy golden file (now also
+denies `var/memory`, H-03); `tests/conftest.py`/`tests/cli/conftest.py` pass the stand-ins'
+variables through the new allowlist.
+
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
 

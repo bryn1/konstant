@@ -34,6 +34,39 @@ from konstant import machinery
 PROFILES = ("closed", "open")
 ALL = "*"                       # credentials = ["*"]: every credential location and variable
 _ENV = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
+# the host environment variables an ALLOWLISTED phase keeps (a closed phase, the researcher, the
+# scenario writer: REVIEW L5-R1 H-05). Everything else from the host is dropped - a secret the
+# denylist of machinery.CREDENTIAL_ENV never named (an operator's own *_API_KEY, a session token)
+# does not reach a phase that needs none of it. The harness's own model keys are added per
+# adapter (Adapter.env_keys); [harness] env sets anything explicitly on top.
+ENV_ALLOW_NAMES = frozenset((
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TZ", "LANG", "TMPDIR", "TMP", "TEMP",
+    "PWD", "HOSTNAME", "COLUMNS", "LINES", "DISPLAY", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME",
+    "PYTHONPATH", "PYTHONHASHSEED", "PYTHONDONTWRITEBYTECODE", "PYTHONUNBUFFERED",
+    "GIT_TERMINAL_PROMPT", "SOURCE_DATE_EPOCH", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "FORCE_COLOR"))
+ENV_ALLOW_PREFIX = ("LC_", "KONSTANT_", "DSH_", "CODEX_", "GEMINI_", "CLAUDE_")
+_ENV_SECRETISH = ("TOKEN", "SECRET", "PASSWORD")
+
+
+def _passthrough_match(name: str, names) -> bool:
+    for n in names or ():
+        if n.endswith("*"):
+            if name.startswith(n[:-1]):
+                return True
+        elif name == n:
+            return True
+    return False
+
+
+def _allowed_env_name(name: str, keys: set, passthrough=()) -> bool:
+    up = name.upper()
+    if name in keys or name in ENV_ALLOW_NAMES or _passthrough_match(name, passthrough):
+        return True
+    if any(up.startswith(p) for p in ENV_ALLOW_PREFIX):
+        # a KONSTANT_*/DSH_* variable that looks like a secret is still dropped (never a token)
+        return not any(w in up for w in _ENV_SECRETISH)
+    return False
 
 # the options table: ONE source for the config check, `konstant confinement show`, doctor and the
 # docs (docs/CONCEPTS.md copies it; tests/unit/test_confinement.py checks they agree).
@@ -174,6 +207,25 @@ class Confinement:
         out = [os.path.expanduser(c) for c in machinery.credentials(harness, env=env)]
         return [c for c in out if os.path.realpath(c) not in keep]
 
+    def allowlists_env(self) -> bool:
+        """Whether a phase's host environment is an ALLOWLIST, not a denylist (REVIEW L5-R1 H-05):
+        every confinement but the open profile's own producer phases. for_phase already forces the
+        scenario writer to CLOSED and the researcher to RESEARCH, both closed, so they allowlist
+        even under an open workspace."""
+        return not self.open
+
+    def filter_host_env(self, environ: dict, adapter_keys=(), passthrough=()) -> dict:
+        """The host variables a phase keeps. Allowlisted (closed, researcher, scenario): only the
+        documented names, the LC_*/KONSTANT_*/harness prefixes, the adapter's own model keys and
+        the operator's [harness] env_passthrough names. Open: the host as-is minus the credential
+        denylist (env_drop)."""
+        if not self.allowlists_env():
+            drop = set(self.env_drop())
+            return {k: v for k, v in environ.items() if k not in drop}
+        keep = set(self.cred_env()) | set(adapter_keys or ())
+        return {k: v for k, v in environ.items()
+                if _allowed_env_name(k, keep, passthrough)}
+
     def env_drop(self) -> list:
         """Environment variables a phase does not get: the credential variables konstant lists
         (machinery.CREDENTIAL_ENV) that `credentials` does not pass, SSH_AUTH_SOCK without
@@ -234,7 +286,7 @@ def _check_path(name: str, p: str, home: Path | None, write: bool) -> None:
         return
     real = os.path.realpath(os.path.expanduser(p))
     ws = os.path.realpath(str(home))
-    core = [os.path.join(ws, "var", "secrets")] + [str(Path(ws) / d) for d in machinery.SEALED]
+    core = [os.path.join(ws, "var", "secrets")] + [str(d) for d in machinery.sealed(ws)]
     if write:
         core += [str(Path(ws) / d) for d in (*machinery.DIRS, *machinery.FILES)]
         core += [os.path.join(ws, "var")]

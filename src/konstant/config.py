@@ -1,5 +1,7 @@
 """konstant.toml: load, defaults, validation, and workspace-root resolution.
 
+reason: the one place every config default lives and every section is validated fail-closed.
+
 The workspace root (KONSTANT_HOME) is the install folder: it holds konstant.toml, var/ and
 projects/. Resolution order: an explicit --config path (its directory), env KONSTANT_HOME, then
 the nearest ancestor of the current directory that holds konstant.toml or var/board.db.
@@ -67,6 +69,7 @@ DEFAULTS: dict = {
         # the endpoint's real slots: fan-out cap = this // max_parallel runs (triage/tiers.py)
         "max_concurrency": 0,
         "env": {},
+        "env_passthrough": [],   # host env names (NAME*) a closed phase keeps (REVIEW H-05)
         # a local OpenAI-compatible endpoint (vLLM, llama.cpp, Ollama) for the adapters that can
         # speak to one (codex, dsh); base_url "" = the harness's own provider
         "endpoint": {"base_url": "", "api_key_env": ""},
@@ -366,6 +369,10 @@ def check_harness(h: dict, path) -> None:
         raise ConfigError(f"{where}.endpoint: base_url must be an http(s) URL")
     if ep["api_key_env"] and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ep["api_key_env"]):
         raise ConfigError(f"{where}.endpoint: api_key_env must be an environment variable name")
+    ep = h.get("env_passthrough", [])
+    if not isinstance(ep, list) or not all(isinstance(x, str)
+            and re.fullmatch(r"[A-Za-z_]\w*\*?", x) for x in ep):
+        raise ConfigError(f"{where} env_passthrough must be a list of NAME or NAME* prefixes")
 
 
 def find_home(explicit_config: str | None = None, cwd: Path | None = None) -> Path:

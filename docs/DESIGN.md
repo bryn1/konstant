@@ -1100,9 +1100,14 @@ from) and `Phase.conf` = `wconf.for_phase(identity, factory)`: the scenario writ
   confines at level 4 too (`Adapter.confines(jail, factory, conf)`: `conf.jails_level4()`), so the
   jail keeps the core around a phase that otherwise has the host; dsh confines always, unless the
   core is off.
-- **phase environment** (`gate/harness.py`): `Confinement.env_drop()` removes
-  `machinery.CREDENTIAL_ENV` not passed, `SSH_AUTH_SOCK` without `ssh_agent`, `DOCKER_HOST`
-  without `docker_socket` (the `[harness] env` table still wins).
+- **phase environment** (`gate/harness.py`, `Confinement.filter_host_env`; L5-F1, REVIEW L5-R1
+  H-05): a closed phase, the researcher and the scenario writer get an ALLOWLIST of the host
+  environment (`confinement.ENV_ALLOW_NAMES`/`ENV_ALLOW_PREFIX`: PATH, HOME, locale, TMPDIR,
+  `KONSTANT_*` minus secret-shaped names, the adapter's `env_keys`, `[harness.endpoint]
+  api_key_env`, `credentials` `$VARIABLES`, `[harness] env_passthrough` /
+  `KONSTANT_ENV_PASSTHROUGH`); an open producer phase gets the host minus `env_drop()`
+  (`machinery.CREDENTIAL_ENV` not passed, `SSH_AUTH_SOCK` without `ssh_agent`, `DOCKER_HOST`
+  without `docker_socket`). The `[harness] env` table still wins.
 - **Claude Code** (`agents/settings.py` `render(conf=)`): open adds `Bash`, `Read(//**)`, unsets
   `blockReadsOutsideWorkingDirectories`; `host_write`/`home_write` add `Edit(//**)`/`Edit(~/**)`
   and sandbox `allowWrite`; `extra_*` add rules (+ `additionalDirectories`); passed credentials

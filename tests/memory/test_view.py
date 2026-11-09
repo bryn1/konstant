@@ -49,7 +49,10 @@ def test_view_reads_the_shared_pool_and_its_notes_land_sealed(mb, tmp_path):
     assert res["hits"][0]["trust"] == f"verified job {job}" and "read-only view" in res["mode"]
     vc.post("/api/memory/note", {"title": "scenario lesson", "text": "zebra inputs only"})
     stored = view.collect(BoardClient(mb, "scenario"), drafts)
-    assert stored == ["sealed/scenario/scenario lesson.md"]
+    # the sealed-pool path is opaque (a hash of the title, not the text): the phase-readable
+    # memory_writes rows must not carry the lesson (REVIEW L5-R1 H-03)
+    assert len(stored) == 1 and stored[0].startswith("sealed/scenario/")
+    assert stored[0].endswith(".md") and "lesson" not in stored[0] and "zebra" not in stored[0]
     assert not (drafts / ".memory").exists()
     assert mb.paths("worker", "zebra") == [] and mb.paths("verifier", "zebra") == stored
 
@@ -79,7 +82,9 @@ def test_intake_scenario_writer_recalls_the_shared_pool_and_writes_sealed(iws):
     assert any("sealed pool" in ln for ln in lines), lines             # its note went behind glass
     sealed = [n["path"] for n in iws.json("--as", "owner", "memory", "list", "--pool",
                                           "sealed")["notes"]]
-    assert "sealed/scenario/scenario lesson.md" in sealed
+    # opaque sealed path (REVIEW L5-R1 H-03): a sealed note exists, named by a hash not its text
+    assert any(p.startswith("sealed/scenario/") for p in sealed)
+    assert all("lesson" not in p for p in sealed if p.startswith("sealed/scenario/"))
     for who in ("worker", "planner", "orchestrator"):
         got = iws.json("--as", who, "memory", "recall", "proof", "inputs")["hits"]
         assert all(not h["path"].startswith("sealed/") for h in got), who

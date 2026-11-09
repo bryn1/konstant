@@ -11,8 +11,10 @@ that job reached `verified`, verified-job lessons first (`label`).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import secrets
 import threading
 import time
 
@@ -156,6 +158,24 @@ def _free(v: Vault, rel: str) -> str:
     return rel
 
 
+def note_path(v: Vault, ns: str, writer: str, kind: str, title: str) -> str:
+    """The vault path of a new write. In the shared pool the file name is the title (Obsidian
+    resolves [[Title]]). In the SEALED pool it is opaque - a random id for a fact, a hash of the
+    title for a named note (so a rewrite replaces it) - because the path is recorded where
+    producers can read it (the board DB's memory_writes, the trail): a name built from the text
+    would carry the judges' lesson out through the glass (REVIEW L5-R1 H-03)."""
+    day = time.strftime('%Y-%m-%d', time.gmtime())
+    if ns == guard.SEALED:
+        if kind == "fact":
+            return f"{ns}/{writer}/facts/{day} {secrets.token_hex(8)}.md"
+        digest = hashlib.sha256(title.encode("utf-8")).hexdigest()[:16]
+        return f"{ns}/{writer}/note {digest}.md"
+    name = note_mod.file_title(title)
+    if kind == "fact":
+        return _free(v, f"{ns}/{writer}/facts/{day} {name}.md")
+    return f"{ns}/{writer}/{name}.md"
+
+
 def write(cfg, db_path, actor, *, kind: str, text: str, title: str = "", tags=(), links=(),
           run: str = "") -> dict:
     """Store a fact (`kind` fact: a new file under <pool>/<writer>/facts/) or write a named note
@@ -204,12 +224,7 @@ def write(cfg, db_path, actor, *, kind: str, text: str, title: str = "", tags=()
         if refused is not None:
             raise MemoryRefused(refused.message, 422)
         v = vault(cfg)
-        name = note_mod.file_title(title)
-        if kind == "fact":
-            rel = _free(v, f"{ns}/{actor.label}/facts/"
-                           f"{time.strftime('%Y-%m-%d', time.gmtime())} {name}.md")
-        else:
-            rel = f"{ns}/{actor.label}/{name}.md"
+        rel = note_path(v, ns, actor.label, kind, title)
         rel = safe_rel(rel)
         created = _now()
         if kind == "note" and (v.root / rel).is_file():

@@ -122,6 +122,8 @@ class Codex(Adapter):
                     "[\"konstant.toml\"]), .agents/skills/*/SKILL.md")
     uses_endpoint = True
 
+    env_keys = ("OPENAI_API_KEY", "OPENAI_BASE_URL")
+
     def argv(self, ph: Phase) -> list:
         a = [self.binary, "exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
              "--ephemeral", "--color", "never",

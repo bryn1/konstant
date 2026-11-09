@@ -41,6 +41,8 @@ def cmd_sync(ctx) -> int:
                     else "\n".join(text + ["konstant agents: generated files match the catalog"]))
             return EXIT_FAIL if drift else EXIT_OK
         changed = gen.sync(only)
+        from konstant import integrity
+        integrity.record(cfg)              # the catalog manifest (REVIEW L5-R1 H-06)
     except (catalog_mod.CatalogError, GenerateError, harnesses.HarnessError) as exc:
         return _fail(str(exc))
     ctx.out({"changed": changed, "workspace": str(cfg.home)},

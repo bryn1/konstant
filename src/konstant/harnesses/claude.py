@@ -68,6 +68,9 @@ class Claude(Adapter):
     home_doc = ("factory mode: CLAUDE_CONFIG_DIR = a fresh directory per phase, removed after it; "
                 "only ~/.claude/.credentials.json bound in, read-only")
 
+    env_keys = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+                 "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL")
+
     def argv(self, ph: Phase) -> list:
         argv = build_argv(self.template(ph.model), ph.values, False)
         if ph.identity == "researcher":

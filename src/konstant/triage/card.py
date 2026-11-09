@@ -74,7 +74,7 @@ class Lookup:
     def __init__(self, client):
         self.client, self.ok, self.errors = client, client is not None, []
 
-    def get(self, path: str, **params):
+    def get(self, path: str, /, **params):
         from konstant.client import ClientError
         if self.client is None:
             return None

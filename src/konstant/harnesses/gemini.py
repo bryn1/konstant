@@ -113,6 +113,7 @@ def policy(ws, allow: list, header: str, conf=None, memory: bool = True) -> str:
     # (the jail covers it)
     sealed = [re.escape(str(ws / d)) for d in machinery.SEALED]
     sealed += [re.escape(d) for d in machinery.SEALED]
+    sealed += [re.escape(str(d)) for d in machinery.external_store(ws)]   # REVIEW L5-R1 H-04
     if sealed:
         rule(toolName=_q(READ_TOOLS), argsPattern=_q("(?:" + "|".join(sealed) + ")(?:/|\"|$)"),
              decision=_q("deny"), priority="300")
@@ -128,6 +129,9 @@ class Gemini(Adapter):
                     "needs a translating gateway, not tested)")
     surfaces_doc = ("AGENTS.md (context.fileName), .agents/skills/*/SKILL.md (workspace tier), "
                     ".gemini/settings.json, .gemini/konstant-policy.toml (passed with --policy)")
+
+    env_keys = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_USE_VERTEXAI",
+                 "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_APPLICATION_CREDENTIALS")
 
     def argv(self, ph: Phase) -> list:
         a = [self.binary, "--approval-mode", "auto_edit", "--policy", str(ph.workspace / POLICY),

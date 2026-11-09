@@ -127,6 +127,7 @@ def render(workspace: Path, perm: dict, python: str | None = None, conf=None,
     if conf.integrity:
         deny += [f"Read({ws}/var/secrets/**)"]
         deny += [f"Read({ws}/{d}/**)" for d in machinery.SEALED]  # the holdout store (LEVEL5 3.3)
+        deny += [f"Read({abs_rule(d)}/**)" for d in machinery.external_store(workspace)]
         deny += [f"Edit({ws}/{d}/**)" for d in PROTECTED_DIRS]
         deny += [f"Edit({ws}/{f})" for f in PROTECTED_FILES]
         deny += [f"Edit({ws}/var/runs/*/{r})" if "." in r else f"Edit({ws}/var/runs/*/{r}/**)"

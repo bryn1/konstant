@@ -13,7 +13,8 @@ def cmd_add(ctx) -> int:
     path = ctx.cfg.resolve(res["path"])
     path.mkdir(parents=True, exist_ok=True)
     if a.init_git and not (path / ".git").exists():
-        r = subprocess.run(["git", "init", "-q", str(path)], capture_output=True, text=True)
+        from konstant import tools
+        r = subprocess.run([tools.git(), "init", "-q", str(path)], capture_output=True, text=True)
         if r.returncode != 0:
             print(f"konstant: git init failed in {path}: {r.stderr.strip()}")
             return EXIT_FAIL

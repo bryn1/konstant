@@ -145,6 +145,9 @@ def seal(cfg, client, ref: str, sources: list, drafts: Path | None = None) -> li
     if job["status"] not in ("queued", "waiting_approval"):
         raise SealRefused([f"job {job['display_id']} is {job['status']}: holdouts are sealed "
                            "only while the job is not claimed (queued or waiting_approval)"])
+    leak = jail_proof(cfg)
+    if leak:
+        raise SealRefused([leak + ": nothing is sealed into a store phases can read"], 2)
     sealed = rows(client, job["id"])["holdouts"]
     new = prepare(cfg, job, sealed, [Path(s) for s in sources], drafts)
     project = project_of(cfg, client, job)
@@ -209,6 +212,37 @@ def check(cfg, client, ref: str, control: bool = False) -> list:
     return out
 
 
+def jail_proof(cfg) -> str | None:
+    """PROVE the store is masked for a phase instead of saying so (REVIEW L5-R1 H-04): list the
+    store from inside konstant's jail, with the masks every phase gets (jail.hide_core) and the
+    root writable when the workspace's factory confinement writes the host. None when the
+    listing is empty (or there is nothing to list yet); else the reason it is not masked."""
+    from konstant import jail as jail_mod
+    from konstant import tools
+    try:
+        where = root(cfg)
+    except SealRefused as exc:
+        return exc.lines[0]
+    if not where.is_dir() or not any(where.iterdir()) or not jail_mod.available():
+        return None
+    ls = tools.which("ls")
+    if ls is None:
+        return "no trusted `ls` to check the store from inside the jail"
+    conf = cfg.confinement().for_phase("worker", factory=True)
+    argv = jail_mod.wrap([ls, "-A", str(where)], hide=jail_mod.hide_core(cfg.home),
+                         home=cfg.home, root_rw=conf.host_write)
+    import subprocess
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=30,
+                           env=tools.env(), stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"the jailed check of the store did not run: {exc}"
+    if r.returncode == 0 and r.stdout.strip():
+        return (f"the holdout store {where} is READABLE inside a phase jail (a listing from "
+                "inside it shows its entries)")
+    return None
+
+
 def doctor_row(cfg) -> tuple:
     """Which separation the holdout store has (docs/LEVEL5.md 3.8, owner question Q3)."""
     why = runner.confined(cfg)
@@ -219,10 +253,18 @@ def doctor_row(cfg) -> tuple:
     if why:
         return ("INFO", "holdouts", f"{why}: a job with sealed holdouts does not run, and "
                 "`holdout add` refuses (no negative control without the jail)")
+    leak = jail_proof(cfg)
+    if leak:
+        return ("FAIL", "holdouts", leak + ": no job with sealed holdouts may run here")
+    proven = ("checked now: a listing from inside a phase jail is empty" if where.is_dir()
+              and any(where.iterdir()) else "nothing sealed yet to check from inside a jail")
+    same = "one OS user, so a process you run unjailed can read it"
     if where == cfg.home / STORE_DEFAULT:
         return ("INFO", "holdouts", f"store {STORE_DEFAULT}/: masked in every jailed phase and "
-                "read-denied by every adapter; one OS user, so a process you run unjailed can "
-                "read it (for more, [holdout] store outside the workspace under a second OS "
-                "user who runs the verifier)")
-    return ("INFO", "holdouts", f"store {where} outside the workspace: give it to the OS user "
-            "that runs `konstant verify` alone")
+                f"read-denied by every adapter ({proven}); {same} (for more, [holdout] store "
+                "outside the workspace under a second OS user who runs the verifier)")
+    return ("INFO", "holdouts", f"store {where} outside the workspace: masked in every jailed "
+            f"phase and read-denied by every adapter like {STORE_DEFAULT}/ ({proven}); "
+            + ("readable by this OS user too, so " + same.split(", so ")[1] + "; give it to "
+               "the OS user that runs `konstant verify` alone for more" if os.access(where, os.R_OK)
+               else "not readable by this OS user"))
