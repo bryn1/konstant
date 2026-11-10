@@ -180,6 +180,48 @@ orchestrator session, [DSH.md](DSH.md)); `bin/konstant notify test` checks it. T
 running across restarts, `bin/konstant factory install-unit` writes a systemd user unit and prints
 how to enable it (konstant never enables it for you).
 
+**Try it on the sample project.** `examples/greeter/` is a tiny Python module (`greet()`), a README
+and one test; `examples/greeter/goal.toml` asks for greet-by-name, a command line and the README
+kept (`max_attempts = 3`, and a post-ship probe that the README still exists):
+
+```sh
+cp -r examples/greeter projects/greeter && rm projects/greeter/goal.toml
+git -C projects/greeter init -q -b main && git -C projects/greeter add -A \
+  && git -C projects/greeter commit -qm "greeter: the sample"
+bin/konstant project add greeter
+bin/konstant --as owner goal add examples/greeter/goal.toml
+bin/konstant factory run greeter --until-idle   # 0 = done, 4 = it needs you, 2 = refused to start
+bin/konstant ship list                            # what shipped where
+git -C projects/greeter log --oneline main
+```
+
+**The same through your orchestrator chat** (how the owner of a factory works day to day). Add to
+`konstant.toml`, then run `bin/konstant agents sync` and restart the board:
+
+```toml
+[factory]
+goal_roles = ["owner", "orchestrator"]   # the orchestrator may PROPOSE a goal; your yes files it
+[notify]
+kind = "chat"                            # escalations come back into the session the goal came from
+```
+
+Start `bin/konstant dsh web` and type the goal's text ("make greeter greet by name, with a CLI and
+a README"). The orchestrator answers with a one-line proposal; reply `yes` to file it (any other
+reply withdraws it). Run the factory as above (or keep `factory start` running): what needs you
+appears at the start of your next message in that chat, and finished goals are summed up in one
+line.
+
+**Ship to GitHub** instead of the project's own branch: `[ship] target = "github"` (in the goal or
+`[factory] defaults ship_target`), `github_repo = "OWNER/REPO"` in the goal, and in `konstant.toml`
+the push URL `[ship] remote` and, optionally, the absolute path of `gh` (`[ship] gh`). Each job goes
+up as a pull request merged with `--match-head-commit`; a rollback is a revert merged through its own
+pull request; a diff with a secret-shaped string, a CI workflow or agent instructions waits for you.
+
+**Check it without a model**: `bash tests/e2e/factory.sh` (from a source checkout) builds the
+release, installs it, and runs every leg of the level-5 proof offline (the chat intake, an honest
+goal, a cheating producer, a producer that reads for the holdouts, a broken ship, budgets, GitHub
+through a stand-in), ending `E2E-FACTORY: PASS (N legs)`.
+
 ## 6. Memory
 
 Every harness konstant starts gets a memory server (`bin/konstant mcp memory`; tools `kb_recall`,

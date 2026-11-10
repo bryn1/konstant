@@ -58,6 +58,65 @@ re-check it. You come back to a job that is `verified`, or to one that stopped w
 written down. You decide what gets built and what "done" means; you do not have to watch the agent
 or read its transcript to know whether it finished.
 
+### Level 5: the dark factory
+
+Level 4 (above) verifies jobs you write. Level 5 also writes the jobs, checks them against tests the
+producing agent never sees, ships the result and rolls it back if it breaks, and only calls you
+when it needs a decision. Nothing changes in how you work: you keep talking to your orchestrator.
+
+**How you talk to it.** In your orchestrator chat (`bin/konstant dsh web`, with `[notify] kind =
+"chat"`) you ask for something, for example "make greeter greet by name, with a CLI and a README".
+The orchestrator does not start coding: it turns your request into a goal and answers in one line
+what it proposes (project, goal, limits). Your next message decides: "yes" files the goal, anything
+else drops it. konstant reads that yes itself, so text in a web page, a file or an agent's output
+can never file a goal. After that the chat is where the factory reports back: things that need you
+(a job blocked, a decision only you can take, a budget reached) appear at the start of your next
+message, once each; finished work is summed up in one line.
+
+**What the factory does underneath** (`bin/konstant factory start`, one loop per workspace):
+
+1. A planner splits the goal into jobs, each with a Definition of Done and probes that prove it; a
+   reviewer with a different identity must pass every DoD before anything is filed.
+2. A scenario writer, which never sees a producer's work, writes held-out acceptance scenarios
+   for each job. They must fail on today's code and are sealed in a store no producing agent can
+   read. You can write them yourself instead (`[holdout] author = "owner"`).
+3. Each job is worked in its own clone by the normal phases (code, test, review). The verifier then
+   re-checks the DoD probes and runs the sealed scenarios against the exact commit. A producer that
+   only satisfied the visible examples fails here and gets at most `max_attempts` (3) tries.
+4. Verified work ships to its target (a branch, or GitHub through a pull request), one job at a
+   time. Post-ship checks re-run the probes, the project's tests and every scenario shipped so far.
+   If one fails, the ship is rolled back with a revert (never a force-push) and a follow-up job is
+   filed. Changes to CI workflows or agent instructions, and a secret-shaped string on its way to
+   GitHub, are never shipped without you.
+
+**The integrity core.** Some things hold no matter how much access you give the agents: the
+sealed scenarios, every other identity's token and konstant's own machinery (its code, catalog,
+goals, ledger and events) are out of a phase's reach in every configuration. "Done", "ship" and
+"roll back" are decided by code reading artifacts, never by a model.
+
+**Open or closed.** `[confinement] profile` chooses how much of your machine a phase may use.
+`closed` (the default) keeps each phase inside the workspace: no home directory, no credentials,
+only the environment it needs. `open` lets phases use your host the way your own shell does (your
+tools, your network, your credentials), which is more capable and more risky. The integrity core
+holds in both, and a factory refuses to start where konstant's jail cannot run.
+
+**Try the factory** with the sample project (`examples/greeter/`, a tiny Python module with a README
+and one test) and its goal (`examples/greeter/goal.toml`):
+
+```sh
+cp -r examples/greeter projects/greeter && rm projects/greeter/goal.toml
+git -C projects/greeter init -q -b main && git -C projects/greeter add -A \
+  && git -C projects/greeter commit -qm "greeter: the sample"
+bin/konstant project add greeter
+bin/konstant --as owner goal add examples/greeter/goal.toml   # or say it in your orchestrator chat
+bin/konstant factory run greeter --until-idle                 # exit 0: every job verified and shipped
+bin/konstant factory status
+```
+
+Without a model, `bash tests/e2e/factory.sh` runs the whole thing offline against stand-ins and
+prints `E2E-FACTORY: PASS`. Steps and options: [docs/QUICKSTART.md](docs/QUICKSTART.md) section 5b;
+the design: [docs/LEVEL5.md](docs/LEVEL5.md).
+
 ### Documentation
 
 [QUICKSTART](docs/QUICKSTART.md) · [CONCEPTS](docs/CONCEPTS.md) (including the security model and
@@ -65,7 +124,7 @@ the two security reviews) · [CLI reference](docs/CLI.md) · [HARNESSES](docs/HA
 [DSH](docs/DSH.md) · [DESIGN](docs/DESIGN.md) · [CONTRIBUTING](CONTRIBUTING.md) ·
 [SECURITY](SECURITY.md) · [CHANGELOG](CHANGELOG.md)
 
-Roadmap: level 5 — see [docs/LEVEL5.md](docs/LEVEL5.md).
+Level 5 (the dark factory, above): [docs/LEVEL5.md](docs/LEVEL5.md).
 
 ## Install in one line
 
@@ -158,6 +217,7 @@ src/konstant/         # package: cli/, board/, gate/, verify/, harnesses/, agent
 catalog/              # types.yaml (the one source), agents/, skills/, workflows/, doctrine/, templates/
 release/patterns.toml # public-safety scan patterns (maintainer tooling)
 tests/                # unit, board, cli, gate, verify, catalog, release, e2e/
+examples/greeter/     # the sample project and goal for the factory (level 5)
 docs/                 # QUICKSTART, CONCEPTS, CLI, HARNESSES, DSH, DESIGN
 ```
 
@@ -174,6 +234,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest -q          # unit, board, CLI, gate, verify, catalog, release
 bash tests/e2e/fresh_install.sh        # build the tarball, install it fresh, run a job lifecycle
 bash tests/e2e/one_line.sh             # the same, installed by the one-liner from a local server
+bash tests/e2e/factory.sh              # level 5: the factory on examples/greeter, offline (P0-P6)
 ```
 
 ## License

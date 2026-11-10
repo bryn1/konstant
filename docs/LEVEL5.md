@@ -866,7 +866,7 @@ for what it lands.
 | **L5-F1** fixes 1 | one red-then-green test per finding under `tests/review/` (`test_H<nn>_...`); zero open P0/P1 | — | L5-R1 | all A and B rows green again |
 | **L5-4** ship + rollback (**done**; see "L5-4 as built" below) | `ship`, `ship list`, targets `github` (push + PR create/merge, revert-PR rollback, the secret scan before a push, a `gh` stand-in for tests; Q2) / `branch` / `apply` / `command`, `[ship] decision_types = ["infra"]` (Q4), the guard on both sides, plumbing-only ref moves, post-ship checks with the regression set, rollback + tree check, the follow-up job after a rollback, halt on a failed rollback, decision rules (5.4), table `ships`, fake modes `ship-break`, `self-ship` | `gate/rules/common.py` git plumbing, `verify/probe.py` `run_line`, `verify/holdout.py`, `board/api/` | L5-F1 | C1-C12 |
 | **L5-5** factory loop + budgets + notifier + view (**done**; see "L5-5 as built" below) | `factory run/start/stop/status/ack/resume-shipping`, `max_attempts` as the one required limit (Q5), `[notify] kind = "chat"` (4.0), `budget_ledger`, `Adapter.usage`, unmeasurable-budget refusal, `notify` (stdout/file/webhook), `escalations`, `board/api/factory.py`, the Factory tab | `gate/loop.py`, `cli/task_run.py`, `cli/board.py` (pid handling), `board/redact.py`, `board/static/` | L5-4 | D1, D1b, D2-D9 |
-| **L5-6** proof of level 5 | `examples/greeter/`, `tests/e2e/factory.sh` (P0-P6), CI job, QUICKSTART "level 5" section, the optional live run recorded | `tests/e2e/fresh_install.sh`, `tests/fixtures/fake_harness.py` | L5-5 | `E2E-FACTORY: PASS`; full `pytest`; release build CLEAN |
+| **L5-6** proof of level 5 (**done**; see "L5-6 as built" below) | `examples/greeter/`, `tests/e2e/factory.sh` (P0-P6), CI job, QUICKSTART "level 5" section, the optional live run recorded | `tests/e2e/fresh_install.sh`, `tests/fixtures/fake_harness.py` | L5-5 | `E2E-FACTORY: PASS`; full `pytest`; release build CLEAN |
 | **L5-R2** independent review 2 | review of the whole factory (ship, rollback, budgets, loop, notifier, view) plus a regression run of F-01..F-35, G-01..G-07 and the L5-R1 findings, on a tarball installed the documented way | — | L5-6 | report |
 | **L5-F2** fixes 2 + release | red-then-green tests per finding, zero open P0/P1, CHANGELOG, a release build; tagging and publication are the owner's step | — | L5-R2 | full `pytest`, `E2E-FACTORY: PASS`, `RESULT: CLEAN` |
 
@@ -1350,6 +1350,78 @@ phase engine, no second ship path. Where it differs from section 6, and why:
   resume, stall, stale heartbeat, the unit `tests/factory/test_factory_process.py`; interrupted
   ships `tests/factory/test_reconcile.py`; follow-up and worn set `tests/factory/
   test_loop_rollback.py`; the planner's decisions `tests/factory/test_loop_units.py`.
+
+### L5-6 as built
+
+Landed as section 7 describes (code: `tests/e2e/factory.sh`, `tests/e2e/factory_check.py`,
+`examples/greeter/`, `tests/e2e/factory_live.sh`, `.github/workflows/ci.yml`; no change under
+`src/`). Where it differs from section 7, and why:
+
+- **Every goal enters through the chat, and the notifier is the chat** (`[notify] kind = "chat"`
+  for the whole run, the owner's setup, Q2/4.0): the rows of section 7 that read `notify.log` read
+  the chat inbox of the orchestrator session (`var/factory/chat/inbox/<session>.jsonl`, the
+  notifier's record for kind chat) and the session's next turn instead; `notify.log` must not
+  exist at all (only a halt writes it, whatever the kind). P0's "every escalation of the run shows
+  up in the session's next turn" is its own final check: each told escalation (7 in the run) is
+  in the inbox once and shown in exactly one later turn. Outcomes (FILED, SHIPPED, GOAL_DONE) come
+  back as the one summary line of the next turn: P1's `GOAL_DONE` is asserted there (outcomes are
+  never pushed into the inbox, 6.3).
+- **The session**: a `konstant dsh headless` session on the stub dsh, one invocation per owner
+  message; its `run:` actions play the konstant-gate plugin (`chat turn --session S -`, the owner's
+  text on stdin) and the orchestrator model (`KONSTANT_CHAT_SESSION=S konstant goal add -
+  --from-chat`). The proposal is generated from `examples/greeter/goal.toml` with the leg's id,
+  project and extra lines.
+- **One workspace, one project per leg** (`greeter`, `overfit`, `reader`, `breaks`, `attempts`,
+  `runs`, `secret`, `workflow`, `ownerset`, each a copy of `examples/greeter/` without its goal file,
+  on `main`): a project that already shipped greet-by-name cannot host a second goal of the sample
+  (its held-out proof would pass on the base: VACUOUS). The github target's push URL and `gh` are
+  operator keys of `konstant.toml` (L5-4 as built), so a github leg points `[ship] remote` / `gh`
+  at its own bare repository and restarts the board (`agents sync` first: `[notify] kind = chat`
+  renders the session patch, and `doctor` FAILs on a stale one).
+- **P1 runs on the github target** (P6 reads its artifacts): the local target's `main` is GitHub's
+  merge of each pull request, so "one fast-forward per job" is checked as one first-parent step per
+  job from the base, the base an ancestor, every verified commit on `main` and the tip's tree the
+  last verified tree; the stand-in's update hook logs every ref update and every one is `ff=new`.
+- **P2** ends after three attempts, each a verify FAIL on a held-out proof, BLOCKED either by the
+  factory's `max_attempts` or by the board's `max_rounds` (the third FAIL verdict), whichever the
+  loop's timing reaches first (both were seen in the runs: the worn set is rotated by the scenario
+  writer after `max_failed_rounds`, before or after the third attempt); the check accepts either
+  and asserts the three attempts, the rotation, no PASS, no ship and the unchanged tip. The producer
+  and the chat are told `holdout H<n> failed (hint: ...)` and never the scenario text.
+- **P3** extends the fake harness's `peek` mode (`peek-token:` per identity's token file,
+  `peek-memory:` for `memory/` and `var/memory/`; the A4 red twin now also asserts that unjailed
+  every token is READ). Before the leg's real run, the same goal with `[gate] jail = false`: exit 2
+  `holdouts need a confined phase`, intake still `none`, no job, no event, no run record.
+  "No canary in the diff" is the verifier's own leak scan: every verification `leak: false`.
+- **P4** files with `factory run --once` first (intake + scenario writer) so the producer can be
+  told which two jobs to break (`FAKE_HARNESS_BREAK_JOBS`); the follow-up job is honest. Ships: B1
+  rolled back (revert PR 1), its follow-up shipped, B2 shipped and rolled back (revert PR 2), the
+  second rollback over `max_rollbacks = 1`: BLOCKED with no follow-up.
+- **P6** also covers the refusals of the brief: a token-shaped string in `settings.py` (built at run
+  time, never in the repository or the transcript) and a `.github/workflows/ci.yml` change, each a
+  DECISION with the remote's refs, the stand-in's calls and its push log unchanged.
+- **The owner-authored check** writes two scenarios per job (four files, the goal has two jobs)
+  into the e2e's own temp dir; the factory escalates one DECISION for the first job (the second
+  waits for it), the owner seals both sets and acknowledges the DECISION (an open DECISION holds a
+  ship), and the next run ships both.
+- **Environment**: the script re-execs under `env -i`, closes stdin, keeps the caller's `HOME`
+  only for `install.sh` (its Python may need a user-site virtualenv) and uses a private `HOME` for
+  every leg (no agent home, git hooks or git config of the caller is loaded), and keeps
+  `owner.token` mode 000 for every `factory run` (opened only for the owner's own `holdout add` and
+  `factory ack`). Where bubblewrap cannot start, it prints `E2E-FACTORY: SKIPPED` (exit 0) unless
+  `KONSTANT_E2E_REQUIRE_JAIL=1`.
+- **The pass line** is `E2E-FACTORY: PASS (N legs, M session turns, Ts)`.
+- **The live run** (`tests/e2e/factory_live.sh`) covers P0 + P1 only, shipped through the github
+  target to a LOCAL bare repository with the `gh` stand-in: the P2 prompt and the private GitHub
+  repository of section 7 were not run (no real GitHub in this wave). Its outcome is recorded below.
+
+**Live run** (`tests/e2e/factory_live.sh`; one local OpenAI-compatible model through a plain dsh
+for every role, `[harness] max_concurrency = 2`, time box 6 h). Attempt 1 stopped after 76 s on a
+defect of the live script itself: it linked the dsh shim from a directory under `/tmp`, and a
+jailed phase's private `/tmp` made the link dangle (`bwrap: execvp dsh: No such file or
+directory`); the script now copies the shim. Its chat path had already worked: the model proposed the goal in
+the request's turn, and the owner's yes filed it with source chat. Attempt 2:
+still running when the wave's main commit was made; its outcome is recorded by the next commit.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

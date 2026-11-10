@@ -2,6 +2,35 @@
 
 All notable changes to konstant. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Level 5, the dark factory (docs/LEVEL5.md; waves L5-1 to L5-6, pending the second independent
+review and its fixes before a release).
+
+### Added
+- **Sealed holdouts** (`holdout add/list/check/show`, the scenario writer): held-out acceptance
+  scenarios a producing phase can never read, run by the verifier on the exact commit.
+- **Factory mode confinement and identities**: every phase of a holdout job jailed on every
+  harness, one identity token per phase, job clones with the target read-only; confinement
+  profiles `closed` / `open` around a fixed integrity core.
+- **Intake from the orchestrator chat** (`goal add --from-chat`, `chat turn`): a request becomes a
+  goal proposal, the owner's "yes" files it; goal files, planner, DoD review, deterministic filing.
+- **Built-in memory** (`memory`, `konstant mcp memory`): a Markdown vault with recall, one shared
+  pool for producers and a sealed pool for the judges.
+- **Triage** (size tiers, the intake card, the closed researcher, the licence gate).
+- **Ship and rollback** (`ship`, targets github / branch / apply / command): post-ship checks,
+  revert rollback, follow-up jobs, owner decisions for CI, instruction surfaces and secrets.
+- **The factory loop** (`factory run/start/stop/status/resume/ack`), budgets (`max_attempts` the
+  one required limit), the notifier (stdout, file, webhook, chat) and the board's Factory tab.
+- **The proof of level 5**: `examples/greeter/` (a sample project and goal) and
+  `tests/e2e/factory.sh` (legs P0-P6: chat intake, honest, cheating, reader, post-ship failure,
+  budget, GitHub through a stand-in; offline, from a fresh install); the optional live run
+  `tests/e2e/factory_live.sh`.
+- CI: bubblewrap on the runner, the release build and scan, the one-line-install and factory e2e.
+
+### Security
+- Fixes from the first independent level-5 review (H-01..H-09; docs/LEVEL5.md "L5-F1 as built").
+
 ## [0.1.0] - 2026-10-31
 
 First public release.

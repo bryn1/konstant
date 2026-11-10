@@ -1,4 +1,4 @@
-# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b, L5-3, L5-M, L5-T, L5-F1, L5-4 and L5-5 landed)
+# konstant — design (v0.1.0, pre-release; level-5 waves L5-1, L5-2, L5-2b, L5-3, L5-M, L5-T, L5-F1, L5-4, L5-5 and L5-6 landed)
 
 konstant is a self-contained workspace for running coding agents with discipline: a local job
 board (**board**), a deterministic **task gate** that turns a task into phases run by one agent
@@ -136,7 +136,10 @@ konstant-0.1.0/
               operate.md.tmpl  # the "how to operate konstant" table both top docs include
   release/patterns.toml      # generic public-safety patterns (IPs, emails, token shapes, paths)
   tests/  unit, board, cli, gate, verify, catalog, release, holdout, factory, memory, ship, fixtures/,
-          e2e/{fresh_install.sh, one_line.sh, dsh_session.sh}
+          e2e/{fresh_install.sh, one_line.sh, factory.sh + factory_check.py, dsh_session.sh,
+               factory_live.sh}
+  examples/greeter/          # the sample project (greeter.py, README.md, test_greeter.py) and its
+                             # goal.toml: the level-5 proof (factory.sh) and the README's "try it"
   docs/   DESIGN.md  QUICKSTART.md  CLI.md  CONCEPTS.md  HARNESSES.md  DSH.md
   .github/workflows/ci.yml   # CI (export-ignore)
   .gitattributes  .gitignore
@@ -1766,4 +1769,23 @@ board at start (a typo must not silently disarm a gate).
   `konstant board serve` whose cwd lies under the run's basetemp is still alive at the end; board
   fixtures stop their board in a finalizer that also runs when their own setup fails
   (`Workspace.stop_board`, which kills the pid-file's board when `board stop` cannot run).
-- **CI:** GitHub Actions on Ubuntu, Python 3.10 and 3.12: unit + board + gate + e2e.
+- **E2E factory (`tests/e2e/factory.sh`, wave L5-6; docs/LEVEL5.md 7):** the level-5 proof in one
+  command: build the tarball, install it fresh with `--harness dsh` (the stub dsh first on PATH,
+  the fake harness playing every phase), stdin `/dev/null`, a private `HOME` after the install,
+  `owner.token` mode 000 for every `factory run`, `[notify] kind = "chat"`. One project per leg,
+  copied from `examples/greeter/`; every goal enters through the orchestrator chat (a `konstant dsh
+  headless` session on the stub dsh whose `run:` actions play the plugin's `chat turn` and the
+  model's `goal add --from-chat`, then the owner's `yes`). Legs P0 (chat intake), P1 (honest goal,
+  github target, GOAL_DONE in the next turn), P2 (`overfit`), P3 (`peek`, incl. `[gate] jail =
+  false` -> exit 2 before any phase), P4 (`ship-break`: revert-PR rollback, follow-up, max_rollbacks
+  -> BLOCKED), P5 (max_attempts BLOCKED; max_task_runs BUDGET_STOP), P6 (PRs with
+  `--match-head-commit`, no force-push; `ship-extra` secret and workflow -> DECISION, nothing
+  pushed), an `author = "owner"` goal sealed by the owner, and every told escalation shown once in
+  the chat. Checks read artifacts only (`tests/e2e/factory_check.py`). Ends `E2E-FACTORY: PASS (N
+  legs)`; prints SKIPPED where bubblewrap cannot run (`KONSTANT_E2E_REQUIRE_JAIL=1` fails instead).
+  `tests/e2e/factory_live.sh` is the optional live run (P0 + P1 on a real dsh and a local model,
+  shipped to a local bare repository), not in CI.
+- **CI:** GitHub Actions on Ubuntu, Python 3.10 and 3.12: bubblewrap installed (and AppArmor's
+  user-namespace restriction lifted on the throwaway runner), pytest (jail tests skip with a
+  reason where no jail starts), the release build and scan with the public patterns only, and the
+  three offline e2e scripts (fresh install, one-line install, factory).

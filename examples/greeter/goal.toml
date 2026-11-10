@@ -1,0 +1,17 @@
+# The sample goal (konstant README "Try the factory"; docs/LEVEL5.md 4.1 and 7). File it with
+#   bin/konstant goal add examples/greeter/goal.toml
+# or say the goal text to your orchestrator chat ([notify] kind = "chat"): it proposes this goal,
+# and your "yes" files it.
+[goal]
+id = "greeter"
+project = "greeter"
+text = """
+make greeter greet by name, with a CLI and a README
+"""
+
+[limits]
+max_attempts = 3                    # the one required limit: attempts per job before BLOCKED
+
+[ship]
+# after every ship the target must still have its README, else the ship is rolled back
+post_probes = ["PROBE: test -f {workdir}/README.md => ^ok$"]

@@ -448,6 +448,18 @@ board's Factory tab and in `doctor` (stale after three ticks).
 its jobs by state with attempts left, ships, escalations and the last events; `bin/konstant factory
 status --json` prints the same. Holdouts appear only as counts.
 
+**The proof that it holds** (`tests/e2e/factory.sh`, [LEVEL5.md](LEVEL5.md) section 7) runs the
+factory on the sample project `examples/greeter/` from a freshly installed release, offline: every
+goal is asked for in an orchestrator chat and filed by the owner's "yes"; an honest goal ships
+through pull requests to a stand-in for GitHub and its `GOAL_DONE` comes back in the chat; a
+producer that overfits the visible DoD is caught by the holdouts and never ships; a producer that
+reads for the holdouts, other identities' tokens or the memory vault finds them masked and is
+still judged on its work; a ship that breaks the project is reverted through its own pull request
+and a follow-up job fixes it; budgets block a job after 3 attempts or pause a goal; a secret in a
+diff or a CI workflow change waits for the owner. Each leg is checked against the board, the git
+refs and the logs, never against the loop's own summary. A live variant on a real model and dsh
+is `tests/e2e/factory_live.sh` (not in CI).
+
 ## Memory
 
 konstant has a built-in memory that every harness uses the same way: notes earlier jobs and

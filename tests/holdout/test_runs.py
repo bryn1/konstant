@@ -55,6 +55,8 @@ def test_A4_red_twin_the_same_peek_unconfined_reads_everything(hws, capsys, monk
         sys.path.pop(0)
     out = capsys.readouterr().out
     assert "peek: READ" in out and "peek: READ via holdout show" in out, out
+    # the factory e2e's P3 rows (tests/e2e/factory_check.py p3), unjailed: every token readable
+    assert "peek-token: owner.token READ" in out and "peek-token: verifier.token READ" in out, out
 
 
 @needs_jail
