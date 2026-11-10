@@ -1482,8 +1482,11 @@ No new feature; what a clean GitHub runner and the live run showed, fixed at the
   (`lexists`); the dsh-gate node suite names its files and asks for the TAP reporter; the probe
   fixtures set the git identity by environment; F-17 accepts the two honest outcomes of the exact
   F-17 download (installs where the venv builds alone; else the refusal with the recipe, and the
-  recipe then installs); the factory process tests print the goal, jobs, events and the factory
-  log when they time out; pytest runs with `-rs` so every skip and its reason is in the log.
+  recipe then installs), and so does step 13 of `tests/e2e/fresh_install.sh`; the factory process
+  tests print the goal, jobs, events and the factory log when they time out; the workflow's
+  release step passes `--version` (the build requires it; earlier runs never got that far) and
+  pytest runs with `-rs` so every skip and its reason is in the log. The interactive gate block is
+  unchanged (its 3300-character budget); the close-out prompt and the `done` rule carry the scope.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
