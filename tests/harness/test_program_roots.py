@@ -107,6 +107,12 @@ def test_program_roots_of_an_interpreter_and_its_script_green(installed, home):
     loose.write_text("print('ok')\n")
     keep = base.program_roots([sys.executable, str(loose)])
     assert os.path.realpath(loose) in keep and os.path.realpath(home) not in keep
+    shim = home / "dsh-shim"                                 # a launcher directly in $HOME
+    shim.write_text(installed["launcher"].read_text())
+    shim.chmod(0o755)
+    keep = base.program_roots([str(shim), "-"])
+    assert os.path.realpath(shim) in keep and os.path.realpath(home) not in keep
+    assert os.path.realpath(home / "opt" / "harness") in keep
 
 
 @needs_jail

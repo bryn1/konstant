@@ -422,6 +422,7 @@ def exe_roots(argv0: str, depth: int = 0, _seen: set | None = None) -> list:
     seen.add(real)
     home = _home()
     out = [os.path.dirname(os.path.abspath(exe)), os.path.dirname(real)]
+    out += [f for f in (os.path.abspath(exe), real) if os.path.dirname(f) == home]  # that file
     parts = Path(real).parts
     for i, part in enumerate(parts):
         if part in ("node_modules", "versions", "lib", "libexec") and i > 1:
@@ -462,7 +463,7 @@ def program_roots(argv: list) -> list:
     """exe_roots for a phase's whole argv: its program (argv[0]) and every later item that names
     a program file (`python /x/harness.py`, `node /x/bin.js`, `--import=/x/hook.mjs`). Only
     paths under $HOME matter (nothing else is masked), and $HOME itself is never kept: a program
-    file lying directly in $HOME keeps that one file."""
+    file lying directly in $HOME keeps that one file (exe_roots)."""
     if not argv:
         return []
     home = _home()
@@ -472,9 +473,6 @@ def program_roots(argv: list) -> list:
         for w in str(item).split("="):
             if "/" in w and _is_program_file(w):
                 out += exe_roots(os.path.abspath(w), 1, seen)
-                real = os.path.realpath(w)
-                if os.path.dirname(real) == home:
-                    out.append(real)
     keep = []
     for p in dict.fromkeys(os.path.realpath(x) for x in out):
         if p.startswith(home + "/"):
