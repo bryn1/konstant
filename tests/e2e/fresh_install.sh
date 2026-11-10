@@ -322,9 +322,21 @@ else
   [ "$NW" -gt 0 ] || fail "pip download saved no wheel"
   echo "wheel dir: $NW files (the folder's dependencies only, no setuptools)"
   DEAD=http://127.0.0.1:9
-  run env PIP_INDEX_URL=$DEAD http_proxy=$DEAD https_proxy=$DEAD HTTP_PROXY=$DEAD HTTPS_PROXY=$DEAD \
-      "$OFF/install.sh" --yes --port "$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')" \
-      --harness "$FAKE" --wheels "$WORK/wheels"
+  offline() {
+    run env PIP_INDEX_URL=$DEAD http_proxy=$DEAD https_proxy=$DEAD HTTP_PROXY=$DEAD HTTPS_PROXY=$DEAD \
+        "$OFF/install.sh" --yes --port "$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')" \
+        --harness "$FAKE" --wheels "$WORK/wheels"
+  }
+  offline
+  if [ "$RC" -ne 0 ]; then
+    # a venv without its own setuptools (Python 3.12+ bundles none): the honest refusal names the
+    # recipe; the documented recipe (the folder + setuptools wheel) then installs offline
+    want_rc 1; want_out "no build backend offline"; want_out "setuptools wheel"
+    run "$WS/.venv/bin/python" -m pip download -q -d "$WORK/wheels" "$OFF" setuptools wheel
+    want_rc 0
+    rm -rf "$OFF/.venv"
+    offline
+  fi
   want_rc 0; want_out "konstant $VER is installed"
 fi
 rm -rf "$WORK/off" "$WORK/wheels"
