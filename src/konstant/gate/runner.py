@@ -63,6 +63,13 @@ def groups(phases: list) -> list:
     return out
 
 
+# what a close-out may claim (L5-6 live finding 2): only what it can read; konstant's sealed
+# stores and its own mechanics are checked by `task check` itself, never attested by a phase
+CLAIM_SCOPE = ("Claim only what you can read: OUT, the project and the task above. Never write a "
+               "row about konstant's sealed stores (the research store var/research/, the holdout "
+               "store var/holdout/, the memory vault) or about the board: no phase can read them, "
+               "and `konstant task check` checks them itself (rules research, holdouts, verified);"
+               " such a row is ignored.")
 HOLDOUT_NOTE = ("This job has {n} sealed holdout scenario(s): black-box acceptance checks written "
                 "before this work, stored where no phase can read them, and run only by "
                 "konstant's verifier, without network, on the commit the job closes with. A "
@@ -151,7 +158,7 @@ class PhaseRunner:
             body += ["Write DONE.md in OUT (`ID | claim | STATUS | evidence` per DoD claim, plus "
                      "the CLEANUP line) and CYCLES.md (`cycle | trigger | action | outcome`, one "
                      "row per KONSTANT-CYCLE-ROW above), from the artifacts in OUT. Never write "
-                     "or edit a verdict file."]
+                     "or edit a verdict file.", CLAIM_SCOPE]
             if self.dod_rows():
                 body += ["DONE.md carries one row per KONSTANT-DOD-ROW above, with its ID "
                          "(`DoD-<n> | <claim> | PASS or BLOCKED | <evidence>`); a DoD row is "

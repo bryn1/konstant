@@ -432,8 +432,12 @@ and "Can you implement X in a.py?" run ungated.
   RUN`. One phase of agent `researcher` as identity `researcher` on the workspace's harness, always
   in factory mode (jailed on any adapter; no jail -> state `unavailable`, never open), under
   `confinement.RESEARCH` whatever the profile (`for_phase`): network on, `home_read` off (`$HOME`
-  masked; `harnesses/base.py exe_roots` keeps the phase's own program and its install root
-  reachable), no credentials, no ssh agent, no docker socket, no host write; `tokens=()`, no memory
+  masked; `harnesses/base.py program_roots` keeps the phase's own program and runtime reachable,
+  read-only, on every adapter (dsh included): argv[0], its `#!` interpreter, the programs a shell
+  launcher execs, every argv item that is a program file, each with its install root (the
+  outermost directory below `$HOME` with a `package.json`, `node_modules`, `pyproject.toml`,
+  `pyvenv.cfg` ...); never `$HOME` itself, and the credential masks still apply inside a kept
+  root; L5-6b), no credentials, no ssh agent, no docker socket, no host write; `tokens=()`, no memory
   server; masked besides the core: `projects/`, `var/runs`, `var/logs`, `var/factory`,
   `var/harness`, `var/sessions.json`, the board DB. Its cwd, harness home and run dir live in
   `var/research/<run>/` (machinery `DIRS` and `SEALED`: no phase reads or writes it; its own dirs
@@ -487,7 +491,7 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 | verdicts | `rules/verdicts.py` | fresh verdict files end with exactly one `# VERDICT: <word>` line; at most one `# JUDGED:` line |
 | phases | `rules/phases.py` | every verifying phase has a fresh verdict file named for it; a cycle writes a new suffixed file (`-c2`); the newest decides; after 3 cycles a non-pass verdict counts as BLOCKED |
 | judged | `rules/judged.py` | a decisive PASS verdict's `# JUDGED: <sha>` equals the content hash of OUT (minus verdicts/DONE/CYCLES/.tmp) + the git diff of the project tree vs the run base (a project that is not a git tree: every project file outside OUT), recomputed by replaying the args recorded with the pin; mismatch = edited after judging (the changed paths are named); unrecorded args (`PIN-ARGS-UNRECORDED`) / base mismatch (`PIN-BASE-DIFFERS`) = UNMET by name; the judge refuses an EMPTY state (exit 2) |
-| done | `rules/done.py` | DONE.md rows `ID | claim | STATUS | evidence`, STATUS in PASS FAIL BLOCKED N/A UNVERIFIED; the header is only a line whose first four cells are exactly those names (F-09); FAIL/UNVERIFIED/placeholder evidence/N/A without reason = UNMET; ≥1 PASS row; with a job, one `DoD-<n>` row per row of the job's DoD (`board.dod.dod_rows`), PASS or BLOCKED, never N/A (F-21); `DECLINED | <claim> | job <id>` excuses an EXCUSABLE condition only when the claim quotes it (≥2 contiguous shared words, claim ≥3 words) AND job `<id>` carries an owner-role note/approval `DECLINED: <the same claim>` read from a reachable board (F-01: a quoted "owner statement" and "any existing job" were text the close-out agent could author); offline or unreachable = unresolved (fail closed); never excuses the rules verdicts, phases, judged, tests, verified, authorship, holdouts, backlog, research, licence; `DECLINED`/`DISPUTE`/`COPIED` rows are not matrix rows |
+| done | `rules/done.py` | DONE.md rows `ID | claim | STATUS | evidence`, STATUS in PASS FAIL BLOCKED N/A UNVERIFIED; the header is only a line whose first four cells are exactly those names (F-09); FAIL/UNVERIFIED/placeholder evidence/N/A without reason = UNMET; ≥1 PASS row; with a job, one `DoD-<n>` row per row of the job's DoD (`board.dod.dod_rows`), PASS or BLOCKED, never N/A (F-21); `DECLINED | <claim> | job <id>` excuses an EXCUSABLE condition only when the claim quotes it (≥2 contiguous shared words, claim ≥3 words) AND job `<id>` carries an owner-role note/approval `DECLINED: <the same claim>` read from a reachable board (F-01: a quoted "owner statement" and "any existing job" were text the close-out agent could author); offline or unreachable = unresolved (fail closed); never excuses the rules verdicts, phases, judged, tests, verified, authorship, holdouts, backlog, research, licence; `DECLINED`/`DISPUTE`/`COPIED` rows are not matrix rows; a row whose claim is about a sealed store (the research store, the holdout store, the memory vault/index: `SEALED_CLAIM`) is ignored with a warning whatever its status, never the PASS row, never BLOCKED (no phase can read those stores; the rules research, holdouts and verified check them; `DoD-<n>` rows are never ignored; L5-6b) |
 | tests | `rules/tests.py` | the test command passes: `[gate] test_cmd` read from the WORKSPACE config, never the record (F-06); `auto` = `pytest` over `test_*.py` under OUT and over the project when it holds Python test files outside OUT (F-18); every run of agent code goes through `konstant.jail` (bubblewrap: read-only root, writes to OUT/project/private tmp, secrets + credential dirs masked, no network) when it works |
 | last mile | `rules/lastmile.py` | in a git tree: no untracked file created during the run outside OUT/.audits/.tmp; no marker words (`TODO`, `FIXME`, `XXX`) added to source since start; changed test files pass |
 | hygiene | `rules/hygiene.py` | non-test source in OUT > 400 lines needs a `reason` in its first 5 lines; a project source file the run grew past 600 lines without one = UNMET (thresholds configurable) |
@@ -551,6 +555,9 @@ The runner is the enforcing mode: konstant, not the model, drives the phases.
 4. Back-edge: a verifying phase whose verdict is FAIL/FIX/RECONSIDER re-runs the producer with the
    verdict text as context, then the verifiers again (new suffixed verdict files). Cap: 3 cycles.
 5. Close-out phase: the `orchestrator` profile writes DONE.md and CYCLES.md from the artifacts.
+   Its prompt scopes the claims (`gate/runner.py CLAIM_SCOPE`): only what it can read (OUT, the
+   project, the task); never a row about konstant's sealed stores or the board, which the check
+   covers itself (L5-6b).
 6. `konstant task check`. UNMET → re-run the phase that owns the first reason (producer: the
    producers, then every verifier that ran, with new cycle files; `verifier:<file>`: that phase;
    orchestrator: DONE.md), then the close-out, up to `[gate] max_resumes` (3); stop early when

@@ -339,36 +339,147 @@ def factory_ro(ph: Phase) -> list:
     return [ph.workspace / "projects"] if ph.factory else []
 
 
-def exe_roots(argv0: str, depth: int = 0) -> list:
+# what marks the root of an installed program (an npm/pnpm package or workspace, a Python project
+# or virtualenv): exe_roots keeps the OUTERMOST such directory below $HOME, so a monorepo's shared
+# node_modules or a virtualenv's site-packages stay reachable with the program
+PROGRAM_MARKERS = ("package.json", "node_modules", "pnpm-workspace.yaml", "pyproject.toml",
+                   "setup.py", "setup.cfg", "pyvenv.cfg")
+# a file named in argv or in a launcher script counts as part of the program only when it is
+# executable or one of these (never a key or config file the command merely names)
+SCRIPT_EXT = (".js", ".mjs", ".cjs", ".ts", ".py", ".pyz", ".sh", ".bash", ".jar", ".rb", ".pl")
+SHELLS = ("sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "busybox")
+_LAUNCHER_MAX = 64 * 1024
+
+
+def _home() -> str:
+    return os.path.realpath(os.path.expanduser("~"))
+
+
+def _is_program_file(p: str) -> bool:
+    return os.path.isfile(p) and (os.access(p, os.X_OK) or p.endswith(SCRIPT_EXT))
+
+
+def _install_root(real: str, home: str) -> str | None:
+    """The outermost directory strictly below $HOME, above `real`, that holds a PROGRAM_MARKERS
+    entry (None: the file is not under $HOME, or no such directory)."""
+    if not real.startswith(home + "/"):
+        return None
+    best = None
+    d = os.path.dirname(real)
+    while d.startswith(home + "/"):
+        if any(os.path.lexists(os.path.join(d, m)) for m in PROGRAM_MARKERS):
+            best = d
+        d = os.path.dirname(d)
+    return best
+
+
+def _launcher_words(real: str, home: str) -> list:
+    """The words of a shell launcher (`#!/bin/sh` + `exec node .../bin.js "$@"`) that may name a
+    program: every token, split again on `=` and `:` (PATH=..., --import=...), with $HOME, ${HOME}
+    and ~ expanded. Unparsable lines fall back to a whitespace split."""
+    try:
+        if os.path.getsize(real) > _LAUNCHER_MAX:
+            return []
+        text = Path(real).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    words = []
+    for line in text.splitlines()[1:]:
+        try:
+            toks = shlex.split(line, comments=True)
+        except ValueError:
+            toks = line.split()
+        for t in toks:
+            for w in re.split(r"[=:]", t):
+                w = w.replace("${HOME}", home).replace("$HOME", home)
+                if w.startswith("~/"):
+                    w = home + w[1:]
+                if w:
+                    words.append(w)
+    return words
+
+
+def exe_roots(argv0: str, depth: int = 0, _seen: set | None = None) -> list:
     """What a jail with $HOME masked (home_read = false: the web researcher always) must keep for
-    the phase's own program to start when it is installed under $HOME: the directory of the name
-    on PATH, the directory of the file it resolves to, the root of an npm-style install it lies in
-    (the parent of its outermost `node_modules`) or a `versions/` store, and the same for the
-    interpreter of a `#!` script (`#!/usr/bin/env node` -> node)."""
-    import shutil
-    exe = shutil.which(str(argv0)) if argv0 else None
-    if not exe:
+    the program `argv0` to start when it is installed under $HOME: the directory of the name on
+    PATH, the directory of the file it resolves to, the root of the install it lies in (the
+    parent of its outermost `node_modules`, a `versions/`, `lib/` or `libexec/` store, and the
+    outermost directory below $HOME with a PROGRAM_MARKERS entry), the `lib`/`lib64`/`libexec`
+    of a `<prefix>/bin/` program (a Python's standard library), then the same for the
+    interpreter of a `#!` script (`#!/usr/bin/env node` -> node) and, for a shell launcher, for
+    every program file or command it names (a two-line `exec node .../bin.js` shim). Read-only:
+    a kept path is only left unmasked; the credential masks still apply inside it."""
+    seen = set() if _seen is None else _seen
+    if not argv0 or depth > 3:
+        return []
+    argv0 = str(argv0)
+    exe = argv0 if "/" in argv0 else shutil.which(argv0)
+    if not exe or not os.path.isfile(exe):
         return []
     real = os.path.realpath(exe)
+    if real in seen:
+        return []
+    seen.add(real)
+    home = _home()
     out = [os.path.dirname(os.path.abspath(exe)), os.path.dirname(real)]
     parts = Path(real).parts
     for i, part in enumerate(parts):
         if part in ("node_modules", "versions", "lib", "libexec") and i > 1:
             out.append(str(Path(*parts[:i])))
             break
-    if depth == 0:
-        try:
-            with open(real, "rb") as fh:
-                first = fh.readline(200)
-        except OSError:
-            first = b""
-        if first.startswith(b"#!"):
-            words = first[2:].decode(errors="replace").split()
-            if words and os.path.basename(words[0]) == "env" and len(words) > 1:
-                words = [w for w in words[1:] if not w.startswith("-")]
-            if words:
-                out += exe_roots(words[0], 1)
+    root = _install_root(real, home)
+    if root:
+        out.append(root)
+    for f in dict.fromkeys((os.path.abspath(exe), real)):     # <prefix>/bin/<exe>: its runtime
+        if os.path.basename(os.path.dirname(f)) == "bin":    # library dirs (a Python's stdlib)
+            prefix = os.path.dirname(os.path.dirname(f))
+            out += [os.path.join(prefix, d) for d in ("lib", "lib64", "libexec")
+                    if os.path.isdir(os.path.join(prefix, d))]
+    try:
+        with open(real, "rb") as fh:
+            first = fh.readline(200)
+    except OSError:
+        first = b""
+    if first.startswith(b"#!"):
+        words = first[2:].decode(errors="replace").split()
+        if words and os.path.basename(words[0]) == "env" and len(words) > 1:
+            words = [w for w in words[1:] if not w.startswith("-")]
+        if words:
+            out += exe_roots(words[0], depth + 1, seen)
+            if os.path.basename(words[0]) in SHELLS:
+                for w in _launcher_words(real, home):
+                    if "/" in w:
+                        if os.path.isabs(w) and _is_program_file(w):
+                            out += exe_roots(w, depth + 1, seen)
+                    elif re.fullmatch(r"[A-Za-z0-9._+-]+", w):
+                        found = shutil.which(w)
+                        if found and os.path.realpath(found).startswith(home + "/"):
+                            out += exe_roots(found, depth + 1, seen)
     return list(dict.fromkeys(out))
+
+
+def program_roots(argv: list) -> list:
+    """exe_roots for a phase's whole argv: its program (argv[0]) and every later item that names
+    a program file (`python /x/harness.py`, `node /x/bin.js`, `--import=/x/hook.mjs`). Only
+    paths under $HOME matter (nothing else is masked), and $HOME itself is never kept: a program
+    file lying directly in $HOME keeps that one file."""
+    if not argv:
+        return []
+    home = _home()
+    seen: set = set()
+    out = exe_roots(argv[0], 0, seen)
+    for item in argv[1:]:
+        for w in str(item).split("="):
+            if "/" in w and _is_program_file(w):
+                out += exe_roots(os.path.abspath(w), 1, seen)
+                real = os.path.realpath(w)
+                if os.path.dirname(real) == home:
+                    out.append(real)
+    keep = []
+    for p in dict.fromkeys(os.path.realpath(x) for x in out):
+        if p.startswith(home + "/"):
+            keep.append(p)
+    return keep
 
 
 def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True, keep=()) -> dict:
@@ -402,9 +513,10 @@ def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True, keep=()) -> 
                 late_ro=[os.path.expanduser(p) for p in conf.extra_read] + conf.cred_paths())
 
 
-def jailed(argv: list, ph: Phase, rw=(), ro_binds=()) -> list:
+def jailed(argv: list, ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True) -> list:
     """The phase inside konstant.jail (jail_layout's shape for its confinement); with $HOME
-    masked the phase's own program stays reachable (exe_roots)."""
+    masked the phase's own program and its runtime stay reachable, read-only (program_roots).
+    Every adapter's confine() goes through here (dsh included: L5-6 live finding 1)."""
     from konstant import jail
-    keep = exe_roots(argv[0]) if argv and not ph.conf.home_read else []
-    return jail.wrap(argv, **jail_layout(ph, rw, ro_binds, keep=keep))
+    keep = program_roots(argv) if argv and not ph.conf.home_read else []
+    return jail.wrap(argv, **jail_layout(ph, rw, ro_binds, tmpdir=tmpdir, keep=keep))

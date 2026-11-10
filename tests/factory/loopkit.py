@@ -106,3 +106,23 @@ def goal(s, slug: str = "greeter") -> dict:
 
 def jobs(s) -> list:
     return s.w.json("job", "list", "--project", "greeter")
+
+
+def diagnose(s) -> str:
+    """What a stuck factory test needs in its failure message (the CI runner keeps nothing
+    else): the goal, each job's status, the last events and the tail of the factory's log."""
+    out = []
+    try:
+        g = goal(s)
+        out.append(f"goal: status {g.get('status')} intake {g.get('intake')}")
+    except Exception as exc:                         # noqa: BLE001 - diagnostics only
+        out.append(f"goal: unreadable ({exc})")
+    try:
+        out += [f"job {j['display_id']}: {j['status']}" for j in jobs(s)]
+    except Exception as exc:                         # noqa: BLE001
+        out.append(f"jobs: unreadable ({exc})")
+    out += [json.dumps(e)[:400] for e in events(s)[-8:]]
+    for log in sorted(s.w.src.glob("factory-*.log"))[-1:]:
+        out += ["--- " + log.name] + log.read_text(errors="replace").splitlines()[-40:]
+    return "\n".join(out)
+

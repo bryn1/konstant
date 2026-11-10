@@ -101,19 +101,34 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def farm(tmp_path, drop=("python",), add=None) -> str:
-    """A PATH of symlinks to /usr/bin and /bin without the tools named in drop, plus fakes."""
+def farm(tmp_path, drop=("python",), add=None,
+         sources=(Path("/usr/bin"), Path("/bin"))) -> str:
+    """A PATH of symlinks to /usr/bin and /bin without the tools named in drop, plus fakes.
+    On a merged-/usr system both name the same directory, and a dangling link there (the CI
+    runner has some) made `exists()` false for the link already made: lexists, once per name."""
     d = tmp_path / "farm"
     d.mkdir()
-    for src in (Path("/usr/bin"), Path("/bin")):
+    for src in sources:
         for p in src.iterdir():
-            if not p.name.startswith(drop) and not (d / p.name).exists():
+            if not p.name.startswith(drop) and not os.path.lexists(d / p.name):
                 (d / p.name).symlink_to(p)
     for name, body in (add or {}).items():
         (d / name).unlink(missing_ok=True)
         (d / name).write_text("#!/bin/sh\n" + body + "\n")
         (d / name).chmod(0o755)
     return str(d)
+
+
+def test_farm_survives_merged_usr_with_a_dangling_link(tmp_path):
+    """The CI runner's merged /usr: /bin and /usr/bin are one directory holding a dangling link
+    (grub-ntldr-img); the farm made it twice -> FileExistsError in six tests."""
+    real = tmp_path / "usr-bin"
+    real.mkdir()
+    (real / "broken").symlink_to(tmp_path / "nowhere")
+    (real / "tool").write_text("#!/bin/sh\n")
+    (tmp_path / "bin").symlink_to(real)
+    d = Path(farm(tmp_path, sources=(real, tmp_path / "bin")))
+    assert sorted(p.name for p in d.iterdir()) == ["broken", "tool"]
 
 
 # --- static: the script itself ---------------------------------------------------------------

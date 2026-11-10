@@ -81,7 +81,12 @@ def test_bundle_rebuilds_byte_for_byte():
 
 @pytest.mark.skipif(_node() is None, reason="node >= 20 not on PATH")
 def test_plugin_node_suite():
-    r = subprocess.run([_node(), "--test", str(REPO / "tests" / "harness" / "dsh_gate")],
+    """The test files are named (node >= 22 reads `--test` arguments as globs and a directory as
+    a module: `Cannot find module .../dsh_gate` on the CI runner's node 24) and the TAP reporter
+    is asked for (node >= 23 defaults to `spec` even when not on a terminal)."""
+    files = sorted(str(p) for p in (REPO / "tests" / "harness" / "dsh_gate").glob("*.test.mjs"))
+    assert files
+    r = subprocess.run([_node(), "--test", "--test-reporter=tap", *files],
                        capture_output=True, text=True, timeout=300, cwd=str(REPO))
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
     assert "# fail 0" in r.stdout and "# pass " in r.stdout

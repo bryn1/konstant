@@ -75,7 +75,9 @@ verifier says BLOCKED: one DONE.md row per claim that could not be verified,
 `Dn | <claim> | BLOCKED | <why; last verdict file>` - the check then ends BLOCKED, never resumed.
 DONE.md in OUT: `ID | claim | STATUS | evidence` per DoD claim, STATUS PASS|FAIL|BLOCKED|N/A|
 UNVERIFIED, evidence = a command and its captured output, a path or a sha{rows};
-plus one `CLEANUP: <what was moved/removed, where>` or `CLEANUP: NONE-NEEDED` line.
+plus one `CLEANUP: <what was moved/removed, where>` or `CLEANUP: NONE-NEEDED` line. Claim only
+what you can read: konstant's sealed stores (var/research/, var/holdout/, the memory vault) are
+checked by the check itself, and a row about them is ignored.
 {dod}Keep CYCLES.md in OUT (cycle | trigger | action | outcome).
 Git last mile: commit the deliverable; no untracked file created outside OUT (scratch goes
 under OUT/.tmp/); no unfinished-work markers added; changed test files pass; pytest in OUT

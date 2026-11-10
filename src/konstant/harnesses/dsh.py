@@ -33,7 +33,7 @@ import re
 from pathlib import Path
 
 from konstant.harnesses import dsh_session
-from konstant.harnesses.base import (Adapter, Phase, Reach, harness_home, jail_layout,
+from konstant.harnesses.base import (Adapter, Phase, Reach, harness_home, jailed,
                                      private_dir)
 
 PATCH = ".dsh/konstant.patch.yml"
@@ -175,10 +175,9 @@ class Dsh(Adapter):
         """The phase inside konstant.jail (dsh's sandbox does not confine reads). Writable:
         the project, OUT and this phase's own dsh root, plus what the confinement profile opens
         (base.jail_layout); konstant's machinery stays read-only inside them (jail.wrap home=)."""
-        from konstant import jail
         if not self.jails(ph):
             return argv
-        return jail.wrap(argv, **jail_layout(ph, rw=[self._root(ph)], tmpdir=False))
+        return jailed(argv, ph, rw=[self._root(ph)], tmpdir=False)
 
     def confines(self, jail: bool = True, factory: bool = False, conf=None) -> bool:
         """Every dsh phase, factory mode or not (dsh's sandbox does not confine reads), unless

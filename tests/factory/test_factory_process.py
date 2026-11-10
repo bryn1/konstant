@@ -20,8 +20,8 @@ import signal
 import time
 import urllib.request
 
-from tests.factory.loopkit import (events, factory, jobs, kill_group, make_lws, notify_lines,
-                                   start_bg, wait_for)
+from tests.factory.loopkit import (diagnose, events, factory, jobs, kill_group, make_lws,
+                                   notify_lines, start_bg, wait_for)
 from tests.holdout.conftest import needs_jail
 
 
@@ -71,7 +71,7 @@ def test_kill_switch_drains_a_running_factory_and_refuses_a_start_red_green(tmp_
     try:
         hb = wait_for(lambda: any(x["kind"] == "attempt" for x in heartbeat(s).get("steps", []))
                       and heartbeat(s), timeout=300, every=0.1)
-        assert hb, heartbeat(s)
+        assert hb, f"{heartbeat(s)}\n{diagnose(s)}"
         r = s.w.run("factory", "stop", "--wait", "0")
         assert r.returncode == 0
         p.wait(timeout=300)
@@ -97,7 +97,7 @@ def test_killed_factory_resumes_from_the_board_and_D6_view(tmp_path):
     try:
         assert wait_for(lambda: any(x["kind"] == "attempt" and x["job"] == 3
                                     for x in heartbeat(s).get("steps", [])), timeout=300,
-                        every=0.1), heartbeat(s)
+                        every=0.1), f"{heartbeat(s)}\n{diagnose(s)}"
         kill_group(p)                                     # the host dies: loop and steps
         assert status(s)["state"] == "stopped"
         r = factory(s, "run", "greeter", "--until-idle")

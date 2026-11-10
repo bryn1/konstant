@@ -99,6 +99,17 @@ def test_intake_phases_act_as_planner_and_dod_reviewer(iws):
 
 
 @needs_jail
+def test_a_close_out_row_about_the_sealed_research_store_does_not_refuse_the_intake(iws):
+    """L5-6 live finding 2: the close-out cannot read var/research/ and says so in a BLOCKED row;
+    konstant checks that store itself, so the row is ignored and the intake files its jobs."""
+    res = intake(iws, "sealed-row")
+    assert res.returncode == 0, res.stderr[-3000:]
+    assert "is about a sealed store and is ignored" in res.stderr
+    assert len(jobs(iws)) == 2
+    assert iws.json("goal", "show", "greeter")["intake"] == "filed"
+
+
+@needs_jail
 def test_B4_weak_dod_files_nothing(iws):
     res = intake(iws, "weak-dod")
     assert res.returncode == 3, res.stderr[-2000:]

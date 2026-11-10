@@ -53,6 +53,8 @@ an intake run writes DOD-verdict.md with one `B<n> | SHIP | ...` line per row; t
 KONSTANT-DRAFTS dir and prints one `scenario-sees: ...` line per thing it tried to read
 (var/runs, job clones, the board DB, the tokens, the store).
   weak-dod                the planner's B2 brief has no PROBE line (the filing must refuse it)
+  sealed-row              the close-out adds a BLOCKED row about the sealed research store (the
+                          L5-6 live run's row): konstant ignores it, the intake files its jobs
   weak-scenario           the scenario writer's proof already passes on the base (VACUOUS)
   scenario-memory         the scenario writer speaks MCP to `konstant mcp memory` (its read-only
                           view, memory/view.py): one kb_recall "greeting" and one kb_note; one
@@ -515,6 +517,10 @@ def closeout(out: Path, rows: list, dod: list = ()) -> None:
         url = os.environ.get("FAKE_RESEARCH_URL") or "https://example.org/greet"
         done.append(f"COPIED | {MODULE}.py | {url} | "
                     f"{'MIT' if MODE == 'copy-licensed' else 'GPL-3.0-only'}")
+    if MODE == "sealed-row":       # the live close-out's honest row about a store it cannot read
+        done.append("P8 | the research result for this run persists in the research store "
+                    "(var/research/) | BLOCKED | the close-out cannot read var/research/ to "
+                    "confirm it")
     done.append("CLEANUP: NONE-NEEDED")
     (out / "DONE.md").write_text("\n".join(done) + "\n")
     (out / "CYCLES.md").write_text("cycle | trigger | action | outcome\n"

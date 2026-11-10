@@ -54,21 +54,44 @@ def test_F34_design_lists_no_job_close_verify_flag():
     assert rows and not any("--verify" in r for r in rows), rows
 
 
-@pytest.mark.skipif(SKIP_INSTALL, reason="KONSTANT_SKIP_INSTALL_TESTS=1")
-def test_F17_offline_install_from_a_pip_download_dir(tmp_path):
-    tree = test_install._copy_release_tree(tmp_path / "k")
-    wheels = tmp_path / "wheels"
-    # REVIEW F-17 exactly: `pip download -d wheels <folder>` (no setuptools in the dir)
-    dl = subprocess.run([sys.executable, "-m", "pip", "download", "-q", "-d", str(wheels),
-                         str(tree)], capture_output=True, text=True, timeout=600)
-    if dl.returncode != 0:
-        pytest.skip(f"no package index reachable to build the wheel dir: {dl.stderr[-200:]}")
+def _offline_install(tree: Path, wheels: Path):
     env = {k: v for k, v in os.environ.items() if not k.startswith("KONSTANT_")}
     dead = "http://127.0.0.1:9"      # the network is blocked: any index or proxy use fails
     env.update(PIP_INDEX_URL=dead, http_proxy=dead, https_proxy=dead, HTTP_PROXY=dead,
                HTTPS_PROXY=dead, PIP_NO_INPUT="1")
-    res = subprocess.run(["./install.sh", "--yes", "--port", "18997", "--wheels", str(wheels),
-                          "--harness", "python3 -c pass {prompt}"], capture_output=True,
-                         text=True, timeout=900, cwd=str(tree), env=env)
+    return subprocess.run(["./install.sh", "--yes", "--port", "18997", "--wheels", str(wheels),
+                           "--harness", "python3 -c pass {prompt}"], capture_output=True,
+                          text=True, timeout=900, cwd=str(tree), env=env)
+
+
+def _download(wheels: Path, *what):
+    dl = subprocess.run([sys.executable, "-m", "pip", "download", "-q", "-d", str(wheels), *what],
+                        capture_output=True, text=True, timeout=600)
+    if dl.returncode != 0:
+        pytest.skip(f"no package index reachable to build the wheel dir: {dl.stderr[-200:]}")
+
+
+@pytest.mark.skipif(SKIP_INSTALL, reason="KONSTANT_SKIP_INSTALL_TESTS=1")
+def test_F17_offline_install_from_a_pip_download_dir(tmp_path):
+    """REVIEW F-17 exactly: `pip download -d wheels <folder>` (no setuptools in the dir). Where
+    the venv builds konstant by itself (Python <= 3.11 venvs bundle setuptools) the offline
+    install succeeds; where it cannot (3.12+ bundle none: the CI runner's 3.12 job) install.sh
+    refuses with the recipe, never a pip traceback, and the documented recipe
+    (`... <folder> setuptools wheel`) then installs."""
+    tree = test_install._copy_release_tree(tmp_path / "k")
+    wheels = tmp_path / "wheels"
+    _download(wheels, str(tree))
+    res = _offline_install(tree, wheels)
+    if res.returncode == 0:
+        assert "konstant" in res.stdout and "installed" in res.stdout
+        return
+    assert res.returncode == 1, res.stdout[-2000:] + res.stderr[-2000:]
+    assert "no build backend offline" in res.stderr and "setuptools wheel" in res.stderr, \
+        res.stderr[-2000:]
+    assert "Traceback" not in res.stderr
+    tree2 = test_install._copy_release_tree(tmp_path / "k2")
+    wheels2 = tmp_path / "wheels2"
+    _download(wheels2, str(tree2), "setuptools", "wheel")
+    res = _offline_install(tree2, wheels2)
     assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
     assert "konstant" in res.stdout and "installed" in res.stdout

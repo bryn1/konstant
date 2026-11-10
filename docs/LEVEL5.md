@@ -1136,7 +1136,7 @@ compatible licence. Landed as DESIGN.md §6.2.1 describes. Where it touches this
   the phase program's own directories (`harnesses/base.py exe_roots`): the PATH entry, its
   resolved file, an npm-style or `versions/` install root and a `#!` interpreter. A harness
   installed in another layout under `$HOME` may not start there (stated limit, not seen on the
-  build host).
+  build host; seen live in L5-6 and fixed in L5-6b: `program_roots`).
 - **An unreachable board is a warning**, not a reason to research: the card says no lookup was
   done. Fail-closed here would have turned every offline run into a web search.
 - **Limits stated**: the licence gate reads declarations and provenance marks, it does not detect
@@ -1433,7 +1433,7 @@ that row as written, so the intake was refused with nothing filed (no job, no ho
 bare repository untouched), the factory exited 4, and the BLOCKED escalation came back in the chat
 at the owner's next message (turn 3), where the model read the board and reported the goal stuck.
 Not reached live: holdouts, producers, the verifier, a ship. Findings for L5-R2 (not fixed in this
-wave, which changes no code under `src/`):
+wave, which changes no code under `src/`; both fixed in L5-6b, below):
   1. **The closed researcher could not start the live dsh.** The live run's `dsh` was a two-line
      `sh` script in a directory under `$HOME` that runs node and dsh's `bin.js`, both under
      `$HOME`; the research profile masks `$HOME` and keeps only the program's own directories
@@ -1447,6 +1447,43 @@ wave, which changes no code under `src/`):
      careful model records it BLOCKED; the intake's DoD check then stops the whole intake, although
      the `research` rule is checked by konstant itself. The intake's close-out prompt (or the
      check) should keep the mechanical rules out of the model's rows.
+
+### L5-6b as built (CI on a clean runner, the two live findings)
+
+No new feature; what a clean GitHub runner and the live run showed, fixed at the cause:
+
+- **Live finding 1, exact cause**: the dsh adapter's `confine()` called `jail.wrap(jail_layout(...))`
+  itself and so never passed the program's roots (`keep`) that every other adapter gets through
+  `base.jailed()`: with `$HOME` masked the launcher's directory was masked too (`bwrap: execvp
+  dsh: No such file or directory`). And `exe_roots` followed only argv[0] and its `#!` line, so
+  even a kept launcher could not reach the runtime and the entry script it execs (node and
+  dsh's `bin.js` inside its pnpm monorepo), and the CI runner's `python <repo under
+  $HOME>/tests/fixtures/fake_harness.py` lost its script (research `empty` in three tests).
+  Fix: every adapter goes through `base.jailed()` (dsh with `tmpdir=False`), which keeps
+  `program_roots(argv)`: argv[0], its interpreter, the programs a shell launcher names (absolute
+  paths, `$HOME`/`~` forms, bare names on PATH; only executables and script files, never a key
+  or config file), every argv item that is a program file, each with its install root (the
+  outermost directory below `$HOME` holding `package.json`, `node_modules`,
+  `pnpm-workspace.yaml`, `pyproject.toml`, `setup.py`, `setup.cfg` or `pyvenv.cfg`). Only paths
+  below `$HOME` are kept, never `$HOME` itself (a program file directly in it keeps that file);
+  the root stays read-only and the credential, socket and integrity-core masks apply inside a
+  kept root. The codex permission profile keeps its own install the same way.
+  Tests: `tests/harness/test_program_roots.py` (the live layout under a HOME-like dir; red twins
+  reproduce the live error and the CI one).
+- **Live finding 2**: the close-out prompt now says what may be claimed (`CLAIM_SCOPE`: OUT, the
+  project, the task; never the sealed stores or the board), and the `done` rule ignores, with a
+  warning, a row whose claim is about a sealed store, whatever its status (it never blocks and
+  never counts as the PASS row; `DoD-<n>` rows are never ignored). Dropping a row grants nothing
+  that leaving it out would not; the stores stay checked by the rules `research`, `holdouts` and
+  `verified`. Tests: `tests/gate/test_sealed_claims.py`, and the intake end to end with the live
+  row (`FAKE_HARNESS_MODE=sealed-row`, red: exit 4 refused; green: filed).
+- **CI** (merged /usr with a dangling link, node 24, Python 3.12 venvs without setuptools, the
+  workflow's `GIT_AUTHOR_*`): the PATH farm of `tests/release/test_get.py` links each name once
+  (`lexists`); the dsh-gate node suite names its files and asks for the TAP reporter; the probe
+  fixtures set the git identity by environment; F-17 accepts the two honest outcomes of the exact
+  F-17 download (installs where the venv builds alone; else the refusal with the recipe, and the
+  recipe then installs); the factory process tests print the goal, jobs, events and the factory
+  log when they time out; pytest runs with `-rs` so every skip and its reason is in the log.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

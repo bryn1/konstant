@@ -12,6 +12,12 @@ dod:      a run bound to a job (`--job`): one `DoD-<n>` row per row of the job's
           BLOCKED - never N/A, never missing (REVIEW F-21).
 absence:  build types: >= 1 `N<n>` proof-of-absence row (or `N1 | proof of absence | N/A | why`).
 surfaces: build types: one `surface <name>` row per surface in the catalog, PASS or N/A + reason.
+sealed:   a row whose claim is about one of konstant's sealed stores (the research store
+          var/research/, the holdout store var/holdout/, the memory vault and its index) is no
+          attestation: no phase can read those stores, and konstant checks them itself (rules
+          research, holdouts, verified). Such a row is IGNORED with a warning, whatever its status
+          (a BLOCKED one never blocks the run: L5-6 live finding 2); it never counts as the PASS
+          row either. `DoD-<n>` rows (the job's own DoD) are never ignored.
 DECLINED: `DECLINED | <claim> | job <id>` excuses an EXCUSABLE unmet/blocked condition only when
           BOTH hold: the claim QUOTES the condition (>= 2 contiguous shared words, claim >= 3
           words) AND job <id> on the board carries an OWNER-role note or approval reading
@@ -42,6 +48,11 @@ CLAIM_MIN_WORDS = 3
 JOB_REF = re.compile(r"\bjob\s*#?\s*(\d+)\b", re.I)
 HEADER = ["ID", "CLAIM", "STATUS", "EVIDENCE"]
 DOD_ID = re.compile(r"^DoD-(\d+)$", re.I)
+# a claim about a sealed store (machinery.SEALED): what no phase can see, so it cannot attest it
+SEALED_CLAIM = re.compile(r"(\bvar/(research|holdout|memory)\b|\b(research|holdout|sealed)[ -]"
+                          r"stores?\b|\bsealed holdouts?\b|\bmemory (vault|index)\b)", re.I)
+SEALED_NOTE = ("no phase can read konstant's sealed stores; konstant checks them itself (rules "
+               "research, holdouts, verified)")
 
 
 def cells(line: str) -> list:
@@ -91,6 +102,10 @@ def read_rows(run: Run):
             continue
         status, rid, claim = norm[2], cs[0], cs[1]
         ev = " | ".join(cs[3:]).strip()
+        if sealed_claim(rid, claim):
+            out.append(Finding("done", f"DONE.md {rid} ({status}) is about a sealed store and is "
+                                       f"ignored: {SEALED_NOTE}: {claim[:80]}", severity="warn"))
+            continue
         rows.append((rid, claim, status, ev))
         short = claim[:80]
         if status in ("FAIL", "UNVERIFIED"):
@@ -110,6 +125,11 @@ def read_rows(run: Run):
     elif not any(r[2] in ("PASS", "BLOCKED") for r in rows):
         out.append(Finding("done", "DONE.md has no PASS row - nothing is claimed done"))
     return out, rows
+
+
+def sealed_claim(rid: str, claim: str) -> bool:
+    """A row about a sealed store (SEALED_CLAIM), except the job's own `DoD-<n>` rows."""
+    return not DOD_ID.match(rid.strip("*`_ ")) and bool(SEALED_CLAIM.search(claim))
 
 
 def surface_name(claim: str):

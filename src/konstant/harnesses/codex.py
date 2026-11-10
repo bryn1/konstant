@@ -63,7 +63,7 @@ def filesystem(ph: Phase) -> dict:
     writable), opens $HOME (home_write) and extra_write paths, masks $HOME's other entries
     (home_read = false) and leaves the credentials it passes through readable; the integrity core
     (machinery read-only, tokens and holdouts denied) stays unless the owner turned it off."""
-    from konstant.harnesses.base import home_masks
+    from konstant.harnesses.base import home_masks, program_roots
     conf = ph.conf
     ws, run = ph.workspace, ph.run_dir
     fs = {":root": "write" if conf.host_write else "read", str(ws): "write"}
@@ -71,7 +71,7 @@ def filesystem(ph: Phase) -> dict:
     if conf.home_write and not conf.host_write and home.is_dir():
         fs[str(home)] = "write"
     if not conf.home_read:
-        for p in home_masks([ws, ph.cwd, run]):
+        for p in home_masks([ws, ph.cwd, run, *program_roots(["codex"])]):  # its own install
             fs[p] = "deny"
     for p in conf.extra_write:
         if Path(os.path.expanduser(p)).exists():

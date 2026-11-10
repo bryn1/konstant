@@ -1,6 +1,7 @@
 """Shared fixtures: a tmp workspace home with a file, a git repo and a sqlite db."""
 from __future__ import annotations
 
+import os
 import sqlite3
 import subprocess
 
@@ -9,9 +10,15 @@ import pytest
 from konstant.verify.shapes import Roots
 
 
+# the identity by environment too: GIT_AUTHOR_* / GIT_COMMITTER_* in the caller's environment
+# (the CI workflow sets them) beat `-c user.email`, and the probe tests read the author back
+IDENT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+
+
 def git(repo, *args):
     subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@example.com", "-c", "user.name=t",
-                    *args], check=True, capture_output=True)
+                    *args], check=True, capture_output=True, env={**os.environ, **IDENT})
 
 
 @pytest.fixture()
