@@ -46,7 +46,8 @@ jobs:
         run: python -m pytest -q -rs
       - name: release build and scan (public patterns; the denylist is maintainer-local)
         run: |
-          python -m konstant.release build --worktree --no-denylist --dist "$RUNNER_TEMP/dist"
+          VER=$(python -c 'import konstant; print(konstant.__version__)')
+          python -m konstant.release build --version "$VER" --worktree --no-denylist --dist "$RUNNER_TEMP/dist"
           python -m konstant.release scan --tree .
       - name: fresh-install end to end
         run: bash tests/e2e/fresh_install.sh
