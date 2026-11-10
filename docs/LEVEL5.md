@@ -1421,7 +1421,32 @@ defect of the live script itself: it linked the dsh shim from a directory under 
 jailed phase's private `/tmp` made the link dangle (`bwrap: execvp dsh: No such file or
 directory`); the script now copies the shim. Its chat path had already worked: the model proposed the goal in
 the request's turn, and the owner's yes filed it with source chat. Attempt 2:
-still running when the wave's main commit was made; its outcome is recorded by the next commit.
+17:13-18:53Z (6021 s), PARTIAL, stopped by itself well inside the time box, the endpoint healthy
+throughout (no error in its watcher's log). P0 held live: turn 1 (31 s) the model proposed goal
+`greeter-greet-by-name` in the same turn, turn 2 "yes" filed it (source chat, only limit
+`max_attempts = 3`), and the model ran no factory step. The factory's intake then ran on the same
+model: the closed researcher could not start (finding 1), the planner wrote two `code` jobs (B1 the
+library greets by name, B2 the command line and the README; 3085 s), the DoD reviewer passed both
+with SHIP in its first cycle (1546 s), and the close-out (938 s) wrote a `BLOCKED` row of its own,
+that it could not confirm the research result in `var/research/` (finding 2). The DoD check took
+that row as written, so the intake was refused with nothing filed (no job, no holdout, no ship; the
+bare repository untouched), the factory exited 4, and the BLOCKED escalation came back in the chat
+at the owner's next message (turn 3), where the model read the board and reported the goal stuck.
+Not reached live: holdouts, producers, the verifier, a ship. Findings for L5-R2 (not fixed in this
+wave, which changes no code under `src/`):
+  1. **The closed researcher could not start the live dsh.** The live run's `dsh` was a two-line
+     `sh` script in a directory under `$HOME` that runs node and dsh's `bin.js`, both under
+     `$HOME`; the research profile masks `$HOME` and keeps only the program's own directories
+     (`harnesses/base.py exe_roots`). The researcher's phase log reads `bwrap: execvp dsh: No such
+     file or directory` and research ended `empty` (a warning; intake went on). The exact cause
+     (the PATH the jail sees, or the binds `exe_roots` returns for this layout) was not diagnosed
+     here; it is the limit L5-T stated ("a harness installed in another layout under `$HOME` may
+     not start there"), now seen live.
+  2. **A close-out row about a sealed store blocks an intake.** `var/research/` is sealed from
+     every phase, so an honest close-out cannot verify "the research result persists" and a
+     careful model records it BLOCKED; the intake's DoD check then stops the whole intake, although
+     the `research` rule is checked by konstant itself. The intake's close-out prompt (or the
+     check) should keep the mechanical rules out of the model's rows.
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
