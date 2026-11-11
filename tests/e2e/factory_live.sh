@@ -202,7 +202,7 @@ say "trail (board artifacts)"
 import json, subprocess, sys
 K, goal, remote, base, ghlog = sys.argv[1:6]
 def kj(*a):
-    r = subprocess.run([K, "--as", "viewer", *a, "--json"], capture_output=True, text=True)
+    r = subprocess.run([K, "--as", "viewer", *map(str, a), "--json"], capture_output=True, text=True)
     return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
 g = kj("goal", "show", goal) or {}
 print(f"goal {goal}: status {g.get('status')} intake {g.get('intake')}")

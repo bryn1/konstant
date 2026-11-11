@@ -1487,6 +1487,25 @@ No new feature; what a clean GitHub runner and the live run showed, fixed at the
   release step passes `--version` (the build requires it; earlier runs never got that far) and
   pytest runs with `-rs` so every skip and its reason is in the log. The interactive gate block is
   unchanged (its 3300-character budget); the close-out prompt and the `done` rule carry the scope.
+- **The live re-run** (`tests/e2e/factory_live.sh`, same rules as L5-6: one local model for every
+  role through a plain dsh copied into the workspace, `max_concurrency = 2`, the github target to a
+  local bare repository; 22:48Z-00:32Z, 6218 s, PARTIAL `factory exit 4`, the endpoint healthy
+  throughout): P0 held again (turn 1 32 s: the goal proposed in the request's turn; turn 2 "yes"
+  8 s: filed, source chat). Intake, now through: the closed researcher started under `$HOME` and
+  ended `summarised` (500 s, 7 sources, 17 findings; finding 1 fixed live), planner 1238 s (B1 code,
+  B2 docs after B1), DoD reviewer 927 s (both SHIP), close-out 790 s (rows about OUT and the target
+  only, no sealed-store row), the DoD check MET, both jobs filed, reviewed and approved. Holdouts,
+  reached for the first time live: the scenario writer (the same model) had its drafts refused
+  by the mechanical lint twice per job (1.1: not held out + hint leaks, then TRIVIAL regexes that
+  match empty output; 1.2: held-out and hint-leak rules, then MALFORMED expectations and too few),
+  947 s and 1706 s; each job's holdout authoring escalated BLOCKED, the intake exited 4, the
+  factory went idle with the goal stuck. Both escalations reached the chat and turn 3 (42 s)
+  reported them from the board. Not reached live: producers, the verifier, a ship (remote main
+  unchanged, no `gh` call). Finding for L5-R2: with one local model the scenario writer is the
+  bottleneck; the lint refused correctly every time (the drafts broke its rules), so the guard is
+  not the defect; a third authoring attempt, a worked example per rule in the retry prompt, or an
+  owner-authored set (`[holdout] author = "owner"`) are the options, an owner call. The live
+  script's trail printer passed a job id as an int to subprocess (fixed: `map(str, ...)`).
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
