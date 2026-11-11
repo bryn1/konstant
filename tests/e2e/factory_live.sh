@@ -12,7 +12,9 @@
 # with node by absolute paths outside /tmp), never a launcher that forces its own DSH_HOME; it is
 # copied first on PATH as `dsh`.
 # The endpoint address and the model name go only into the temp workspace's konstant.toml.
-# KONSTANT_E2E_LIVE_TIMEOUT (default 21600 s = 6 h) boxes the whole run; the endpoint is probed
+# KONSTANT_E2E_LIVE_REQUEST replaces the owner's first message (default: the greeter sample's goal
+# text; a smaller request makes a smaller goal). KONSTANT_E2E_LIVE_TIMEOUT (default 21600 s = 6 h)
+# boxes the whole run; the endpoint is probed
 # every 30 s and the factory is stopped when it has answered with errors for more than 2 minutes.
 # The workspace goes under $HOME (dsh's sandbox gives a phase an empty private /tmp). KEEP=1 keeps
 # it. Prints `E2E-FACTORY-LIVE: PASS` (the goal done, every job shipped) or `E2E-FACTORY-LIVE:
@@ -22,7 +24,7 @@ set -euo pipefail
 if [ -z "${KONSTANT_E2E_SCRUBBED:-}" ]; then
   keep=(KONSTANT_E2E_SCRUBBED=1 "HOME=$HOME" "PATH=$PATH" "LANG=${LANG:-C.UTF-8}")
   for v in LC_ALL TERM TMPDIR LEFTHOOK PYTHON KEEP KONSTANT_E2E_DSH KONSTANT_E2E_DSH_BASE_URL \
-           KONSTANT_E2E_DSH_MODEL KONSTANT_E2E_LIVE_TIMEOUT KONSTANT_E2E_DIR; do
+           KONSTANT_E2E_DSH_MODEL KONSTANT_E2E_LIVE_TIMEOUT KONSTANT_E2E_LIVE_REQUEST KONSTANT_E2E_DIR; do
     [ -z "${!v:-}" ] || keep+=("$v=${!v}")
   done
   exec env -i "${keep[@]}" bash "$(readlink -f "$0")" "$@" </dev/null
@@ -171,7 +173,7 @@ PY
 }
 
 STAGE="P0 chat intake"
-owner_turn 1 "make greeter greet by name, with a CLI and a README"
+owner_turn 1 "${KONSTANT_E2E_LIVE_REQUEST:-make greeter greet by name, with a CLI and a README}"
 [ -n "$SID" ] || fail "no dsh session id in the first turn's events"
 GOAL=$("$K" --as viewer goal list --json | "$VPY" -c 'import json,sys; s=sys.argv[1]; g=[x for x in json.load(sys.stdin) if x.get("session")==s and x["status"]=="proposed"]; print(g[-1]["slug"] if g else "")' "$SID")
 [ -n "$GOAL" ] || fail "the orchestrator proposed no goal in the request's turn"

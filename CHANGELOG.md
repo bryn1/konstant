@@ -4,7 +4,7 @@ All notable changes to konstant. Versions follow [Semantic Versioning](https://s
 
 ## [Unreleased]
 
-Level 5, the dark factory (docs/LEVEL5.md; waves L5-1 to L5-6, pending the second independent
+Level 5, the dark factory (docs/LEVEL5.md; waves L5-1 to L5-7, pending the second independent
 review and its fixes before a release).
 
 ### Added
@@ -27,6 +27,10 @@ review and its fixes before a release).
   budget, GitHub through a stand-in; offline, from a fresh install); the optional live run
   `tests/e2e/factory_live.sh`.
 - CI: bubblewrap on the runner, the release build and scan, the one-line-install and factory e2e.
+- **A scenario writer one local model can satisfy** (L5-7): rules and worked examples in its
+  prompt, `holdout lint --draft` (the seal's own lint, run inside its phase) and `holdout new`
+  (a skeleton), the seal's reasons per draft on a retry, `[holdout] author_attempts`
+  (default 3). No lint rule changed; a skeleton placeholder is a new refusal.
 
 ### Security
 - Fixes from the first independent level-5 review (H-01..H-09; docs/LEVEL5.md "L5-F1 as built").

@@ -1511,6 +1511,91 @@ No new feature; what a clean GitHub runner and the live run showed, fixed at the
   owner-authored set (`[holdout] author = "owner"`) are the options, an owner call. The live
   script's trail printer passed a job id as an int to subprocess (fixed: `map(str, ...)`).
 
+### L5-7 as built (one local model writes the holdouts; the first live goal end to end)
+
+Owner decision (binds this wave): ONE local model plays every role, the scenario writer included;
+no owner-authored holdouts by default. The L5-6b refusals were correct, so the wave makes good
+drafts easy and keeps every rule (DESIGN.md §7.3 has the mechanics):
+
+- **The prompt teaches the bar** (`holdout/draft.py`): the rules R1-R10 in short checkable form
+  (each states the lint's own numbers: 4-character literals, 200-character hints, the five test
+  strings a regex must not be found in) and three worked examples for another project (a CLI
+  proof, a library regression, a regex proof), each passing the lint; the profile
+  `catalog/agents/scenario-writer.md` no longer carries a greeter example a model could copy.
+- **A pre-check inside the phase**: `konstant holdout lint --draft .` is the seal's own lint
+  (`parse`, `lint`, `lint_set`) with `detail=True`, which only appends what tripped a rule (the
+  literal found in the brief, the shared hint words, the test string a regex matches); a test
+  over a corpus proves detail never changes a verdict, and a differential run of the edfce84 lint
+  against this one gave byte-identical verdicts on every draft of the corpus. It reads the job's
+  brief, DoD and set size from `.konstant-draft.json`, which konstant writes beside the drafts;
+  it has no board and no store access (a file in a sealed store that is not a
+  `<store>/<job>/drafts/` file is refused) and does not run the negative control (the writer may
+  run its RUN on the read-only target itself).
+- **A skeleton**: `konstant holdout new --kind proof|regression [--regex]` writes the format with
+  `<FILL: ...>` placeholders; a value that still holds one is MALFORMED (a new refusal: stricter,
+  never looser).
+- **The retry prompt carries the seal's exact reasons per draft** (`SealRefused.hids` maps each
+  `H<n>` to its draft): file name, reasons, the same rules in detail, and the draft as written.
+  That text lives only in the next prompt, inside the sealed store; konstant's stderr (a factory
+  step log producers can read), the event and the trail still name rules and ids only. A test
+  scans every producer-readable file under `var/` and the trail for the drafts' text.
+- **`[holdout] author_attempts`** (default 3, 1-10), separate from a job's `max_attempts`.
+- **Not reachable everywhere**: the pre-check needs a shell in the phase; dsh (the owner's
+  harness) has one. The claude, codex and gemini allow lists do not name `holdout lint` (Claude
+  Code runs konstant's allowed verbs outside its sandbox, so a new verb there would widen what an
+  unsandboxed command can read); on those harnesses the writer still gets the rules, examples and
+  the per-draft retry prompt.
+
+**The live runs** (`tests/e2e/factory_live.sh`, same rules as L5-6/6b: one local model for every
+role through a plain dsh copied into the workspace, `max_concurrency = 2`, the github target to a
+local bare repository with the `gh` stand-in; one 12 h box for both runs, 06:28-18:28Z; the
+endpoint healthy throughout).
+
+- **Run 1, the greeter sample** (06:28-15:09Z, PARTIAL, stopped by hand when its third job could
+  no longer finish inside the box). P0 held (proposal in the request's turn, 31 s; filed on "yes",
+  20 s). Intake 2 h 17 min: research 15 min, planner 29 min, then two DoD-review FIX cycles before
+  SHIP (three jobs: B1 the library, B2 the CLI, B3 the README). **Holdouts: every job sealed on its
+  FIRST attempt** (3, 3 and 4 scenarios; 205 s, 310 s, 652 s), each writer having run the
+  pre-check to `DRAFTS OK` first; in L5-6b both jobs were refused twice and BLOCKED. **Job 1.1 went
+  the whole way**: producer phases 68 min (architect, coder, tester, reviewer, architect,
+  close-out; one resume because the first close-out stopped to ask instead of writing DONE.md),
+  `verify` PASS with its three holdouts, shipped through a pull request onto the bare
+  repository's `main`, post-ship probes, the project's tests and the three holdouts as the
+  regression set all ok. Job 1.2's first attempt ended UNMET after 5 h 08 min: a second
+  architect pass rewrote its evidence in OUT after the tester and reviewer had pinned it (each
+  re-judged), the reviewer's FIX on a test gap sent the coder round again, the tester then hit
+  the 1 h phase timeout, and the architect FIXed again; its second attempt was stopped with job
+  1.3 still queued.
+- **Run 2, a single-job goal** (the brief's fallback): **PASS** (15:15-18:10Z, `E2E-FACTORY-LIVE: PASS`). A first try (15:09Z) of
+  a reworded request ("one small job in greeter ...") was answered inline by the gate (no
+  deliverable word: finding 2) and stopped within minutes with the target untouched; the request
+  "implement greet(name) in greeter: ... a single code job (max_jobs 1), nothing else" then went
+  through: P0 turn 1 (34 s) proposed goal `greet-name`, turn 2 "yes" (10 s) filed it with limits
+  `max_attempts = 3, max_jobs = 1`. The intake step 78 min (research about 10 min, planner 21
+  min, DoD review SHIP in its first cycle 18 min, close-out 15 min, one job filed, then the
+  scenario writer, which sealed **5 scenarios on its first attempt** in 14 min). The producer step took 94 min (architect,
+  coder, tester PASS and reviewer SHIP in parallel, architect, close-out; one re-judged reviewer
+  pin, finding 1), then `verify` PASS with the five holdouts, the ship through a pull request onto
+  the bare repository's `main`, post-ship probes, the project's tests and the five holdouts as the
+  regression set ok, `SHIPPED` and `GOAL_DONE`; the factory exited 0 and the owner's next turn in
+  the same chat reported the goal done from the board ("FILED -> SHIPPED -> GOAL_DONE"). No canary
+  of the five scenarios was in any producer-readable file of the workspace.
+
+Findings for L5-R2 (not fixed here):
+  1. **Pin drift between verifying phases.** The `judged` state is every OUT file except verdict
+     and meta files (DESIGN §6.4), so a verifying phase that writes its own evidence into OUT
+     (the architect's second pass) makes the tester's and reviewer's earlier pins stale and costs
+     each a re-run (about 1 h on this model); the models named it themselves (job 1.1's close-out
+     "parallel evidence writes make the judge pin last-writer-wins", job 1.2's reviewer F5).
+     Narrowing the state (for example, excluding files a verifying phase wrote) changes an
+     integrity rule and needs its own review; it was left as is.
+  2. **Chat routing depends on the classifier's deliverable words.** A plain sentence like "one
+     small job in greeter ... greet(name) returns hello ..." has no deliverable signal, so the
+     gate answers it inline instead of filing a goal (L5-T "small"); "implement greet(name) ..."
+     routes to intake. Correct by the classifier's rules, but an owner who phrases a goal
+     plainly gets no factory.
+  3. A 1 h `[harness] timeout_s` is tight for a thorough tester on this model (one phase hit it).
+
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
 
