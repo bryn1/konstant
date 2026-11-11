@@ -12,7 +12,10 @@ an owner request of 2026-11-08) is in DESIGN.md §6.2.1, docs/CONCEPTS.md "Triag
 built". Wave L5-F1 fixed the first level-5 review ("L5-F1 as built"). Wave L5-4 (pillar C, ship,
 post-ship checks and rollback: section 5) is in DESIGN.md §7.5, docs/CONCEPTS.md "Ship" and "L5-4
 as built". Wave L5-5 (pillar D, the factory loop, budgets, the notifier and the factory view:
-section 6) is in DESIGN.md §7.6, docs/CONCEPTS.md "Factory" and "L5-5 as built". The owner answered the open questions on 2026-11-01 (section 9); the
+section 6) is in DESIGN.md §7.6, docs/CONCEPTS.md "Factory" and "L5-5 as built". Wave L5-6 (the proof,
+section 7), L5-6b (CI and the live findings) and L5-7 (the scenario writer made reliable for one
+local model, the first live goal end to end) are in "L5-6 as built", "L5-6b as built" and "L5-7 as
+built". The owner answered the open questions on 2026-11-01 (section 9); the
 sections they change say so. Everything else on this page is still the plan that the next
 releases build in the waves of section 8; DESIGN.md, CONCEPTS.md and CLI.md change wave by wave as
 each part lands, and this page stays the roadmap until level 5 is reached.
@@ -313,9 +316,10 @@ gemini) and asserts each one is denied. It goes red when `SEALED` loses its entr
     transcripts is refused for the scenario role (`Adapter.relocatable_home`, new; `doctor` names
     it). Otherwise a later producer on the same harness could read the scenario writer's
     transcript from the shared harness home.
-  - then `seal()` (3.2) runs lint and the negative control on every draft. A refused draft goes
-    back to the writer once with the lint reasons. Another refusal escalates the job as
-    `holdout-authoring BLOCKED`.
+  - then `seal()` (3.2) runs lint and the negative control on every draft. A refused set goes
+    back to the writer with the lint's reasons per draft, up to `[holdout] author_attempts`
+    (default 3; L5-7 as built). The last refusal escalates the job as `holdout-authoring
+    BLOCKED`.
 - **Independence comes from identity, context and file isolation, not from a second model**
   (owner decision Q1, section 9: one local model plays every role, the scenario writer
   included). The scenario writer is a different identity (the board refuses it the claim and the

@@ -12,19 +12,29 @@ workspace's own: owner decision Q1, one model may play every role), acting as id
     phase alone; its run dir (prompt, phases/*.log) is <store>/<job>/runs/<stamp>/ and its harness
     home <store>/<job>/home/<harness>/..., deleted after the phase. A harness whose home konstant
     cannot relocate (`command`) is refused: a later producer could read the transcript there;
+  - its prompt carries the rules in short checkable form and worked examples for another
+    project (holdout/draft.py), and the pre-check it can run on its drafts inside its phase,
+    `konstant holdout lint --draft .` (the same lint as the seal; no board, no store); konstant
+    writes the job's brief and DoD next to the drafts for it (draft.CONTEXT);
   - then `seal()`: lint and the negative control on every draft. A refused set goes back to the
-    writer ONCE with the reasons (lint reasons name the rule and the id, never content); a second
-    refusal escalates `holdout-authoring BLOCKED` (an escalation trail row + a BLOCKED event).
+    writer with the seal's exact reasons PER DRAFT (its file name, the H<n> it was checked as,
+    the same rules in detail and the draft as written), up to `[holdout] author_attempts`
+    (default 3; separate from a job's max_attempts). That text lives only in its next prompt,
+    inside the sealed store; konstant's own log and the escalation name rules and ids only. The
+    last refusal escalates `holdout-authoring BLOCKED` (an escalation trail row + a BLOCKED
+    event).
 Always confined: without konstant's jail it refuses (`holdouts need a confined phase`).
 """
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
+import sys
 import time
 from pathlib import Path
 
-from konstant.holdout import store
+from konstant.holdout import draft, store
 
 ROLE = "scenario-writer"
 IDENTITY = "scenario"
@@ -84,11 +94,21 @@ def masked(cfg, target: Path) -> list:
     return [p for p in out if p.exists()]
 
 
+def konstant_cmd(cfg) -> str:
+    """How the phase runs konstant: the workspace's own `bin/konstant`, else this Python."""
+    wrapper = Path(cfg.home) / "bin" / "konstant"
+    if wrapper.is_file() and os.access(wrapper, os.X_OK):
+        return shlex.quote(str(wrapper))
+    return shlex.join([sys.executable, "-m", "konstant"])
+
+
 def prompt(profile: str, job: dict, goal_text: str, target: Path, drafts: Path, need: int,
-           feedback: str = "") -> str:
+           feedback: str = "", cli: str = "konstant") -> str:
+    lint_cmd = f"{cli} holdout lint --draft ."
     head = [f"# konstant scenario writer: job {job['display_id']}", f"KONSTANT-AGENT: {ROLE}",
             f"KONSTANT-JOB: {job['id']}", f"KONSTANT-DRAFTS: {drafts}",
-            f"KONSTANT-TARGET: {target}", f"KONSTANT-MIN-SCENARIOS: {need}"]
+            f"KONSTANT-TARGET: {target}", f"KONSTANT-MIN-SCENARIOS: {need}",
+            f"KONSTANT-LINT: {lint_cmd}"]
     body = ["", "## Your profile", profile.strip(), "", "## The goal", goal_text.strip(), "",
             f"## The job: {job['title']}", (job.get("brief") or "").strip(), "",
             "## Your phase",
@@ -97,7 +117,20 @@ def prompt(profile: str, job: dict, goal_text: str, target: Path, drafts: Path, 
             f"The target is {target}: read it to see what exists now (it is read-only). A proof "
             "must FAIL on it as it is now and pass once the job is done; a regression must pass "
             "now and after. Use inputs and expected outputs that the brief above does not "
-            "contain. You are a leaf: never spawn agents or sub-sessions."]
+            "contain. You are a leaf: never spawn agents or sub-sessions.", "",
+            "## The rules (konstant checks each one; a draft that breaks one is refused)",
+            draft.RULES.replace("{need}", str(need)), "",
+            "## Worked examples (another project, `tempconv`: copy the SHAPE, never the content)",
+            draft.examples_text(), "",
+            "## Tools for your drafts",
+            f"- `{cli} holdout new --kind proof --out <name>.scenario` (or `--kind regression`; "
+            "add `--regex` for EXPECT_RE) writes a skeleton with the format right; replace "
+            "every `<FILL: ...>` value.",
+            f"- `{lint_cmd}` checks every draft in this directory as one set against the rules "
+            "above and this job's brief and DoD, and names what tripped each rule. Run it before "
+            "you finish and fix every reason until it prints `DRAFTS OK`. It does not run your "
+            "commands: you may run a RUN yourself in the target directory to see that a proof "
+            "fails there now and a regression passes."]
     if feedback:
         body += ["", "## Your previous drafts were refused; fix every reason", feedback]
     return "\n".join(head + body) + "\n"
@@ -126,18 +159,23 @@ def author(cfg, cat, job: dict, goal_text: str, target: Path, client, need: int,
         d.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(d, 0o700)
     profile = Generator(cat, Path(cfg.home)).agent_prompt(ROLE)      # one snapshot (F-08)
+    attempts = int(cfg.data["holdout"]["author_attempts"])
+    ctx = {"job": job.get("display_id"), "brief": job.get("brief") or "",
+           "acceptance": job.get("acceptance") or "", "need": need}
+    cli = konstant_cmd(cfg)
     feedback, reasons = "", []
-    for attempt in (1, 2):
+    for attempt in range(1, attempts + 1):
         drafts = _fresh(jd / "drafts")
+        draft.write_context(drafts, job, need)
         home = _fresh(jd / "home")
         run_dir = jd / "runs" / f"{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}-a{attempt}"
         run_dir.mkdir(parents=True, mode=0o700)
-        text = prompt(profile, job, goal_text, target, drafts, need, feedback)
+        text = prompt(profile, job, goal_text, target, drafts, need, feedback, cli)
         # memory (owner decision 2026-11-08): it reads the shared pool through an exported copy and
         # writes only the sealed pool, collected below; its phase still holds no token
         mem_env = view.prepare(client, drafts) if cfg.data["memory"]["enabled"] else {}
-        log(f"konstant holdout: scenario writer for job {job['display_id']} (attempt {attempt}, "
-            f"{harness.name}; run dir {run_dir})")
+        log(f"konstant holdout: scenario writer for job {job['display_id']} (attempt {attempt} "
+            f"of {attempts}, {harness.name}; run dir {run_dir})")
         res = harness.run(text, agent=ROLE, cwd=drafts, run_dir=run_dir,
                           label=f"scenario-a{attempt}", out=None, identity=IDENTITY,
                           home_base=home, tokens=(), hide=tuple(masked(cfg, target)),
@@ -146,6 +184,7 @@ def author(cfg, cat, job: dict, goal_text: str, target: Path, client, need: int,
         if mem_env:
             view.collect(client, drafts, log)
         files = sorted(p for p in drafts.glob("*.scenario") if p.is_file() and not p.is_symlink())
+        hids: dict = {}
         if res.rc != 0 and not files:
             reasons = [f"the scenario writer exited {res.rc} and wrote no draft"]
         elif not files:
@@ -159,11 +198,14 @@ def author(cfg, cat, job: dict, goal_text: str, target: Path, client, need: int,
             except store.SealRefused as exc:
                 if exc.code != 1:
                     raise AuthorRefused("; ".join(exc.lines)) from None
-                reasons = exc.lines
-        feedback = "\n".join(f"- {r}" for r in reasons)
+                reasons, hids = exc.lines, exc.hids
+        # the detailed per-draft text goes ONLY into the next prompt (inside the sealed store);
+        # the log line (a factory step log a producer can read) names rules and ids only
+        feedback = draft.feedback(reasons, hids, attempt, attempts, ctx) if hids else \
+            "\n".join(f"- {r}" for r in reasons)
         log(f"konstant holdout: job {job['display_id']} drafts refused: "
             + "; ".join(reasons)[:400])
     shutil.rmtree(jd / "drafts", ignore_errors=True)
     codes = sorted({r.split(":", 1)[0] for r in reasons})
     return {"blocked": f"{BLOCKED}: job {job['display_id']}: the scenario writer's drafts were "
-                       f"refused twice ({', '.join(codes)})", "attempts": 2}
+                       f"refused {attempts} time(s) ({', '.join(codes)})", "attempts": attempts}

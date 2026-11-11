@@ -712,7 +712,10 @@ positional arguments:
   VERB
     add       lint, control and seal scenario files (moves them into the store; owner)
     author    run the scenario writer for a job and seal its drafts (the scenario identity; exit 4
-              refused twice)
+              refused [holdout] author_attempts times)
+    lint      pre-check scenario drafts (the scenario writer's own; no board, no store; same rules
+              as add)
+    new       write a scenario skeleton to fill in
     list      ids, kinds, commitments and states
     check     commitment + parse of each sealed file
     show      print one sealed scenario (never in a task)
@@ -754,6 +757,40 @@ options:
   --config PATH      konstant.toml to use
   --harness HARNESS  an adapter name for the scenario writer (default [holdout] writer_harness, else
                      [harness])
+```
+
+## `konstant holdout lint`
+
+```
+usage: konstant holdout lint [-h] [--as ROLE] [--json] [--config PATH] --draft FILE|DIR
+                             [--context FILE]
+
+options:
+  -h, --help        show this help message and exit
+  --as ROLE         act with this role's token, or a factory identity's (planner, dod-reviewer,
+                    scenario, factory) (default [client] default_role)
+  --json            print JSON
+  --config PATH     konstant.toml to use
+  --draft FILE|DIR  a draft file, or a dir: every *.scenario in it as one set (repeatable)
+  --context FILE    the job context (brief, DoD, set size; default: the .konstant-draft.json beside
+                    the drafts)
+```
+
+## `konstant holdout new`
+
+```
+usage: konstant holdout new [-h] [--as ROLE] [--json] [--config PATH] --kind {proof,regression}
+                            [--regex] [--out FILE]
+
+options:
+  -h, --help                 show this help message and exit
+  --as ROLE                  act with this role's token, or a factory identity's (planner, dod-
+                             reviewer, scenario, factory) (default [client] default_role)
+  --json                     print JSON
+  --config PATH              konstant.toml to use
+  --kind {proof,regression}
+  --regex                    EXPECT_RE instead of EXPECT_OUT
+  --out FILE                 write it here (never overwrites; default stdout)
 ```
 
 ## `konstant holdout list`

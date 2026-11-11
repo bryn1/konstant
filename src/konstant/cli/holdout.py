@@ -8,6 +8,14 @@ list   ids, kinds, commitments, states (no content; any token reads).
 check  the commitment and parse of each sealed file; --control re-runs the negative control on
        the project's current HEAD. Prints ids and statuses only. Exit 1 when any is not ok.
 show   one scenario's file, read from the store directly (no board route serves content).
+lint   the scenario writer's pre-check of its OWN drafts (`--draft FILE|DIR`, DIR = every
+       *.scenario in it, linted as one set): the same lint as `add`, each reason naming what
+       tripped it. No board, no store: a file in a sealed store other than a `drafts/` dir is
+       refused, and the negative control is not run. The held-out rule uses the job context
+       konstant writes next to the drafts (holdout/draft.py CONTEXT) or `--context`. Exit 0 ok,
+       1 refused, 2 unreadable. Allowed inside a task run: it reads only the file it is given.
+new    a scenario skeleton (`--kind proof|regression`, `--regex`) with every value to write as a
+       `<FILL: ...>` placeholder the lint refuses; to stdout or `--out FILE` (never overwrites).
 add, check and show are refused inside a task run (KONSTANT_IN_TASK=1): a phase never handles
 holdout content.
 """
@@ -121,6 +129,47 @@ def cmd_author(ctx) -> int:
     return EXIT_OK
 
 
+def cmd_lint(ctx) -> int:
+    """The draft pre-check (holdout/draft.py): never the board, never the sealed store."""
+    from pathlib import Path
+    from konstant.holdout import draft
+    a = ctx.args
+    try:
+        files = draft.expand(a.draft, ctx.cfg.home)
+    except draft.DraftRefused as exc:
+        print(f"konstant: refused: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    first = Path(a.draft[0])
+    cpath = Path(a.context) if a.context else \
+        (Path(files[0]).parent if files else first if first.is_dir() else first.parent) \
+        / draft.CONTEXT
+    if not draft.allowed(str(cpath), draft.sealed_roots(ctx.cfg.home)):
+        print(f"konstant: refused: {cpath} lies in a sealed store", file=sys.stderr)
+        return EXIT_USAGE
+    res = draft.check(files, draft.read_context(cpath))
+    ctx.out(res, draft.report(res))
+    return EXIT_OK if res["ok"] else EXIT_FAIL
+
+
+def cmd_new(ctx) -> int:
+    import os
+    from konstant.holdout import draft
+    text = draft.skeleton(ctx.args.kind, ctx.args.regex)
+    if not ctx.args.out:
+        sys.stdout.write(text)
+        return EXIT_OK
+    try:
+        fd = os.open(ctx.args.out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError as exc:
+        print(f"konstant: {ctx.args.out}: {exc.strerror} (holdout new never overwrites a file)",
+              file=sys.stderr)
+        return EXIT_USAGE
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    print(f"wrote a {ctx.args.kind} skeleton to {ctx.args.out}: replace every <FILL: ...> value")
+    return EXIT_OK
+
+
 def register(sub, leaf) -> None:
     h = sub.add_parser("holdout", help="sealed holdout scenarios of a job (run only by verify)")
     hs = h.add_subparsers(dest="holdout_cmd", metavar="VERB")
@@ -132,11 +181,25 @@ def register(sub, leaf) -> None:
                    help="a scenario file outside the workspace (repeat for a set)")
     p.set_defaults(func=cmd_add)
     p = hs.add_parser("author", parents=[leaf], help="run the scenario writer for a job and "
-                      "seal its drafts (the scenario identity; exit 4 refused twice)")
+                      "seal its drafts (the scenario identity; exit 4 refused [holdout] "
+                      "author_attempts times)")
     p.add_argument("id", help="job id or display id")
     p.add_argument("--harness", help="an adapter name for the scenario writer (default "
                    "[holdout] writer_harness, else [harness])")
     p.set_defaults(func=cmd_author)
+    p = hs.add_parser("lint", parents=[leaf], help="pre-check scenario drafts (the scenario "
+                      "writer's own; no board, no store; same rules as add)")
+    p.add_argument("--draft", action="append", required=True, metavar="FILE|DIR",
+                   help="a draft file, or a dir: every *.scenario in it as one set (repeatable)")
+    p.add_argument("--context", metavar="FILE", help="the job context (brief, DoD, set size; "
+                   "default: the .konstant-draft.json beside the drafts)")
+    p.set_defaults(func=cmd_lint)
+    p = hs.add_parser("new", parents=[leaf], help="write a scenario skeleton to fill in")
+    p.add_argument("--kind", required=True, choices=("proof", "regression"))
+    p.add_argument("--regex", action="store_true", help="EXPECT_RE instead of EXPECT_OUT")
+    p.add_argument("--out", metavar="FILE", help="write it here (never overwrites; default "
+                   "stdout)")
+    p.set_defaults(func=cmd_new)
     p = hs.add_parser("list", parents=[leaf], help="ids, kinds, commitments and states")
     p.add_argument("id")
     p.set_defaults(func=cmd_list)

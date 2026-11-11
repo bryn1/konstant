@@ -56,6 +56,8 @@ KONSTANT-DRAFTS dir and prints one `scenario-sees: ...` line per thing it tried 
   sealed-row              the close-out adds a BLOCKED row about the sealed research store (the
                           L5-6 live run's row): konstant ignores it, the intake files its jobs
   weak-scenario           the scenario writer's proof already passes on the base (VACUOUS)
+Scenario-writer reliability modes (wave L5-7): scenario-live, scenario-retry, scenario-lint
+(tests/fixtures/fake_scenario.py).
   scenario-memory         the scenario writer speaks MCP to `konstant mcp memory` (its read-only
                           view, memory/view.py): one kb_recall "greeting" and one kb_note; one
                           `scenario-memory: ...` line each
@@ -97,6 +99,10 @@ import sys
 import time
 from pathlib import Path
 
+try:                                  # run as a script (its dir on sys.path) or imported by tests
+    from tests.fixtures.fake_scenario import SCENARIOS, VACUOUS, scenario_writer  # noqa: F401
+except ImportError:
+    from fake_scenario import SCENARIOS, VACUOUS, scenario_writer  # noqa: F401
 MODE = os.environ.get("FAKE_HARNESS_MODE", "")
 MODULE = os.environ.get("FAKE_HARNESS_MODULE", "greet")
 SURFACES = ["backend", "db", "frontend", "api contract", "tests", "docs", "deploy"]
@@ -251,20 +257,6 @@ Add a command line entry to greeter.py that prints greet(NAME) for the name give
 DoD:
 - running greeter.py with one name prints the greeting for that name
 """ + "PROBE: grep -c __main__ {workdir}/greeter.py => ^[1-9]\n"
-SCENARIOS = ("SCENARIO: greet uses the caller's name\nKIND: proof\n"
-             "RUN: python3 -c \"from greeter import greet; print(greet('Ada'))\"\n"
-             "EXPECT_EXIT: 0\nEXPECT_OUT: hello Ada\n"
-             "HINT: names other than the default are used verbatim\n",
-             "SCENARIO: the default greeting still works\nKIND: regression\n"
-             "RUN: python3 -c \"from greeter import greet; print(greet().upper())\"\n"
-             "EXPECT_EXIT: 0\nEXPECT_OUT: HELLO WORLD\n"
-             "HINT: calling it without an argument keeps working\n")
-VACUOUS = ("SCENARIO: the module documents itself\nKIND: proof\n"
-           "RUN: python3 -c \"import greeter; print(greeter.__doc__)\"\n"
-           "EXPECT_EXIT: 0\nEXPECT_OUT: greeter: small greetings.\n"
-           "HINT: the module keeps its docstring\n")
-
-
 def planner(out: Path) -> None:
     (out / "jobs").mkdir(parents=True, exist_ok=True)
     (out / "BACKLOG.md").write_text("# backlog\n\nB1 | code | greet(name) greets the caller by "
@@ -282,47 +274,6 @@ def dod_reviewer(out: Path, verdict: str, judge_cmd: str) -> None:
     line = judge(judge_cmd)
     (out / verdict).write_text("# DoD review\n" + lines + (line + "\n" if line else "")
                                + "# VERDICT: SHIP\n")
-
-
-def scenario_writer(h: dict) -> None:
-    ws = Path(os.environ.get("KONSTANT_HOME") or ".")
-    tries = [("var/runs", ws / "var" / "runs"), ("board db", ws / "var" / "board.db"),
-             ("secrets", ws / "var" / "secrets"), ("store", ws / "var" / "holdout")]
-    proj = ws / "projects"
-    tries += [(f"clone {p.name}", p) for p in sorted(proj.iterdir()) if "@" in p.name] \
-        if proj.is_dir() else []
-    for what, path in tries:
-        try:
-            seen = (sorted(x.name for x in path.iterdir()) if path.is_dir()
-                    else [f"{len(path.read_bytes())} bytes"])
-        except OSError as exc:
-            seen = [f"denied ({type(exc).__name__})"]
-        print(f"scenario-sees: {what}: {seen[:8]}")
-    drafts = Path(h["DRAFTS"])
-    if MODE == "scenario-memory":
-        scenario_memory()
-    texts = (VACUOUS, SCENARIOS[1]) if MODE == "weak-scenario" else SCENARIOS
-    for i, t in enumerate(texts, 1):
-        (drafts / f"draft{i}.scenario").write_text(t)
-
-
-def scenario_memory() -> None:
-    import json
-    msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize",
-             "params": {"protocolVersion": "2025-06-18", "capabilities": {}}},
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-             "params": {"name": "kb_recall", "arguments": {"query": "greeting"}}},
-            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-             "params": {"name": "kb_note", "arguments": {
-                 "title": "scenario lesson", "text": "proof inputs must differ from the DoD's"}}}]
-    r = subprocess.run([sys.executable, "-m", "konstant", "mcp", "memory"], capture_output=True,
-                       text=True, input="".join(json.dumps(m) + "\n" for m in msgs))
-    replies = [json.loads(x) for x in r.stdout.splitlines() if x.strip()]
-    for rep in replies[1:]:
-        text = rep.get("result", {}).get("content", [{}])[0].get("text", str(rep))
-        print("scenario-memory: " + " | ".join(text.splitlines()[:3]))
-    if not replies:
-        print(f"scenario-memory: no server ({r.returncode}): {r.stderr.strip()[-200:]}")
 
 
 def inject() -> None:
@@ -562,7 +513,7 @@ def main() -> int:
         print(f"fake harness: researcher done (mode {MODE or 'default'})")
         return 0
     if agent == "scenario-writer":
-        scenario_writer(h)
+        scenario_writer(h, MODE, PROMPT)
         print(f"fake harness: {agent} done (mode {MODE or 'default'})")
         return 0
     if agent == "orchestrator":

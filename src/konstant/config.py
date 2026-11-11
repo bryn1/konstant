@@ -113,6 +113,10 @@ DEFAULTS: dict = {
         # and the jail, so a second harness or model is optional, never required
         "writer_harness": "",
         "writer_model": "",
+        # how many times the scenario writer may write a job's set before the job is escalated
+        # `holdout-authoring BLOCKED` (each refusal goes back with the seal's reasons per draft);
+        # separate from a job's [limits] max_attempts, which counts producer task runs
+        "author_attempts": 3,
     },
     # level-5 intake (docs/LEVEL5.md 4): who may file a goal, and the limits a goal gets for what
     # it does not name. Only max_attempts is required (owner decision Q5); 0 = not limited
@@ -370,9 +374,12 @@ def check_memory(m: dict, path) -> None:
 
 
 def check_holdout(h: dict, path) -> None:
-    for key in ("min_per_job", "max_failed_rounds", "run_timeout_s"):
+    for key in ("min_per_job", "max_failed_rounds", "run_timeout_s", "author_attempts"):
         if h[key] < 1:
             raise ConfigError(f"{path}: [holdout] {key} = {h[key]}: must be >= 1")
+    if h["author_attempts"] > 10:
+        raise ConfigError(f"{path}: [holdout] author_attempts = {h['author_attempts']}: must be "
+                          "<= 10 (each attempt is a model phase)")
     store = h["store"]
     if store != "var/holdout" and not os.path.isabs(store):
         raise ConfigError(f"{path}: [holdout] store = {store!r}: var/holdout (masked in every "

@@ -348,6 +348,10 @@ greeter`), every phase in konstant's jail:
 4. the **scenario writer** (identity `scenario`) writes each job's holdouts from the goal, the
    brief and a read-only view of the project, in a jail where it sees no job clone, no run record,
    no board and no token; konstant lints them, runs them on the current commit and seals them.
+   Its prompt carries the rules in checkable form and worked examples, and it can check its own
+   drafts with `konstant holdout lint --draft .` (the same lint, no board, no store) before it
+   finishes; a refused set comes back with the reasons per draft, up to `[holdout]
+   author_attempts` (default 3) times, then the job is escalated `holdout-authoring BLOCKED`.
 
 The order is the point: DoD, review and holdouts exist before any producer runs, each from a
 different identity. A job whose holdout authoring fails twice is reported `BLOCKED` and waits

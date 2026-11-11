@@ -227,6 +227,36 @@ done = g.get("status") == "done" and jobs and all(
 print("RESULT", "DONE" if done else "PARTIAL")
 PY
 cat "$BASE/trail.txt"
+say "time per stage (the factory's step logs: start from the name, end = last write; phases from
+their manifests; the scenario writer's attempts from the run dirs in the sealed store)"
+"$VPY" - "$WS" <<'PY' || true
+import datetime as dt, json, re, sys
+from pathlib import Path
+ws = Path(sys.argv[1])
+for f in sorted((ws / "var" / "factory" / "steps").glob("*.log")):
+    m = re.match(r"(\d{8}T\d{6})-\d+-([a-z]+)-(.+)\.log$", f.name)
+    if not m:
+        continue
+    t0 = dt.datetime.strptime(m.group(1), "%Y%m%dT%H%M%S").replace(tzinfo=dt.timezone.utc)
+    secs = int(f.stat().st_mtime - t0.timestamp())
+    last = ([ln for ln in f.read_text(errors="replace").splitlines() if ln.strip()] or [""])[-1]
+    print(f"step {m.group(2):<7} {m.group(3):<28} {t0:%H:%M:%SZ} {secs:>6}s  {last[:110]}")
+for d in sorted((ws / "var" / "runs").glob("*")):
+    for mf in sorted((d / "phases").glob("*.json"), key=lambda x: x.stat().st_mtime):
+        try:
+            m = json.loads(mf.read_text())
+        except ValueError:
+            continue
+        print(f"  run {d.name[:40]:<40} phase {m.get('label', '?'):<24} {m.get('identity', '-'):<12}"
+              f" rc {m.get('rc')} {round(m.get('seconds') or 0)}s")
+store = ws / "var" / "holdout"
+for d in sorted(store.glob("*/runs/*")) if store.is_dir() else []:
+    logs = list((d / "phases").glob("*.log"))
+    if logs:
+        t0 = min(x.stat().st_mtime for x in (d / "prompts").glob("*.md")) if (d / "prompts").is_dir() else None
+        secs = int(logs[0].stat().st_mtime - t0) if t0 else -1
+        print(f"  scenario writer job {d.parts[-3]} {d.name}: {secs}s")
+PY
 echo "events:"; sed 's/^/  /' "$WS/var/factory/events.jsonl" 2>/dev/null | cut -c1-240 || true
 [ ! -f "$BASE/endpoint.log" ] || { echo "endpoint log:"; sed 's/^/  /' "$BASE/endpoint.log"; }
 echo "times: P0 chat intake done at +${T_P0}s, factory ended at +${T_F}s (exit $FRC), total +$(( $(date +%s) - T0 ))s"

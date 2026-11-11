@@ -28,11 +28,12 @@ _HID = re.compile(r"^H([1-9][0-9]*)$")
 
 
 class SealRefused(Exception):
-    """`holdout add` refused; .lines are the reasons, .code the exit code (1 lint, 2 setup)."""
+    """`holdout add` refused; .lines are the reasons, .code the exit code (1 lint, 2 setup),
+    .hids which H<n> each new source was checked as (the scenario writer's retry prompt)."""
 
-    def __init__(self, lines, code: int = 1):
+    def __init__(self, lines, code: int = 1, hids: dict | None = None):
         super().__init__("; ".join(lines))
-        self.lines, self.code = list(lines), code
+        self.lines, self.code, self.hids = list(lines), code, dict(hids or {})
 
 
 def root(cfg) -> Path:
@@ -85,7 +86,7 @@ def prepare(cfg, job: dict, sealed: list, sources: list, drafts: Path | None = N
     """Parse + lint the new files against the job's brief and the sealed set. -> [(source,
     Scenario)]; SealRefused with every reason. `drafts`: the scenario writer's drafts dir, the
     only place inside the workspace a source may come from (it is in the masked store)."""
-    reasons, new = [], []
+    reasons, new, hids = [], [], {}
     for src in sources:
         if drafts is not None:
             if not _inside(src, drafts):
@@ -108,6 +109,7 @@ def prepare(cfg, job: dict, sealed: list, sources: list, drafts: Path | None = N
     for src in sources:
         n += 1
         hid = f"H{n}"
+        hids[hid] = src
         try:
             raw = lint.with_canary(Path(src).read_bytes())
             sc = lint.parse(raw, hid)
@@ -122,7 +124,7 @@ def prepare(cfg, job: dict, sealed: list, sources: list, drafts: Path | None = N
     reasons += lint.lint_set(old + [sc for _s, sc in new],
                              cfg.data["holdout"]["min_per_job"], str(job["id"]))
     if reasons:
-        raise SealRefused(reasons)
+        raise SealRefused(reasons, hids=hids)
     return new
 
 
@@ -157,7 +159,7 @@ def seal(cfg, client, ref: str, sources: list, drafts: Path | None = None) -> li
     except runner.HoldoutError as exc:
         raise SealRefused([str(exc)], 2)
     if control:
-        raise SealRefused(control)
+        raise SealRefused(control, hids={sc.hid: src for src, sc in new})
     d = _private(job_dir(cfg, job["id"]))
     _private(d.parent)
     staged = []

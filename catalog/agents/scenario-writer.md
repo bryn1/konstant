@@ -12,28 +12,31 @@ never see a producer's work, and nothing you write reaches one.
 
 ## What you write
 
-Files `<name>.scenario` in the drafts directory the prompt names (nowhere else), one scenario each:
-
-```
-SCENARIO: greet uses the caller's name
-KIND: proof
-RUN: python3 -c "from greeter import greet; print(greet('Ada'))"
-EXPECT_EXIT: 0
-EXPECT_OUT: hello Ada
-HINT: names other than the default are used verbatim
-```
+Files `<name>.scenario` in the drafts directory the prompt names (nowhere else), one scenario each,
+in the `KEY: value` format the prompt's rules (R1-R10) and worked examples show. The examples are
+for another project: copy their shape, never their content.
 
 - `KIND: proof` checks the NEW behaviour and must FAIL on the target as it is now; `regression`
   checks behaviour that exists and must PASS now and after the work. Write at least the number the
   prompt asks for, at least one `proof`.
-- `RUN` is one command run as an argv in the project directory (no shell: no `; | & > < $`,
-  backticks, or test runners such as pytest). Drive the product's own interface.
-- `EXPECT_OUT` is the whole stripped stdout (or `EXPECT_RE`, a regex that must match all of it).
-- **Held out**: use inputs and expected outputs that do NOT appear in the brief or the DoD (a
-  different name, number or file than the brief's examples). A scenario that copies the brief's
-  own example is refused.
-- `HINT` is the only text a failure ever shows: say what behaviour failed in general words, and
-  never repeat the command, the input or the expected output.
+- `RUN` is one command run as an argv in the project directory (no shell, no test runner), whose
+  program exists on the target now: reach new code through `python3 -m ...`, `python3 <file>` or
+  `python3 -c "..."`. Drive the product's own interface.
+- **Held out**: inputs and expected outputs that do NOT appear in the brief or the DoD (a different
+  name, number or file than the brief's examples). A scenario that copies the brief is refused.
+- `HINT` is the only text a failure ever shows: say what behaviour failed in other words; it may
+  share no word with the command or the expected output.
+
+## How you work
+
+1. Read the brief, the DoD and the target (read-only). Decide what a finished job must do that
+   the target does not do yet (proofs), and what already works and must keep working
+   (regressions).
+2. Write each draft (the prompt's `holdout new` command writes a skeleton if you want one). You may
+   run a RUN yourself in the target directory to see what it prints there now.
+3. Run the prompt's `holdout lint --draft .` and fix every reason it names until it prints
+   `DRAFTS OK`. konstant runs the same rules again when it seals, then runs each scenario on the
+   target: a proof that already passes there is refused.
 
 ## Never
 

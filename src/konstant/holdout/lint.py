@@ -17,7 +17,10 @@ stdout. RUN is split with shlex and runs as an argv, never through a shell: a co
 or a shell operator (; & | < > ` $) outside quotes is refused, and so is a test runner (a
 project's conftest or plugins could rewrite its verdict). CANARY (khc- + 20 hex) is the salt of
 the commitment and the marker of the leak scan; `holdout add` writes one when the file has none.
-The lint never prints a scenario's content, only its id and the rule.
+The lint never prints a scenario's content, only its id and the rule - except with
+`detail=True`, which the scenario writer's own pre-check and its retry prompt use (both live in the
+sealed store): the same rules, plus WHICH literal, word or test string tripped each one. A value
+that still holds the skeleton's `<FILL: ...>` placeholder (`holdout new`) is MALFORMED.
 """
 from __future__ import annotations
 
@@ -34,6 +37,7 @@ KINDS = ("proof", "regression")
 CANARY = re.compile(r"khc-[0-9a-f]{20}")
 _LINE = re.compile(r"^([A-Z_]+):[ \t]?(.*)$")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+FILL = "<FILL:"                          # the skeleton's placeholder (holdout/draft.py skeleton)
 LITERAL_MIN = 4
 RUNNER_BINS = {"pytest", "py.test", "nose2", "nosetests", "tox", "nox", "jest", "mocha", "vitest",
                "rspec", "phpunit", "ctest", "behave", "ava", "karma", "trial"}
@@ -86,7 +90,11 @@ def with_canary(raw: bytes) -> bytes:
     return (text.rstrip("\n") + f"\nCANARY: {new_canary()}\n").encode("utf-8")
 
 
-def parse(raw: bytes, hid: str) -> Scenario:
+def _show(text: str, n: int = 80) -> str:
+    return repr(text if len(text) <= n else text[:n] + "...")
+
+
+def parse(raw: bytes, hid: str, detail: bool = False) -> Scenario:
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
@@ -97,7 +105,8 @@ def parse(raw: bytes, hid: str) -> Scenario:
             continue
         m = _LINE.match(line)
         if not m:
-            raise ScenarioError(f"MALFORMED: {hid} line {n} is not `KEY: value`")
+            raise ScenarioError(f"MALFORMED: {hid} line {n} is not `KEY: value`"
+                                + (f" (it reads {_show(line)})" if detail else ""))
         key, value = m.group(1), m.group(2).strip()
         if key not in KEYS:
             raise ScenarioError(f"MALFORMED: {hid} line {n}: unknown key {key} "
@@ -105,11 +114,17 @@ def parse(raw: bytes, hid: str) -> Scenario:
         if key in fields:
             raise ScenarioError(f"MALFORMED: {hid} has {key} twice")
         fields[key] = value
+    unfilled = [k for k, v in fields.items() if FILL in v]
+    if unfilled:
+        raise ScenarioError(f"MALFORMED: {hid} {', '.join(unfilled)} still hold(s) the "
+                            "skeleton's <FILL: ...> placeholder")
     missing = [k for k in REQUIRED if not fields.get(k)]
     if missing:
         raise ScenarioError(f"MALFORMED: {hid} lacks {', '.join(missing)}")
     if ("EXPECT_OUT" in fields) == ("EXPECT_RE" in fields):
-        raise ScenarioError(f"MALFORMED: {hid} needs exactly one of EXPECT_OUT and EXPECT_RE")
+        raise ScenarioError(f"MALFORMED: {hid} needs exactly one of EXPECT_OUT and EXPECT_RE"
+                            + ((" (it has both)" if "EXPECT_OUT" in fields else
+                                " (it has neither)") if detail else ""))
     if fields["KIND"] not in KINDS:
         raise ScenarioError(f"MALFORMED: {hid} KIND must be proof or regression")
     if not re.fullmatch(r"\d{1,3}", fields["EXPECT_EXIT"]) or int(fields["EXPECT_EXIT"]) > 255:
@@ -191,31 +206,57 @@ def _words(text: str) -> set:
     return {w.lower() for w in re.findall(r"[A-Za-z0-9_]{3,}", text or "")} - STOP
 
 
-def lint(sc: Scenario, brief: str, acceptance: str) -> list:
-    """Refusal lines for one parsed scenario (empty: it passes the lint)."""
+def _trivial_canary(expect: str):
+    """The test string an EXPECT_RE matches (verify/probe.py TRIVIAL_CANARIES), for the detail."""
+    from konstant.verify.probe import TRIVIAL_CANARIES
+    try:
+        rx = re.compile(expect, re.M)
+    except re.error:
+        return "(not a regex)"
+    return next((c for c in TRIVIAL_CANARIES if rx.search(c) is not None), None)
+
+
+def lint(sc: Scenario, brief: str, acceptance: str, detail: bool = False) -> list:
+    """Refusal lines for one parsed scenario (empty: it passes the lint). `detail`: the same
+    rules and verdicts, each line naming what tripped it (only for the scenario writer itself)."""
     out = []
+
+    def add(line: str, why: str = "") -> None:
+        out.append(line + (f" ({why})" if detail and why else ""))
+
     if sc.expect_out is not None and not sc.expect_out.strip():
-        out.append(f"TRIVIAL: {sc.hid} the expectation is empty: it proves nothing")
+        add(f"TRIVIAL: {sc.hid} the expectation is empty: it proves nothing")
     if sc.expect_re is not None and trivial_expect(sc.expect_re):
-        out.append(f"TRIVIAL: {sc.hid} EXPECT_RE also matches empty or unrelated output")
+        hit = _trivial_canary(sc.expect_re)
+        add(f"TRIVIAL: {sc.hid} EXPECT_RE also matches empty or unrelated output",
+            "it is found in the test string " + _show(hit) if hit is not None else "")
     argv = sc.argv()
     bins = [a.rsplit("/", 1)[-1].lower() for a in argv]
     if (set(bins) & RUNNER_BINS or set(zip(bins, bins[1:])) & RUNNER_PAIRS
             or any(RUNNER_WORD.search(a) for a in argv[1:])):
-        out.append(f"TEST RUNNER: {sc.hid} RUN calls a test runner: a holdout drives the "
-                   "product's own interface (a project's test config could rewrite a runner's "
-                   "verdict)")
+        add(f"TEST RUNNER: {sc.hid} RUN calls a test runner: a holdout drives the "
+            "product's own interface (a project's test config could rewrite a runner's "
+            "verdict)", "it calls " + ", ".join(sorted(
+                (set(bins) & RUNNER_BINS) | {" ".join(p) for p in set(zip(bins, bins[1:]))
+                                             & RUNNER_PAIRS}
+                | {m for a in argv[1:] for m in RUNNER_WORD.findall(a)})))
     for what, found in (("expectation", expectation_literals(sc)),
                         ("a quoted RUN argument", run_literals(sc))):
-        if any(x in (acceptance or "") for x in found):
-            out.append(f"NOT HELD OUT: {sc.hid} {what} appears in the DoD")
-        elif any(x in (brief or "") for x in found):
-            out.append(f"NOT HELD OUT: {sc.hid} {what} appears in the brief")
+        in_dod = [x for x in found if x in (acceptance or "")]
+        in_brief = [x for x in found if x in (brief or "")]
+        if in_dod:
+            add(f"NOT HELD OUT: {sc.hid} {what} appears in the DoD",
+                "found there: " + ", ".join(_show(x) for x in in_dod))
+        elif in_brief:
+            add(f"NOT HELD OUT: {sc.hid} {what} appears in the brief",
+                "found there: " + ", ".join(_show(x) for x in in_brief))
     if len(sc.hint) > 200:
-        out.append(f"HINT: {sc.hid} the hint is over 200 characters")
-    if _words(sc.hint) & (_words(sc.run) | _words(sc.expectation())):
-        out.append(f"HINT LEAKS: {sc.hid} the hint contains a token of RUN or of the "
-                   "expectation (a failing holdout reveals its hint)")
+        add(f"HINT: {sc.hid} the hint is over 200 characters", f"it has {len(sc.hint)}")
+    shared = _words(sc.hint) & (_words(sc.run) | _words(sc.expectation()))
+    if shared:
+        add(f"HINT LEAKS: {sc.hid} the hint contains a token of RUN or of the "
+            "expectation (a failing holdout reveals its hint)",
+            "shared words: " + ", ".join(sorted(shared)))
     return out
 
 

@@ -851,11 +851,25 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
   masked one late instead of skipping the mask), `var/runs/`, `var/logs/`, `var/factory/`,
   `var/sessions.json`, the board DB, every `<project>@<job>` clone and the target's `.audits/`
   (`Phase.hide`), and exposes no token (`Phase.tokens = ()`). Prompt: the composed
-  `scenario-writer` profile, goal text, job title and brief, the target path, the drafts dir. Then
-  `store.seal(..., drafts=)` (lint + negative control + commitment as `scenario`); refused drafts go
-  back once with the lint reasons; a second refusal returns `holdout-authoring BLOCKED: job N:
-  <rule codes>`, which intake records as a `BLOCKED` event and an `escalation` trail row (actor
-  `factory`), exit 4. `author = "owner"`: the jobs wait for `holdout add`.
+  `scenario-writer` profile, goal text, job title and brief, the target path, the drafts dir, the
+  rules R1-R10 in short checkable form and three worked examples for another project
+  (`holdout/draft.py` `RULES`, `EXAMPLES`; each passes the lint), and the two helpers it may run in
+  its phase: `holdout new --kind proof|regression` (a skeleton whose `<FILL: ...>` values the
+  lint refuses until filled) and the pre-check `holdout lint --draft .` (wave L5-7). The pre-check
+  is `lint.parse`/`lint.lint`/`lint.lint_set` themselves with `detail=True` (each reason also
+  names what tripped it: the literal found in the brief, the shared hint words, the test string a
+  regex matches; a test proves detail never changes a verdict), against the job's brief, DoD and
+  set size that konstant writes beside the drafts (`.konstant-draft.json`); no board, no store (a
+  file in a sealed store other than a `<store>/<job>/drafts/` file is refused), no negative
+  control. Then `store.seal(..., drafts=)` (lint + negative control + commitment as `scenario`); a
+  refused set goes back with the seal's exact reasons PER DRAFT (`SealRefused.hids` maps each
+  `H<n>` to its draft: the file name, its reasons, the same rules in detail and the draft as
+  written; `draft.feedback`), up to `[holdout] author_attempts` (default 3, 1-10; separate from a
+  job's `max_attempts`); the last refusal returns `holdout-authoring BLOCKED: job N: ... refused
+  N time(s) (<rule codes>)`, which intake records as a `BLOCKED` event and an `escalation` trail
+  row (actor `factory`), exit 4. The per-draft text lives only in the next prompt, inside the
+  sealed store; konstant's stderr (a factory step log a producer can read), the event and the
+  trail name rules and ids only. `author = "owner"`: the jobs wait for `holdout add`.
 - A stopped `konstant intake` (SIGINT/SIGTERM) records a `BLOCKED` event and the intake state
   `refused` (unless `filed`), exit 128+signal.
 - **Events** (`factory/notify.py`): `var/factory/events.jsonl`, one redacted line per event;
@@ -1529,7 +1543,9 @@ Global: `--as ROLE`, `--json`, `--config PATH`; env `KONSTANT_HOME`. Exit 0 ok, 
 | `verify ID` / `verify --pending` | `--dry-run --no-rerun --json` | §7 (exit 0 PASS, 3 FAIL, 4 BLOCKED) |
 | `holdout add ID` | `--file FILE` (repeatable) | lint + negative control + commitment; moves the files into the store (owner; §7.1; exit 1 refused, 2 no jail) |
 | `holdout list ID` / `holdout check ID` / `holdout show ID HID` | `--control` (check) | commitments and states / commitment + parse (+ negative control) / one file from the store; check and show refused inside a task run |
-| `holdout author ID` | `--harness` | run the scenario writer for one job and seal its drafts (§7.3; exit 4 refused twice, 2 setup) |
+| `holdout author ID` | `--harness` | run the scenario writer for one job and seal its drafts (§7.3; exit 4 refused `[holdout] author_attempts` times, 2 setup) |
+| `holdout lint --draft FILE\|DIR` | `--context FILE` | the scenario writer's pre-check of its own drafts: the seal's lint with detail, no board, no store, no negative control; allowed inside a task run (§7.3; exit 0 ok, 1 refused, 2 a path in a sealed store) |
+| `holdout new` | `--kind proof\|regression --regex --out FILE` | a scenario skeleton with `<FILL: ...>` placeholders the lint refuses until filled (never overwrites) |
 | `ship JOB` / `ship list` | `--dry-run --approve-decision` | ship the verified commit as `factory`: both guards, the target, post-ship checks, rollback (§7.5; exit 0 shipped, 1 refused, 3 rolled back, 4 rollback failed / halted) |
 | `factory run [GOAL..]` | `--until-idle --once --dry-run --harness` | the factory loop in the foreground (§7.6; --until-idle exit 0 every goal done, 4 an escalation or a halt, 2 refused before the start, 5 internal error) |
 | `factory start` / `stop` / `resume` | `--now --wait` (stop) | the loop in the background (one per workspace: exit 2 when one runs) / the kill switch (drain, then exit) / clear it, redeliver the spool and lift a halt (owner) |
@@ -1623,6 +1639,7 @@ run_timeout_s = 60             # one scenario run in the verifier's jail
 store = "var/holdout"          # or an absolute path outside the workspace (a second OS user)
 writer_harness = ""            # the scenario writer's harness ("" = [harness]; never command)
 writer_model = ""              # its model ("" = the same: one model for every role, Q1)
+author_attempts = 3            # scenario-writer attempts per job before holdout-authoring BLOCKED
 
 [factory]                      # level-5 intake (§7.3) and the loop (§7.6)
 goal_roles = ["owner"]         # + "orchestrator": goal add --from-chat from the owner's chat
