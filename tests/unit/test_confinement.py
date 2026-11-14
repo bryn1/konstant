@@ -65,7 +65,9 @@ def test_the_scenario_writer_always_runs_closed_and_factory_never_gets_docker():
     c = parse({"profile": "open"})
     assert c.for_phase("scenario") == CLOSED
     f = c.for_phase("worker", factory=True)
-    assert f.docker_socket is False and f.integrity and f.ssh_agent and f.host_write
+    assert f.docker_socket is False and f.integrity and f.host_write
+    # REVIEW L5-R2 K-10 (was `and f.ssh_agent`): no push credentials in a factory phase
+    assert not f.ssh_agent and "~/.ssh" in f.withhold and "$GITHUB_TOKEN" in f.withhold
     off = parse({"profile": "open", "integrity": "off"})
     assert not off.integrity and off.for_phase("worker", factory=True).integrity
 

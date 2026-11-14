@@ -82,6 +82,9 @@ def cmd_show(ctx) -> int:
 
 def _status(verb: str):
     def cmd(ctx) -> int:
+        if in_chat() and not in_task() and ctx.args.as_role in (None, "owner"):
+            from konstant.cli.factory import _propose
+            return _propose(ctx, f"goal-{verb}", ctx.args.id)
         res = ctx.client(ctx.args.as_role or "owner").post(f"/api/goals/{ctx.args.id}/{verb}")
         ctx.out(res, f"goal {res['slug']} {res['status']}")
         return EXIT_OK
@@ -131,6 +134,14 @@ def cmd_intake(ctx) -> int:
 
 def cmd_chat_turn(ctx) -> int:
     if _no_task("chat turn"):
+        return EXIT_FAIL
+    if in_chat():
+        # the konstant-gate plugin runs `chat turn` on the owner's genuine message without the
+        # session marker; a command from the session's own shell is the model (REVIEW L5-R2
+        # K-07): it must not confirm its own goal or owner-action proposal
+        print("konstant: refused: `chat turn` reads the OWNER's message and runs from the "
+              "konstant-gate plugin, never from the orchestrator chat's own shell "
+              "(KONSTANT_CHAT_SESSION is set)", file=sys.stderr)
         return EXIT_FAIL
     from konstant.factory import chat
     text = sys.stdin.read() if ctx.args.text == ["-"] else " ".join(ctx.args.text)

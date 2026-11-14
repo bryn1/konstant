@@ -122,10 +122,16 @@ class Harness:
                 self._memory = True
         return self._memory
 
+    def sealed(self) -> bool:
+        """The workspace holds factory state: every phase is jailed or refused (L5-R2 K-06)."""
+        from konstant import machinery
+        return machinery.factory_state(self.workspace)
+
     def phase(self, values: dict) -> Phase:
         identity = values.get("identity") or "worker"
         return Phase(values, model=self.model, endpoint=self.endpoint, allow=self.allow,
                      jail=self.jail, factory=self.factory, identity=identity,
+                     sealed=self.sealed(),
                      home_base=values.get("home_base"), tokens=values.get("tokens"),
                      hide=tuple(values.get("hide") or ()), wconf=self.conf,
                      # the scenario writer reads memory through its exported view
@@ -148,7 +154,7 @@ class Harness:
         (dsh)."""
         drv = self.driver()
         conf = self.conf.for_phase("worker", self.factory)
-        return drv is not None and drv.confines(self.jail, self.factory, conf)
+        return drv is not None and drv.confines(self.jail, self.factory, conf, self.sealed())
 
     def check(self, run_dir: Path | None = None) -> None:
         """Fail fast on a template that cannot work (before any phase starts)."""
@@ -194,6 +200,11 @@ class Harness:
             elif self.factory:
                 raise HarnessError("holdouts need a confined phase: konstant's jail is off or "
                                    "unavailable, and a factory phase never runs unconfined")
+            elif ph.sealed:
+                raise HarnessError("this workspace holds factory state (sealed holdouts or "
+                                   "var/factory/): no phase runs unconfined in it, level 4 "
+                                   "included, and konstant's jail is off or unavailable "
+                                   "(REVIEW L5-R2 K-06; `konstant doctor`)")
             argv = drv.confine(argv, ph)
             extra.update(extra_env or {})
             return self._start(argv, extra, prompt, cwd, run_dir, label, identity)
@@ -219,6 +230,7 @@ class Harness:
         env = {**host, **extra, **{k: str(v) for k, v in self.env.items()},
                "KONSTANT_IN_TASK": "1", "KONSTANT_RUN": str(run_dir), "KONSTANT_ROLE": "worker",
                "KONSTANT_IDENTITY": identity, "KONSTANT_HOME": str(self.workspace)}
+        env = conf.withheld_env(env)        # a factory phase: no push credentials (L5-R2 K-10)
         t0, timed_out = time.time(), False
         with open(log, "wb") as fh:
             try:

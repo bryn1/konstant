@@ -28,9 +28,11 @@ def start(w, tmp_path, *args, **env):
     fakebin = tmp_path / "fakebin"
     fakebin.mkdir(exist_ok=True)
     stub_dsh.install(fakebin)
-    log = tmp_path / "dsh.log"
+    # the session home is writable to the jailed composition check (L5-F2a), so its records land
+    log = session_home(w) / "stub.log"
     log.unlink(missing_ok=True)
     e = w.env(PATH=f"{fakebin}:/usr/bin:/bin", STUB_DSH_LOG=str(log), **env)
+    w.ok("agents", "sync", env=w.env(PATH=f"{fakebin}:/usr/bin:/bin"))   # pins dsh (K-01)
     res = w.run("dsh", *(args or ("web", "--port", "3999")), env=e)
     recs = [json.loads(ln) for ln in log.read_text().splitlines()] if log.exists() else []
     return res, [r for r in recs if "dump" in r], [r for r in recs if "argv" in r]

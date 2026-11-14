@@ -140,9 +140,11 @@ def test_open_factory_phase_reaches_the_host_but_not_the_core(pws, harness):
     jid = sealed_job(pws)
     res, rd = run(pws, harness, jid, **pws.probe_env)
     for s in probes(rd):
-        assert s["ssh_key"] == "READ" and s["token_file"] == "READ", s     # the host, as open
-        assert s["outside"] == "WROTE" and s["ssh_agent"] == "SOCKET", s
-        assert s["cred_var"] == "SET", s
+        assert s["token_file"] == "READ" and s["outside"] == "WROTE", s     # the host, as open
+        # ... but never the push credentials: ~/.ssh, the agent, GITHUB_TOKEN (REVIEW L5-R2
+        # K-10; this row asserted READ/SOCKET/SET before L5-F2a)
+        assert s["ssh_key"] != "READ" and s["ssh_agent"] != "SOCKET", s
+        assert s["cred_var"] == "unset", s
         assert_core(s, factory=True)
     assert res.returncode == 0, res.stderr[-3000:]
     assert pws.json("job", "show", jid)["status"] == "verified"

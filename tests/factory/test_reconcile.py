@@ -83,7 +83,7 @@ def test_interrupted_ship_is_reconciled_on_resume_red_green(tmp_path, how):
             assert ships[0]["post"] is not None and ships[0]["post"]["ok"] is True
         assert notify_lines(s) == []
         rows = jobs(s)
-        assert git_out(s.target, "rev-parse", "main") == s.commit(rows[1]["id"])
+        assert s.shipped_as(rows[1]["id"])          # the ship commit (L5-F2a K-03)
         assert s.w.json("goal", "show", "greeter")["status"] == "done"
     finally:
         s.w.stop_board()

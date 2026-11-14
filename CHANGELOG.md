@@ -32,6 +32,22 @@ review and its fixes before a release).
   (a skeleton), the seal's reasons per draft on a retry, `[holdout] author_attempts`
   (default 3). No lint rule changed; a skeleton placeholder is a new refusal.
 
+
+### Security (wave L5-F2a: the second review's integrity findings K-01..K-04, K-06, K-07, K-10, K-12, K-15)
+- **Pinned harness programs**: `agents sync` records each harness CLI and `[ship] gh` /
+  `ship_cmd` / `rollback_cmd` with the sha256 of their program files; konstant's own unjailed runs
+  refuse a changed or unpinned one, and the dsh composition check and doctor's version probe run
+  jailed (K-01).
+- **Goals cannot name where or how they ship**: only `post_probes` under `[ship]`; the proposal and
+  the FILED line show the goal text verbatim and every non-default setting (K-02).
+- **The ship commit**: every target ships konstant's squash of the verified tree onto the target's
+  tip, never the job's history; an orphan or unrelated history is an owner decision (K-03, K-04).
+- **Factory state jails every phase**, level 4 included (K-06); **no push credentials in a factory
+  phase** in any profile, opt back in with `factory_host_credentials = true` (doctor FAIL) (K-10).
+- **Chat**: producer text is quoted and labelled, never a konstant line; owner verbs from the chat
+  are proposals the owner's next yes confirms (K-07); `factory stop`/`resume` are owner-only (K-12).
+- **One decision list** for ship-time owner decisions, case-insensitive, all of `.github/`,
+  test-runner and editor config, package scripts (K-15).
 ### Security
 - Fixes from the first independent level-5 review (H-01..H-09; docs/LEVEL5.md "L5-F1 as built").
 

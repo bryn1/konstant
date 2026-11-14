@@ -1,8 +1,9 @@
 """Post-ship checks (docs/LEVEL5.md 5.3): after the target moved, the shipped state must hold.
 
 For the github and branch targets, on the target's new tip (github: the merge GitHub made):
-  1. `merged` (github): the verified commit is an ancestor of the new tip and the tip's tree is the
-     verified commit's tree (the shipped state is exactly what was verified);
+  1. `merged` (github): konstant's ship commit (the squash, targets.Base.head) is an ancestor of the
+     new tip and the tip's tree is the verified commit's tree (the shipped state is exactly what
+     was verified);
   2. `probe`: the goal's post_probes and the job's own DoD probes, `{workdir}` = the target
      (whose worktree konstant just rewrote to the tip from raw objects), through the probe
      allowlist (verify/probe.py run_line);
@@ -146,7 +147,7 @@ def run(cfg, client, tgt, job: dict, conf: dict, commit: str, tip: str) -> dict:
     repo, target = tgt.repo, tgt.target
     try:
         if tgt.name == "github":
-            same = shiprepo.is_ancestor(repo, commit, tip) and \
+            same = shiprepo.is_ancestor(repo, tgt.head, tip) and \
                 shiprepo.tree_of(repo, tip) == shiprepo.tree_of(repo, commit)
             checks.append(_row("merged", same, "the merged tip's tree is the verified commit's"
                                if same else "the merged tip is not the verified commit's tree"))

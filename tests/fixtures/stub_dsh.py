@@ -76,13 +76,19 @@ def home() -> Path:
 
 
 def open_profile(profile: str) -> Path:
+    """Creates the profile on first open, as dsh does; a home it cannot write (a forced home
+    outside the jail's writable dirs: konstant runs the composition check jailed since L5-F2a)
+    is read as it is."""
     d = home() / "profiles" / profile
-    d.mkdir(parents=True, exist_ok=True)
-    if not (d / "package.json").exists():
-        (d / "package.json").write_text(json.dumps({"dsh": {"profile": {
-            "bundles": SHIPPED + [f"@deepseek-ai/dsh-{profile}"]}}}))
-    if not (d / "cordis.patch.yml").exists():
-        (d / "cordis.patch.yml").write_text("# your patch layer\n[]\n")
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        if not (d / "package.json").exists():
+            (d / "package.json").write_text(json.dumps({"dsh": {"profile": {
+                "bundles": SHIPPED + [f"@deepseek-ai/dsh-{profile}"]}}}))
+        if not (d / "cordis.patch.yml").exists():
+            (d / "cordis.patch.yml").write_text("# your patch layer\n[]\n")
+    except OSError:
+        pass
     return d
 
 
@@ -99,7 +105,9 @@ def dump(profile: str, patches: list) -> int:
             print(f"dsh: cannot read patch file {f}", file=sys.stderr)
             return 1
     d = open_profile(profile)
-    bundles = json.loads((d / "package.json").read_text())["dsh"]["profile"]["bundles"]
+    pj = d / "package.json"
+    bundles = json.loads(pj.read_text())["dsh"]["profile"]["bundles"] if pj.is_file() else \
+        SHIPPED + [f"@deepseek-ai/dsh-{profile}"]
     lines = ["# == @deepseek-ai/dsh-base", f"# == @deepseek-ai/dsh-base, patched by "
              f"@deepseek-ai/dsh-{profile}"]
     lines += [f"# == {b}" for b in bundles if b not in SHIPPED + [f"@deepseek-ai/dsh-{profile}"]]
@@ -117,9 +125,14 @@ def dump(profile: str, patches: list) -> int:
 
 
 def log(rec: dict) -> None:
+    """Appends to $STUB_DSH_LOG; skipped where it is not writable (the jailed composition check
+    writes only its own dsh home)."""
     if os.environ.get("STUB_DSH_LOG"):
-        with open(os.environ["STUB_DSH_LOG"], "a") as fh:
-            fh.write(json.dumps(rec) + "\n")
+        try:
+            with open(os.environ["STUB_DSH_LOG"], "a") as fh:
+                fh.write(json.dumps(rec) + "\n")
+        except OSError:
+            pass
 
 
 def run(profile: str, patches: list, rest: list) -> int:

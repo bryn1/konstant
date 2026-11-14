@@ -246,17 +246,6 @@ def check_agents(rep: Report, cfg) -> None:
     rep.add(*integrity.doctor_row(cfg))        # the catalog manifest (REVIEW L5-R1 H-06)
 
 
-def _version(exe: str, args) -> str:
-    import subprocess
-    try:
-        r = subprocess.run([exe, *args], capture_output=True, text=True, timeout=20,
-                           stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    lines = (r.stdout or r.stderr).strip().splitlines()
-    return lines[0][:60] if r.returncode == 0 and lines else ""
-
-
 def check_harness(rep: Report, cfg) -> str:
     """The default harness and every per-type override: the CLI on PATH (and its version), then
     what each one's own permission system enforces for a phase (docs/HARNESSES.md)."""
@@ -275,9 +264,12 @@ def check_harness(rep: Report, cfg) -> str:
         exe0 = exe0 or (exe if t is None else exe0)
         found = shutil.which(exe) if exe else None
         what = f"{ch.name}{' model ' + ch.model if ch.model else ''}"
-        if found:
-            ver = _version(found, ch.adapter.version_args) if ch.template is None else ""
-            rep.add("PASS", check, f"{what}: {exe} -> {found}" + (f" ({ver})" if ver else ""))
+        if found and ch.template is None:
+            from konstant import pins
+            rep.add(*pins.doctor_row(cfg.home, ch.name, check, f"{what}: {exe} -> ", found,
+                                     ch.adapter.version_args))
+        elif found:
+            rep.add("PASS", check, f"{what}: {exe} -> {found}")
         else:
             rep.add("WARN", check, f"{what}: {exe or '(empty)'} not found on PATH: `task run` "
                     "cannot start phases until it is installed or [harness] in konstant.toml "

@@ -112,11 +112,18 @@ class Phase:
     # swaps an empty --mcp-config in when off (konstant/memory/wiring.py); the scenario writer's
     # server runs on its exported read-only view (memory/view.py)
     memory: bool = True
+    # the workspace holds factory state (machinery.factory_state): every phase is jailed, level 4
+    # included, or refused (REVIEW L5-R2 K-06)
+    sealed: bool = False
 
     @property
     def conf(self):
         from konstant import confinement
-        return (self.wconf or confinement.CLOSED).for_phase(self.identity, self.factory)
+        c = (self.wconf or confinement.CLOSED).for_phase(self.identity, self.factory)
+        if self.sealed and not c.integrity:      # factory state: the core holds for every phase
+            from dataclasses import replace as _replace
+            c = _replace(c, integrity=True)
+        return c
 
     @property
     def workspace(self) -> Path:
@@ -188,17 +195,20 @@ class Adapter:
             return argv
         return jailed(argv, ph, rw=self.jail_rw(ph), ro_binds=self.jail_ro_binds(ph))
 
-    def confines(self, jail: bool = True, factory: bool = False, conf=None) -> bool:
+    def confines(self, jail: bool = True, factory: bool = False, conf=None,
+                 sealed: bool = False) -> bool:
         """Whether confine() puts the phase inside konstant.jail ([gate] jail = `jail`): every
-        adapter does in factory mode (a job with sealed holdouts, docs/LEVEL5.md 2.1) and, with
-        the open profile, at level 4 too: there the jail is a thin layer that keeps only the
-        integrity core (konstant/confinement.py)."""
+        adapter does in factory mode (a job with sealed holdouts, docs/LEVEL5.md 2.1), in a
+        workspace that holds factory state (`sealed`: machinery.factory_state, REVIEW L5-R2 K-06)
+        and, with the open profile, at level 4 too: there the jail is a thin layer that keeps
+        only the integrity core (konstant/confinement.py)."""
         from konstant import jail as jail_mod
         level4 = conf is not None and conf.jails_level4()
-        return bool(jail) and (bool(factory) or level4) and jail_mod.available()
+        return bool(jail) and (bool(factory) or bool(sealed) or level4) and \
+            jail_mod.available()
 
     def jails(self, ph: Phase) -> bool:
-        return self.confines(ph.jail, ph.factory, ph.conf)
+        return self.confines(ph.jail, ph.factory, ph.conf, ph.sealed)
 
     def jail_rw(self, ph: Phase) -> list:
         """Directories the harness itself must write inside the jail (its per-phase home)."""
@@ -501,9 +511,12 @@ def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True, keep=()) -> 
     if not conf.home_read:
         hide += home_masks([ws, ph.cwd, *roots, *keep])
     ro_dirs = factory_ro(ph)
-    if conf.host_write:                           # root writable: konstant's own code/interpreter
-        from konstant import tools                # stays read-only (REVIEW L5-R1 H-01)
-        ro_dirs = ro_dirs + [Path(d) for d in tools.own_dirs()]
+    from konstant import pins, tools
+    # konstant's own code/interpreter (REVIEW L5-R1 H-01) and the pinned harness programs and their
+    # install roots (L5-R2 K-01): read-only wherever a writable bind or the open profile's
+    # writable root reaches them, in every profile
+    ro_dirs = ro_dirs + [Path(d) for d in tools.own_dirs()] + [Path(p) for p in
+                                                                pins.ro_paths(ws)]
     return dict(rw=roots, hide=hide, home=ws, expose=[secrets / t for t in phase_tokens(ph)],
                 tmpfs=("/tmp",) if phase_private_tmp(ph) else (), cwd=ph.cwd, net=True,
                 ro_binds=[*ro_binds, *prompt_binds(ph)], root_rw=conf.host_write,

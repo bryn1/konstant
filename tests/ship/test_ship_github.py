@@ -23,14 +23,18 @@ def test_C11_ship_through_a_pull_request_then_roll_back_through_a_second(gws):
     r = gws.ship(j1, "--json")
     assert r.returncode == 0, r.stderr + r.stdout[-2000:]
     m1 = git_out(gws.remote, "rev-parse", "main")
-    assert git_out(gws.remote, "rev-parse", "main^2") == c1 and \
-        git_out(gws.remote, "rev-parse", "main^1") == pre          # GitHub's merge commit
-    assert git_out(gws.remote, "rev-parse", "main^{tree}") == \
-        git_out(gws.remote, "rev-parse", f"{c1}^{{tree}}")
+    # GitHub's merge commit; its second parent is konstant's ship commit (the verified tree on
+    # top of pre, L5-F2a K-03), never the job's own commit c1
+    s1 = git_out(gws.remote, "rev-parse", "main^2")
+    assert gws.shipped_as(j1, "main^2", repo=gws.remote) and s1 != c1 and \
+        git_out(gws.remote, "rev-parse", "main^1") == pre
+    assert git_rc(gws.remote, "cat-file", "-e", c1) != 0          # the job's history stayed home
+    assert git_out(gws.remote, "rev-parse", "main^{tree}") == git_out(gws.remote, "rev-parse",
+                                                                      f"{s1}^{{tree}}")
     calls = gws.gh_calls()
     assert [c["call"] for c in calls] == ["pr create", "pr merge"]
-    assert calls[0]["head"] == "konstant/ship-1" and calls[0]["sha"] == c1
-    assert calls[1]["argv"][calls[1]["argv"].index("--match-head-commit") + 1] == c1
+    assert calls[0]["head"] == "konstant/ship-1" and calls[0]["sha"] == s1
+    assert calls[1]["argv"][calls[1]["argv"].index("--match-head-commit") + 1] == s1
     assert calls[0]["repo"] == "example-org/greeter"
     assert git_out(gws.target, "rev-parse", "main") == m1        # the local target followed
     ship1 = gws.ships()[0]
@@ -45,8 +49,9 @@ def test_C11_ship_through_a_pull_request_then_roll_back_through_a_second(gws):
     assert s2["state"] == "rolled_back"
     assert git_out(gws.remote, "rev-parse", "main^{tree}") == \
         git_out(gws.remote, "rev-parse", f"{m1}^{{tree}}")        # the pre-ship tree again
-    assert git_rc(gws.remote, "merge-base", "--is-ancestor", c2, "main") == 0  # history kept
     calls = gws.gh_calls()
+    assert git_rc(gws.remote, "merge-base", "--is-ancestor", calls[2]["sha"], "main") == 0 and \
+        calls[2]["sha"] != c2                                          # history kept
     assert [c["call"] for c in calls] == ["pr create", "pr merge"] * 3
     assert calls[4]["head"] == "konstant/rollback-2" and calls[5]["revert"] is True
     rb = git_out(gws.remote, "rev-parse", "main^2")

@@ -42,7 +42,8 @@ def rws(tmp_path):
     toml = w.home / "konstant.toml"
     toml.write_text(toml.read_text() + '[harness]\nname = "dsh"\nmodel = "m-coder"\n'
                     '[harness.types.review]\nname = "codex"\nmodel = "m-review"\n')
-    w.ok("agents", "sync")                  # .dsh/konstant.patch.yml: a dsh run composes it
+    # .dsh/konstant.patch.yml (a dsh run composes it); the fake CLIs on PATH get pinned (K-01)
+    w.ok("agents", "sync", env=w.env(PATH=f"{bindir}:{os.environ['PATH']}"))
     return w
 
 

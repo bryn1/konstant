@@ -915,7 +915,17 @@ identity (refused inside a task run and in the orchestrator chat). No model take
   `--as owner ship JOB --approve-decision` records an `approval` trail row naming the exact
   verified commit (`POST /api/jobs/{ref}/ship-decision`, owner role only); both guards then pass
   the decision rule for that commit only (a moved target is never approved past).
-- **Targets** (`factory/targets.py`): `github` pushes the commit as `konstant/ship-<n>` to
+- **The ship commit (wave L5-F2a, REVIEW L5-R2 K-03/K-04; a deviation from "ship the verified
+  commit itself", made because the job's own history can carry a secret committed and removed
+  again, a merged side branch or an orphan, none of which the `pre..commit` diff shows):** every
+  target moves to `Base.head` = `shiprepo.squash` = `commit-tree <commit>^{tree} -p <pre>`, a
+  deterministic konstant-written commit (fixed identity, the verified commit's committer time, a
+  message of ids). The tree is the one the holdouts passed; the ship row keeps `commit_sha` =
+  the verified commit and `tip_sha` = the target's new tip. A verified commit that does not
+  descend from `pre` (`shiprules.history_rule`) is an owner decision on both sides; the decision
+  paths are the ONE list `shiprules.DECISION_LIST` (`decision_reasons`, also content-aware for
+  `package.json` scripts and `pyproject.toml` `[tool.pytest]`; K-15).
+- **Targets** (`factory/targets.py`): `github` pushes the ship commit as `konstant/ship-<n>` to
   `[ship] remote` from the ship repository (pinned git; only file, https and ssh allowed for that
   call; https credentials through `gh auth git-credential`), `gh pr create --repo [ship]
   github_repo`, `gh pr merge N --merge --match-head-commit <commit>`, fetches the branch back
@@ -928,15 +938,17 @@ identity (refused inside a task run and in the orchestrator chat). No model take
   refused before the ship when the worktree has local changes on tracked or shipped paths, or the
   branch is checked out in a linked worktree). `apply` materialises the commit into `[ship]
   apply_dir` (never inside the machinery or the project), the previous tree kept as `.prev`.
-  `command` runs `ship_cmd` (argv, no shell, `{commit}` `{branch}` `{job}`); without a
+  `command` runs `ship_cmd` (argv, no shell, `{commit}` = the ship commit, `{branch}` `{job}`;
+  the program and its script files pinned at `agents sync`, `konstant/pins.py`); without a
   `rollback_cmd` it may not ship. gh and the push get an environment konstant builds
   (`targets.own_env`: HOME, the gh token variables when set, the ssh agent, the trusted PATH);
-  `gh` is `[ship] gh` (absolute) or gh on the trusted dirs, never the inherited PATH. Every git
+  `gh` is `[ship] gh` (absolute, pinned and re-verified: K-01) or gh on the trusted dirs, never
+  the inherited PATH. Every git
   call of the ship runs with `shiprepo.git_env` (nothing inherited but HOME and the locale: no
   `GIT_*` variable of the calling shell). The ship branch must exist in the target (`target`
   rule: `the target has no branch X (its checked-out branch is Y)`), since the job clone's base
   is the target's checked-out commit.
-- **Post-ship** (`factory/postship.py`): `merged` (github: the verified commit is an ancestor of
+- **Post-ship** (`factory/postship.py`): `merged` (github: the ship commit is an ancestor of
   the new tip and the tip's tree is its tree), every `[ship] post_probes` + goal `post_probes` +
   DoD `PROBE:` line with `{workdir}` = the target (its worktree just rewritten to the tip), the
   project's tests (`[gate] test_cmd`, `auto` = pytest when the tree holds tests) and the
@@ -1294,8 +1306,24 @@ no model; `doctor` checks that the settings file is in sync before a run.
 `[confinement] profile` = `closed` (default: the reach this section describes) or `open` (a phase
 gets the host like the owner's own shell), plus per-capability options that override the profile
 (`OPTIONS`, the one table: `network`, `home_read`, `home_write`, `host_write`, `extra_read`,
-`extra_write`, `credentials`, `ssh_agent`, `docker_socket`, `host_agents`; each with what it allows
-and risks, copied into docs/CONCEPTS.md and checked by a test). `confinement.parse` fails closed:
+`extra_write`, `credentials`, `ssh_agent`, `docker_socket`, `host_agents`, `memory_share`,
+`factory_host_credentials`; each with what it allows and risks, copied into docs/CONCEPTS.md and
+checked by a test).
+
+Wave L5-F2a (REVIEW L5-R2; docs/LEVEL5.md 2.1 "Hardened in wave L5-F2a"), three changes to this
+section's rules: (1) `Confinement.for_phase(..., factory=True)` withholds the push credentials
+(`machinery.SHIP_CREDENTIALS`/`SHIP_CREDENTIAL_ENV`, the ssh agent, git's credential helpers) in
+every profile unless `factory_host_credentials = true` (doctor FAIL) (K-10); (2)
+`machinery.factory_state(ws)` (a holdout store with content, or `var/factory/`) makes EVERY phase
+jailed, level 4 and every harness included, or refused without a jail (`Phase.sealed`,
+`Adapter.confines(..., sealed)`; K-06), a deviation from "at level 4 only the open profile
+jails", because the integrity core cannot depend on only factory phases being jailed; (3)
+`konstant/pins.py` pins every harness CLI and the ship programs at `agents sync`; konstant's own
+unjailed runs re-verify the pin and refuse on drift, the dsh composition check and doctor's
+version probe run jailed, and every phase jail binds the pinned files and their install roots
+read-only (K-01). Goals lose every `[ship]` key but `post_probes` (K-02), and owner verbs from the
+orchestrator chat become proposals the owner's next yes confirms (`factory/owner_actions.py`;
+K-07). `confinement.parse` fails closed:
 an unknown key, a wrong type, a relative or `..` path, a path inside the integrity core, or
 `integrity = "off"` without `profile = "open"` stop the config load.
 
@@ -1657,10 +1685,10 @@ retries = 2                    # more tries before the event is spooled and the 
 retry_s = 1
 timeout_s = 10
 
-[ship]                         # auto-ship (§7.5); target/branch: the goal, else [factory] defaults
+[ship]                         # auto-ship (§7.5); target/branch: [factory] defaults (never a goal's)
 decision_types = ["infra"]     # jobs of these types never ship unattended (Q4)
 post_probes = []               # PROBE lines every ship checks after it (+ the goal's own)
-github_repo = ""               # OWNER/REPO for `gh --repo` (the goal may name it)
+github_repo = ""               # OWNER/REPO for `gh --repo` (a goal may not name it: L5-F2a K-02)
 remote = ""                    # the push URL ("" = https://github.com/<github_repo>.git); never a goal's
 gh = ""                        # absolute path of the gh CLI ("" = gh in the root-owned system dirs)
 apply_dir = ""                 # the apply target's directory
@@ -1683,6 +1711,7 @@ integrity = "on"               # on | off (off: profile open, level 4 only; doct
 # ssh_agent = false            # open: true
 # docker_socket = false        # open: true at level 4; never in factory mode
 # host_agents = false          # the `konstant dsh` session may run host agent launchers
+# factory_host_credentials = false  # true: factory phases keep push credentials (doctor FAIL)
 # memory_share = false         # open: true; notes konstant did not write are recalled too
 
 [memory]                       # built-in memory (§7.4)

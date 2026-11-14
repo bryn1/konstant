@@ -49,6 +49,11 @@ def _human(res: dict) -> str:
 
 def cmd_ship(ctx) -> int:
     a = ctx.args
+    if a.approve_decision and in_chat() and not in_task() and a.as_role in (None, "owner"):
+        from konstant.cli.factory import _propose
+        job = ctx.client("viewer").get(f"/api/jobs/{a.job}")
+        commit = ((job.get("evidence") or {}).get("commit") or "").strip()
+        return _propose(ctx, "approve-decision", str(job["id"]), commit)
     if _refused_here("ship"):
         return EXIT_FAIL
     from konstant.factory import ship

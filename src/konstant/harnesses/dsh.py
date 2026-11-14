@@ -179,11 +179,13 @@ class Dsh(Adapter):
             return argv
         return jailed(argv, ph, rw=[self._root(ph)], tmpdir=False)
 
-    def confines(self, jail: bool = True, factory: bool = False, conf=None) -> bool:
+    def confines(self, jail: bool = True, factory: bool = False, conf=None,
+                 sealed: bool = False) -> bool:
         """Every dsh phase, factory mode or not (dsh's sandbox does not confine reads), unless
-        the owner turned the integrity core off (open profile, level 4: nothing is masked)."""
+        the owner turned the integrity core off (open profile, level 4, no factory state in the
+        workspace: nothing is masked)."""
         from konstant import jail as jail_mod
-        off = conf is not None and not conf.integrity and not factory
+        off = conf is not None and not conf.integrity and not factory and not sealed
         return bool(jail) and not off and jail_mod.available()
 
     def jail_env(self, ph: Phase) -> dict:
@@ -250,12 +252,25 @@ def _fresh(workspace: Path):
 
 
 def _dump(exe: str, workspace: Path, profile: str, patches: list, env: dict) -> tuple:
+    """`dsh --dump-config`, run from the PINNED launcher (konstant/pins.py) INSIDE konstant's jail:
+    the integrity core masked (no token, no sealed store), the root read-only but the dsh home it
+    composes in, no network (REVIEW L5-R2 K-01: konstant's own check never runs a launcher a
+    phase could have written, and the dump needs none of the core)."""
     import subprocess
+
+    from konstant import jail
     argv = [exe, "--profile", profile]
     for p in patches:
         argv += ["--patch", str(p)]
+    homes = [env[k] for k in ("DSH_HOME", "DSH_AGENTS_HOME") if env.get(k)]
+    for h in homes:
+        Path(h).mkdir(parents=True, exist_ok=True, mode=0o700)
+    from konstant.harnesses.base import private_tmp
+    run = jail.wrap([*argv, "--dump-config"], rw=homes, hide=jail.hidden(workspace),
+                    home=workspace, cwd=workspace, net=False,
+                    tmpfs=("/tmp",) if private_tmp(workspace) else ())
     try:
-        r = subprocess.run([*argv, "--dump-config"], cwd=str(workspace),
+        r = subprocess.run(run, cwd=str(workspace),
                            env={**os.environ, **env}, capture_output=True, text=True,
                            timeout=120, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -283,11 +298,18 @@ def compose_layers(workspace: Path, profile: str = "headless", patches: list | N
       - foreign = every origin that is neither one of konstant's patch files nor a bundle the
         baseline composed: an id-patch AND an insert-only layer of a profile, a home layer, a
         bundle added to a profile's package.json.
-    error = why the composition could not be read (None when it was): callers fail closed."""
+    error = why the composition could not be read (None when it was): callers fail closed.
+    dsh runs from the path `agents sync` pinned, re-verified first (konstant/pins.py, REVIEW
+    L5-R2 K-01): an unpinned or changed launcher is an error, never run."""
     import shutil
-    exe = shutil.which("dsh")
-    if not exe:
+
+    from konstant import pins
+    rec = pins.load(workspace).get("dsh")
+    if not shutil.which("dsh") and not (isinstance(rec, dict) and rec.get("exe")):
         return "dsh not on PATH", []
+    exe, why = pins.resolve(workspace, "dsh")
+    if why:
+        return why, []
     workspace = Path(workspace)
     patches = patches if patches is not None else [workspace / PATCH]
     scratch = []

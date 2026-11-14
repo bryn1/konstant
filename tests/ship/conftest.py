@@ -94,6 +94,16 @@ class Ship:
     def job(self, jid) -> dict:
         return self.w.json("job", "show", jid)
 
+    def shipped_as(self, jid, ref: str = "main", repo=None) -> bool:
+        """`ref` of the target (or `repo`) is konstant's ship commit for job `jid` (L5-F2a,
+        REVIEW L5-R2 K-03): the verified commit's tree on top of the job clone's base."""
+        job = self.job(jid)
+        clone = self.w.home / job["workdir"]
+        tree = git_out(clone, "rev-parse", f"{job['evidence']['commit']}^{{tree}}")
+        repo = repo or self.target
+        return (git_out(repo, "rev-parse", f"{ref}^{{tree}}") == tree and
+                git_out(repo, "rev-parse", f"{ref}^") == job["workdir_base"])
+
     def commit(self, jid) -> str:
         return self.job(jid)["evidence"]["commit"]
 
@@ -138,6 +148,7 @@ def make_ship_ws(tmp: Path, ship: str = "", tail: str = "", github: bool = False
         w.stop_board()
         cfg = w.home / "konstant.toml"
         cfg.write_text(cfg.read_text() + extra + tail)
+        w.ok("agents", "sync")          # pins [ship] gh / ship_cmd as the owner's sync does (K-01)
         w.ok("board", "start")
     except BaseException:
         w.stop_board()

@@ -83,6 +83,6 @@ def test_goal_jobs_roll_back_follow_up_ships_and_max_rollbacks_blocks(tmp_path):
         assert r.returncode == 0, r.stderr + r.stdout[-1500:]
         post = s.ships()[2]["post"]["checks"]
         assert any("grep -c greet" in c["reason"] and c["ok"] for c in post)   # the goal's probe
-        assert git_out(s.target, "rev-parse", "main") == s.commit(fu["id"])
+        assert s.shipped_as(fu["id"])          # the ship commit (L5-F2a K-03)
     finally:
         s.w.stop_board()

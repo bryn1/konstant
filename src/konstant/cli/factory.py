@@ -7,18 +7,21 @@ factory run [GOAL..]  the loop in the foreground (forever; --until-idle: exit 0 
                       what the first tick would do, change nothing)
 factory start         the same loop in the background (var/factory/factory.pid, var/logs/
                       factory.log); refused (exit 2) while a factory runs: one per workspace
-factory stop          the kill switch: var/factory/STOP; the loop starts nothing new, lets its
+factory stop          (owner) the kill switch: var/factory/STOP; the loop starts nothing new, lets its
                       running steps finish and exits (--now: SIGTERM to the loop and its steps);
                       no factory starts while it is set
-factory resume        clear the kill switch; a halted factory (a notifier that could not deliver,
-                      an internal error): deliver the spooled events, then lift the halt (owner)
+factory resume        (owner) clear the kill switch; a halted factory (a notifier that could not
+                      deliver, an internal error): deliver the spooled events, then lift the halt
+                      (stop and resume ask the board for the owner role first: K-12)
 factory status        the loop (running|draining|stale|stopped), halt, shipping, goals, open
                       escalations, the last events
 factory ack ID        (owner) acknowledge an escalation: the next one of its kind is told again
 factory install-unit  write a systemd --user unit for the loop into var/factory/systemd/ and
                       print it; konstant never enables or starts it (that is the owner's step)
 notify test           deliver one TEST event through [notify] (or --kind/--url)
-All of it is refused inside a task run and in the orchestrator chat, except status.
+All of it is refused inside a task run and in the orchestrator chat, except status; in the chat
+`ack`, `resume` and `resume-shipping` are PROPOSED instead and done only on the owner's next yes
+(factory/owner_actions.py, REVIEW L5-R2 K-07).
 """
 from __future__ import annotations
 
@@ -42,6 +45,17 @@ def _refused_here(what: str) -> bool:
               "(KONSTANT_CHAT_SESSION is set)", file=sys.stderr)
         return True
     return False
+
+
+def _propose(ctx, verb: str, ref: str = "", commit: str = "") -> int:
+    """In the orchestrator chat an owner verb becomes a proposal the owner's next yes confirms
+    (factory/owner_actions.py, REVIEW L5-R2 K-07)."""
+    from konstant.factory import owner_actions
+    rec = owner_actions.propose(ctx.cfg, in_chat(), verb, ref, commit)
+    ctx.out(rec, f"PROPOSED owner action: {rec['text']} - konstant does it when the owner's next "
+                 "message in this chat is a plain yes; any other reply drops it. Tell the owner "
+                 "this line verbatim and end your turn.")
+    return EXIT_OK
 
 
 def _switch(home) -> str | None:
@@ -150,10 +164,35 @@ def cmd_start(ctx) -> int:
     return EXIT_OK
 
 
+def _owner_switch(ctx, action: str) -> bool:
+    """The board's owner check before the kill switch or the spool is touched (REVIEW L5-R2
+    K-12): any other role is refused and nothing changes."""
+    role = ctx.args.as_role or "owner"
+    try:
+        client = ctx.client(role)               # reads the token: no token, no switch
+    except ClientError as exc:
+        print(f"konstant factory: refused: {exc.message}", file=sys.stderr)
+        return False
+    try:
+        client.post("/api/factory/switch", {"action": action})
+    except ClientError as exc:
+        if exc.status == 0 and action == "stop" and role == "owner":
+            # the board is down: stopping is the safe direction, and this user could read the
+            # owner token (ctx.client did); resume always needs the board's answer
+            print(f"konstant factory: {exc.message}; stopping anyway (owner token read, the "
+                  "board could not confirm it)", file=sys.stderr)
+            return True
+        print(f"konstant factory: refused: {exc.message}", file=sys.stderr)
+        return False
+    return True
+
+
 def cmd_stop(ctx) -> int:
     a, cfg = ctx.args, ctx.cfg
     if _refused_here("factory stop"):
         return EXIT_USAGE
+    if not _owner_switch(ctx, "stop"):
+        return EXIT_FAIL
     from konstant.factory import proc
     proc.set_stop(cfg.home, os.environ.get("USER", "?"), "factory stop" + (" --now" if a.now
                                                                             else ""))
@@ -183,8 +222,12 @@ def cmd_stop(ctx) -> int:
 
 def cmd_resume(ctx) -> int:
     cfg = ctx.cfg
+    if in_chat() and not in_task() and ctx.args.as_role in (None, "owner"):
+        return _propose(ctx, "factory-resume")
     if _refused_here("factory resume"):
         return EXIT_USAGE
+    if not _owner_switch(ctx, "resume"):
+        return EXIT_FAIL
     from konstant.factory import notify, proc
     cleared = proc.stopped_by(cfg.home) is not None
     proc.stop_file(cfg.home).unlink(missing_ok=True)
@@ -237,6 +280,8 @@ def cmd_status(ctx) -> int:
 
 
 def cmd_ack(ctx) -> int:
+    if in_chat() and not in_task() and ctx.args.as_role in (None, "owner"):
+        return _propose(ctx, "ack", str(ctx.args.id))
     if _refused_here("factory ack"):
         return EXIT_USAGE
     res = ctx.client(ctx.args.as_role or "owner").post(f"/api/factory/escalations/{ctx.args.id}"
@@ -257,6 +302,8 @@ def cmd_escalations(ctx) -> int:
 
 
 def cmd_resume_shipping(ctx) -> int:
+    if in_chat() and not in_task() and ctx.args.as_role in (None, "owner"):
+        return _propose(ctx, "resume-shipping")
     if _refused_here("factory resume-shipping"):
         return EXIT_FAIL
     res = ctx.client(ctx.args.as_role or "owner").post(

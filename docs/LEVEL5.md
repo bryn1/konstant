@@ -95,7 +95,8 @@ shape above) or `open` (a phase gets the host like the owner's own shell: read a
 the user can, network, ssh and the ssh agent, the docker socket, the user's credential files and
 variables), and per-capability options override it (`network`, `home_read`, `home_write`,
 `extra_read`, `extra_write`, `credentials`, `ssh_agent`, `docker_socket`, `host_write`,
-`host_agents`; CONCEPTS.md "Confinement profiles" has the table with what each allows and risks).
+`host_agents`, `factory_host_credentials`; CONCEPTS.md "Confinement profiles" has the table with
+what each allows and risks).
 What no profile opens is the **integrity core**, always enforced in factory mode: the sealed
 store unreadable, every token but the phase's own identity's unreadable, konstant's machinery
 (`machinery.py`: catalog, generated harness surfaces, `var/` bookkeeping, the board DB with the
@@ -105,6 +106,32 @@ is a thin layer (the host root bound writable, masks and read-only binds over th
 wraps every phase at level 4 too; the scenario writer always runs closed; factory mode never
 passes the docker socket (root on the host). Outside factory mode the owner may set `integrity =
 "off"` (with `open`): `doctor` FAILs and factory mode refuses to start.
+
+**Hardened in wave L5-F2a (REVIEW L5-R2).**
+- **No push credentials in a factory phase, in any profile (K-10).** A factory phase never gets
+  `GH_TOKEN`/`GITHUB_TOKEN` (and the other token variables of `machinery.SHIP_CREDENTIAL_ENV`),
+  `~/.config/gh`, `~/.git-credentials`, `~/.config/git/credentials`, `~/.netrc`, `~/.ssh` or the
+  ssh agent (`machinery.SHIP_CREDENTIALS`), and git's credential helpers are reset for it. Under
+  `open` a factory phase keeps the rest of the host. Otherwise a producer could push or merge to
+  the real remote itself and skip verify, the holdouts and the secret scan. The owner can opt in
+  with `[confinement] factory_host_credentials = true`. `doctor` then FAILs: "verified/shipped no
+  longer guaranteed". Level-4 phases keep the profile's credentials.
+- **Factory state jails every phase (K-06).** While the workspace holds factory state (a holdout
+  store with anything in it, or `var/factory/`; `machinery.factory_state`), EVERY phase runs in
+  konstant's jail: level-4 jobs, every harness and the `command` adapter included, under the
+  workspace's profile, with the integrity core on. Without a working jail such a phase is refused
+  and `doctor` FAILs (`level-4 phases`). The integrity core no longer depends on "only factory
+  phases are jailed".
+- **Pinned harness programs (K-01).** `agents sync` (install.sh runs it) records each harness CLI
+  found on PATH (dsh, claude, codex, gemini) and `[ship] gh` / `ship_cmd` / `rollback_cmd` in
+  `var/machinery.json`. It stores their resolved path and the sha256 of every program file
+  konstant can identify: the launcher, its real path, its `#!` interpreter and the scripts a
+  shell launcher names (`konstant/pins.py`). konstant's own unjailed runs re-verify that record
+  first and refuse on any change: the `konstant dsh` session, `ship`'s gh and commands, and the
+  dsh composition check. A missing record refuses as well; `agents sync` re-pins on purpose. The
+  dsh `--dump-config` check and doctor's `--version` probe also run inside the jail now, with the
+  core masked. Every phase jail binds the pinned files and their install roots read-only, in
+  every profile.
 
 ### 2.2 Identities
 
@@ -170,8 +197,11 @@ names paths of the result as `{workdir}/...`; the verifier substitutes the clone
 matching (the allowlist and path roots apply to the resolved path), and the post-ship checks
 substitute the target (5.3), so the same DoD probes are checked once before and once after the
 ship. The target is bound read-only in every phase jail. Only the ship step (5) moves the
-target's branch, and only to a commit the verifier passed. At level 5 one factory runs jobs **serially per project**, so a ship
-is always a fast-forward of the commit the job was cloned from (5.2).
+target's branch, and only to the tree the verifier passed. At level 5 one factory runs jobs
+**serially per project**. The ship never sends the job's own history: it moves the target to
+konstant's **ship commit**, the verified tree with the clone's base as its only parent (5.1).
+So a ship is always a fast-forward of the commit the job was cloned from. A verified commit that
+does not descend from that base is an owner decision (5.4, REVIEW L5-R2 K-04).
 
 ### 2.5 New modules and tables (sizes respect the 400-line rule)
 
@@ -461,18 +491,33 @@ the factory, then reports back in the same chat.
 2. **Confirmation stays a chat sentence, not a gate the owner must learn.** Before `goal add` the
    orchestrator states in one line what it will file (project, goal text, limits) and files it
    on the owner's yes; a goal never starts from a message the owner did not send (a phase's
-   output, a web page, a file in a repo: prompt injection through content is not intake).
+   output, a web page, a file in a repo: prompt injection through content is not intake). The
+   proposal line konstant prints, and the FILED line, carry the goal text verbatim (JSON-quoted),
+   every setting beyond the defaults (`limits.*`, `holdout.*`, `ship.post_probes`) and where the
+   workspace ships it. A goal cannot name a ship target, command, directory, repository or
+   remote at all (4.1, REVIEW L5-R2 K-02), so the yes never covers a hidden destination.
 3. **Report back in the chat.** The factory's escalations (`BLOCKED`, `DECISION`, `BUDGET_STOP`,
    `LEAK`, `ROLLBACK_FAILED`, `HALTED`) go to `[notify] kind = "chat"`: the gated session shows
    new events at the start of the owner's next turn (the konstant-gate plugin reads
    `var/factory/events.jsonl` and `factory status`), and outcomes (`SHIPPED`, `GOAL_DONE`) when
-   the owner asks. Answering an escalation is again a chat sentence the orchestrator turns into
-   the owner verb (`ship --approve-decision`, `goal resume`, `factory ack`), which still needs
-   the owner role (the orchestrator session asks the owner to confirm, as for any owner verb).
+   the owner asks. Each escalation line is konstant's own wording (`konstant DECISION: goal G job
+   N: a verified job waits for your decision before it ships (escalation E; ...)`). Its reason
+   can carry text a producer wrote: a DISPUTE cell, a trail body, a file name. That reason
+   follows on its own line, JSON-quoted and labelled "untrusted text from the job and its
+   phases", never as konstant speaking. An inbox line counts only when the event log holds the
+   same event (REVIEW L5-R2 K-07). Answering an escalation is again a chat sentence. The
+   orchestrator runs the owner verb (`ship --approve-decision`, `goal pause|resume|cancel`,
+   `factory ack|resume|resume-shipping`) and, inside the chat, konstant only records it as a
+   PROPOSAL. konstant carries it out with the owner token when the owner's NEXT message is a
+   plain yes, read by `chat turn` exactly like the goal yes (`factory/owner_actions.py`).
+   Anything else drops it. The session itself holds no owner power: `--as owner`/`verifier` and
+   `chat turn` are refused from its shell (KONSTANT_CHAT_SESSION).
 4. **The orchestrator is not a factory phase.** It is the owner's own session, unjailed, acting
    as `orchestrator`; it never claims, closes, verifies or ships a factory job (it holds none of
    the identity tokens of 2.2), so a goal it files goes through the whole loop below like any
-   other.
+   other. Limit (stated): the session runs unjailed as the owner's OS user. The KONSTANT_CHAT_SESSION
+   marker stops every ordinary command path. A model that deliberately strips it and reads
+   `var/secrets/owner.token` itself is not stopped by konstant, as for the goal yes.
 
 Goal files stay the mechanism underneath (and `goal add FILE` as owner stays a path for anyone
 who prefers files).
@@ -502,9 +547,9 @@ max_tokens = 0                      # > 0 needs a harness that reports usage (6.
 max_cost_usd = 0
 
 [ship]
-target = "github"                   # github | branch | apply | command (5.1); github is this
-                                    # owner's default (Q2), the public default stays branch
-branch = "main"
+# only more post-ship checks; WHERE and HOW a job ships (target, branch, ship_cmd, rollback_cmd,
+# apply_dir, github_repo, remote, gh) is konstant.toml's [ship] / [factory] defaults, never a
+# goal's: a goal naming any of them is refused (REVIEW L5-R2 K-02)
 post_probes = ["PROBE: test -f projects/greeter/README.md => ^ok$"]
 
 [holdout]
@@ -585,10 +630,19 @@ comes from a different identity.
 
 | target | ship | post-ship | rollback |
 |---|---|---|---|
-| `github` (this owner's default, Q2; opt-in by config in the public product) | push `<commit>` to a branch `konstant/ship-<n>` of the target's GitHub remote, open a pull request into `[ship] branch` with `gh pr create`, then merge it with `gh pr merge --merge --match-head-commit <commit>` (the merge refuses a head that moved); the shipped state is the remote branch's new tip, fetched back | `post_probes`, the project's own tests and the regression set (below) on the fetched new tip | a revert: `commit-tree <pre>^{tree} -p <tip>` ("roll back ship N"), pushed as `konstant/rollback-<n>` and merged through its own pull request (`gh pr merge`); never a force-push, never a branch delete; then the fetched tip's tree must equal `<pre>^{tree}` |
-| `branch` (the public default) | `update-ref refs/heads/<branch> <commit> <pre>` in the target repo (compare-and-swap; fast-forward only) | `post_probes`, the project's own tests and **every holdout of every job shipped so far** on the new tip | `commit-tree <pre>^{tree} -p <tip>` -> a new "roll back ship N" commit, then `update-ref` (CAS) |
+| `github` (this owner's default, Q2; opt-in by config in the public product) | push konstant's ship commit `<head>` (below) to a branch `konstant/ship-<n>` of the target's GitHub remote, open a pull request into `[ship] branch` with `gh pr create`, then merge it with `gh pr merge --merge --match-head-commit <head>` (the merge refuses a head that moved); the shipped state is the remote branch's new tip, fetched back | `post_probes`, the project's own tests and the regression set (below) on the fetched new tip | a revert: `commit-tree <pre>^{tree} -p <tip>` ("roll back ship N"), pushed as `konstant/rollback-<n>` and merged through its own pull request (`gh pr merge`); never a force-push, never a branch delete; then the fetched tip's tree must equal `<pre>^{tree}` |
+| `branch` (the public default) | `update-ref refs/heads/<branch> <head> <pre>` in the target repo (compare-and-swap; fast-forward only) | `post_probes`, the project's own tests and **every holdout of every job shipped so far** on the new tip | `commit-tree <pre>^{tree} -p <tip>` -> a new "roll back ship N" commit, then `update-ref` (CAS) |
 | `apply` | materialise `<commit>` into `[ship] apply_dir`, keeping the previous tree as `apply_dir.prev` | `post_probes` against `apply_dir` | swap `apply_dir.prev` back |
-| `command` | the owner's `ship_cmd` template (e.g. a `gh pr create` or a deploy script), run by the factory process with `{commit}`, `{branch}`, `{job}` | `post_probes` | the owner's `rollback_cmd`; a target without one may not auto-ship |
+| `command` | the owner's `ship_cmd` template from `konstant.toml` (e.g. a `gh pr create` or a deploy script), run by the factory process with `{commit}` (= `<head>`, copied into the target's object store first), `{branch}`, `{job}`; its program and the script files it names are pinned at `agents sync` (`konstant/pins.py`) and refused when they changed | `post_probes` | the owner's `rollback_cmd` (pinned the same way); a target without one may not auto-ship |
+
+**The ship commit (REVIEW L5-R2 K-03).** No target ships the job's own commits. Every target
+moves to `<head>` = `commit-tree <commit>^{tree} -p <pre>` (`shiprepo.squash`), written by
+konstant with a fixed identity, the verified commit's committer time and a message of ids only.
+It is deterministic, so a resumed factory recomputes it. Its tree is the tree the verifier and
+every holdout passed, and its one diff, `pre..<head>`, is exactly the diff the decision rules and
+the secret scan read. A producer's intermediate commit (a secret committed and then removed), a
+merged side branch or an orphan never leaves the host. The verified commit itself stays in
+konstant's ship repository and is named in the ship row and the commit message.
 
 The branch and github targets never rewrite history. A rollback adds a commit whose tree equals
 the pre-ship tree, so the shipped commit stays an ancestor and the record stays readable. A target
@@ -598,9 +652,11 @@ worktree stale); `apply` is the target for a working directory.
 The `github` target (owner decision Q2) is the only built-in target that uses the network. It runs
 in the factory process, outside every phase, with the owner's own git and `gh` credentials, which
 no phase can read (`~/.config/gh`, `~/.git-credentials` and the rest of `machinery.CREDENTIALS`
-stay masked in every phase jail). Before any push the factory runs the release scanner's patterns
-(`release/patterns.toml` plus the maintainer denylist when present) over the diff `pre..commit`
-and refuses the ship with a `DECISION` on a finding: a dark factory must not publish a token or an
+stay masked in every phase jail, and a factory phase never gets the push credentials in any
+profile: 2.1). Before any push the factory runs the release scanner's patterns
+(`release/patterns.toml` plus the maintainer denylist when present) over the diff `pre..commit`,
+which is the whole of what is pushed (the ship commit above), and refuses the ship with a
+`DECISION` on a finding: a dark factory must not publish a token or an
 address a producer pasted. The push and the merge use the pinned git environment for konstant's
 own git calls; `gh` is called with an explicit `--repo` from `[ship] github_repo`, never inferred
 from a repo's config. Branch protection on the remote is respected, not bypassed: a merge the
@@ -616,7 +672,9 @@ board checks the same conditions again on `POST /api/jobs/{ref}/ships`:
    commitment digest equal to `holdouts.sha256` for each, and states **no LEAK**: **never ship
    without a matched holdout**;
 3. the commit those holdouts ran on equals the evidence `COMMIT=` and the commit about to be
-   shipped;
+   shipped (whose tree the ship commit carries, 5.1); that commit descends from the clone's base
+   `pre` (`merge-base --is-ancestor`), else an owner decision (5.4: an orphan or rewritten
+   history);
 4. the target tip (for `github`: the remote branch's tip, fetched) still equals the job clone's
    base (`pre`, `jobs.workdir_base` since L5-2). With jobs serial per project only
    something outside the factory can move it, so a mismatch is `target moved`, an owner decision
@@ -660,9 +718,21 @@ The factory ships nothing that needs judgement beyond the checks. These stop as 
 
 - a job type in `[ship] decision_types` (owner decision Q4: default `["infra"]`; `security`
   jobs ship without the owner, see the threat row in 5.5);
-- a diff that adds or changes project instruction surfaces (`AGENTS.md`, `CLAUDE.md`, `.claude/`,
-  `.agents/`, `.dsh/`, `.gemini/`, `.github/workflows/`), import hooks (`sitecustomize.py`,
-  `usercustomize.py`, `*.pth`) or `conftest.py` outside test dirs;
+- a diff that touches any path of the ONE decision list `factory/shiprules.py` `DECISION_LIST`
+  (names compare case-insensitively, at any depth; tests check this list against it, REVIEW
+  L5-R2 K-15). Agent instruction surfaces: `AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`,
+  `GEMINI.md`, anything under `.claude/`, `.agents/`, `.dsh/`, `.gemini/`, `.codex/`, `.cursor/`.
+  All of `.github/`: workflows, actions, `copilot-instructions.md`, `dependabot.yml`,
+  `CODEOWNERS`. Import hooks: `sitecustomize.py`, `usercustomize.py`, files ending `.pth`. Test-runner hooks
+  and config: `conftest.py` anywhere, `pytest.ini`, `setup.cfg`, `tox.ini`, `noxfile.py`. Shell and
+  git hooks: `.envrc`, `.pre-commit-config.yaml`, `.gitmodules`, `.gitattributes`. Build commands:
+  `Makefile`, `GNUmakefile`, `justfile`. Editor and container tasks: `.vscode/`, `.idea/`,
+  `.devcontainer/`. And by content: `package.json` when its `scripts` or a git-hook manager's key
+  (`husky`, `simple-git-hooks`, `lint-staged`, `pre-commit`, `gitHooks`, `config`) changes, and
+  `pyproject.toml` when its `[tool.pytest]` tables change;
+- a verified commit that does not descend from the target's tip `pre` (an orphan or rewritten
+  history, REVIEW L5-R2 K-04; checked on both sides; what ships after the owner's approval is
+  still the ship commit on top of `pre`, 5.1);
 - a job with only `regression` holdouts (nothing proved the change) unless the goal allows it;
 - a target that moved outside the factory (5.2 rule 4);
 - a DISPUTE row (3.6).
@@ -675,7 +745,11 @@ does not have to read the code to decide: the escalation names the rule that sto
 | attack | what stops it |
 |---|---|
 | the producer moves the target branch itself (`git update-ref` in the target) | the target is read-only in every factory phase jail (2.4); the producer only has its job clone |
-| the producer pushes somewhere | no credentials in a phase (`machinery.CREDENTIALS` masked); the built-in targets never push |
+| the producer pushes somewhere | no push credentials in any factory phase, in every profile (`machinery.SHIP_CREDENTIALS` masked, the token variables dropped, the ssh agent withheld, git's credential helpers reset; 2.1, K-10); `[confinement] factory_host_credentials = true` gives them back and `doctor` FAILs; the built-in targets never push from a phase |
+| a producer commits a secret and removes it again, or merges a side branch that holds one | the ship pushes only konstant's ship commit (5.1): the job's own history never leaves the host (K-03) |
+| a producer hands in an orphan commit that would replace the target's history | owner decision on both sides (5.4, K-04); the ship commit always has `pre` as its parent |
+| a goal (from a file or the chat) names a ship command, directory, repository or target | refused when filed: those are `konstant.toml`'s alone (4.1, K-02) |
+| a phase rewrites a harness launcher that konstant later runs unjailed | the pinned programs (2.1, K-01): read-only in every phase jail, re-verified before every unjailed run |
 | ship a commit other than the one verified | guard rules 2-3 on both sides; CAS on the ref |
 | a repo-configured filter or hook runs during ship or rollback | plumbing only, pinned git env (F-04); no checkout, merge or revert |
 | code that passes on the clone and breaks on the target | post-ship checks on the real target, regression set, automatic rollback |
@@ -693,7 +767,7 @@ does not have to read the code to decide: the escalation names the rule that sto
 | # | command | expected |
 |---|---|---|
 | C1 | `bin/konstant ship 2 --dry-run --json` | `"decision": "ship"`, `"commit": "$C"`, `"pre"` = the target tip, every guard rule listed `ok` |
-| C2 | `bin/konstant ship 2; RC=$?` then `git -C $T rev-parse main` | `RC=0`, output `$C`; `bin/konstant ship list --json` shows `"state": "shipped"` |
+| C2 | `bin/konstant ship 2; RC=$?` then `git -C $T rev-parse main^{tree} main^` | `RC=0`, output `$C`'s tree and the pre-ship tip (the ship commit, 5.1); `bin/konstant ship list --json` shows `"state": "shipped"` with `commit_sha` `$C` |
 | C3 | ship a level-4 job (verified, no holdouts) | exit 1 `refused: no holdout PASS for commit ...`; `git -C $T rev-parse main` unchanged |
 | C4 | holdouts passed on `$C`, evidence names another commit | exit 1 `refused: holdouts ran on $C, the evidence names ...` |
 | C5 | `FAKE_HARNESS_MODE=ship-break` (verifies, then fails a post-ship probe on the target) | `ship list --json` `"state": "rolled_back"`; `git -C $T rev-parse main^{tree}` equals `git -C $T rev-parse <pre>^{tree}`; `git -C $T log -1 --format=%s main` = `konstant: roll back ship 1`; job 2 still `verified` and a follow-up job filed whose acceptance holds the failed check as a `PROBE:` row |
@@ -1228,7 +1302,8 @@ pinned binary with an environment it builds (H-01). Where it differs from sectio
   worktree rewrite: the next job's clone must start from the shipped state (rule 4 compares the
   remote AND the local target with the clone's base). The push URL (`[ship] remote`) and the gh
   binary (`[ship] gh`, absolute) are operator keys of `konstant.toml`, never goal keys, so a goal
-  confirmed in chat cannot point a push elsewhere; `github_repo` may come from the goal.
+  confirmed in chat cannot point a push elsewhere. (Since L5-F2a no `[ship]` key but
+  `post_probes` may come from a goal; `github_repo` included: REVIEW L5-R2 K-02.)
 - **C11's "the remote main moves to $C"**: `gh pr merge --merge` makes GitHub's merge commit, so
   the remote `main` is a merge whose tree is `$C`'s tree and whose second parent is `$C`; the
   shipped state is that tip, and the post-ship `merged` check asserts exactly this. C5's
@@ -1655,7 +1730,7 @@ underneath; the level-5 proof includes the chat intake (leg P0, section 7).
 | one model writes the DoD, the holdouts and the code, and they agree on the same mistake (the owner's chosen setup, Q1) | a person wrote the DoD | distinct identities enforced by the board; separate contexts (the scenario writer sees goal, brief and a read-only target only; the producer never sees the scenarios); holdouts must fail on the base and stay out of the brief, so a scenario cannot just echo the producer's reading; black-box only; post-ship regression set and rollback; another harness/model optional, never required |
 | a same-model scenario writer is steered by the producer of an earlier job (text it shipped into the target) | there was no scenario writer | the scenario writer sees only the target's committed tree, read-only; instruction-surface diffs are owner decisions (5.4); every scenario passes lint and the negative control |
 | a `security` job ships unattended and weakens security (Q4) | `security` was always reviewed by a person at level 4 | the full gate set of every type plus the 5.4 diff rules (which stop any type), the secret scan before a `github` push, post-ship regression set and rollback; `infra` still stops |
-| shipping to GitHub publishes a secret or triggers CI with repository secrets (Q2) | nothing was pushed automatically | secret scan of every diff before the push (a finding is a DECISION); `.github/workflows/` diffs are owner decisions; push credentials live only in the factory process, masked in every phase |
+| shipping to GitHub publishes a secret or triggers CI with repository secrets (Q2) | nothing was pushed automatically | secret scan of every diff before the push (a finding is a DECISION), and the push carries only konstant's ship commit, never the job's history (5.1); all of `.github/` is an owner decision; push credentials live only in the factory process and are withheld from every factory phase in every profile unless the owner sets `factory_host_credentials = true` (doctor FAIL) |
 | holdouts erode: the producer learns them through repeated failures | no holdouts existed | redacted hints only, exposure budget, rotation, canary and literal scans (3.5, 3.6) |
 | runaway cost or an endless loop | a person started each job | per-goal hard limits checked every tick; unmeasurable budgets refused before the start; a budget stop pauses and escalates (6.2) |
 | errors compound: job 2 builds on a defect job 1 shipped | jobs were reviewed one by one | serial jobs per project; the regression set re-runs every shipped holdout after each ship; rollback (5.3) |

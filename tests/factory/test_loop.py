@@ -36,7 +36,7 @@ def test_D3_D8_D1b_honest_goal_runs_to_done_without_a_human_role_green(tmp_path)
         assert [r["status"] for r in rows] == ["verified", "verified"]
         ships = s.ships()
         assert [x["state"] for x in ships] == ["shipped", "shipped"]
-        assert git_out(s.target, "rev-parse", "main") == s.commit(rows[1]["id"])
+        assert s.shipped_as(rows[1]["id"])          # the ship commit (L5-F2a K-03)
         assert goal(s)["status"] == "done"
     finally:
         os.chmod(s.w.home / "var" / "secrets" / "owner.token", 0o600)

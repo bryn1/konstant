@@ -107,6 +107,10 @@ def target(goal: str) -> Path:
     return WS / "projects" / kj("goal", "show", goal)["project"]
 
 
+def clone_of(job: dict) -> Path:
+    return WS / kj("job", "show", job["id"])["workdir"]
+
+
 def no_notify_log() -> None:
     p = WS / "var" / "factory" / "notify.log"
     ok(not p.exists(), "no notify.log ([notify] kind = chat; nothing halted)",
@@ -241,10 +245,16 @@ def p1(kw) -> None:
     ok(git_rc(t, "merge-base", "--is-ancestor", base, "main") == 0,
        "every move was a fast-forward of the base")
     commits = [kj("job", "show", j["id"])["evidence"]["commit"] for j in jobs]
-    for c in commits:
-        ok(git_rc(t, "merge-base", "--is-ancestor", c, "main") == 0,
-           f"verified commit {c[:12]} is on main")
-    ok(git(t, "rev-parse", "main^{tree}") == git(t, "rev-parse", f"{commits[-1]}^{{tree}}"),
+    by_job = {s["job_id"]: s for s in ships}
+    for j, c in zip(jobs, commits):
+        tip = by_job[j["id"]]["tip_sha"]          # konstant's ship commit (L5-R2 K-03)
+        ok(git_rc(t, "merge-base", "--is-ancestor", tip, "main") == 0 and
+           git(t, "rev-parse", f"{tip}^{{tree}}") == git(clone_of(j), "rev-parse", f"{c}^{{tree}}"),
+           f"the ship commit {tip[:12]} of verified commit {c[:12]} (same tree) is on main")
+        ok(git_rc(t, "cat-file", "-e", c) != 0,
+           f"job {j['display_id']}: its own history never left the job clone")
+    ok(git(t, "rev-parse", "main^{tree}") == git(clone_of(jobs[-1]), "rev-parse",
+                                                 f"{commits[-1]}^{{tree}}"),
        "main's tree is the last verified commit's tree")
     ok(inbox(goal) == [], f"chat inbox: no escalation for {goal}", inbox(goal))
     evs = [e["event"] for e in events(goal)]
@@ -294,11 +304,14 @@ def p6(kw) -> None:
         if s is None:
             continue
         c = kj("job", "show", j["id"])["evidence"]["commit"]
-        heads = [x for x in creates if x["sha"] == c]
-        ok(heads and heads[0]["head"].startswith("konstant/ship-"),
-           f"job {j['display_id']}: its verified commit went up as {heads[0]['head'] if heads else '?'}")
-        ok(git_rc(remote, "merge-base", "--is-ancestor", c, "main") == 0,
-           f"job {j['display_id']}: the remote main contains {c[:12]}")
+        heads = [x for x in creates if x["head"] == f"konstant/ship-{s['id']}"]
+        tree = git(clone_of(j), "rev-parse", f"{c}^{{tree}}")
+        ok(heads and git(remote, "rev-parse", f"{heads[0]['sha']}^{{tree}}") == tree,
+           f"job {j['display_id']}: konstant's ship commit went up as "
+           f"{heads[0]['head'] if heads else '?'}, with the verified tree")
+        ok(heads and git_rc(remote, "merge-base", "--is-ancestor", heads[0]["sha"], "main") == 0
+           and git_rc(remote, "cat-file", "-e", c) != 0,
+           f"job {j['display_id']}: the remote main contains the ship commit, never {c[:12]}")
     ok(git(remote, "rev-parse", "main") == git(target(goal), "rev-parse", "main"),
        "the local target followed the remote main")
     reverts = [m for m in merges if m.get("revert")]
@@ -423,7 +436,7 @@ def p4(kw) -> None:
     ok(ships[2]["follow_up_id"] is None, "the second rollback filed no follow-up (max_rollbacks = 1)")
     t = target(goal)
     for s in (ships[0], ships[2]):
-        c = s.get("commit") or kj("job", "show", s["job_id"])["evidence"]["commit"]
+        c = s["tip_sha"]                          # konstant's ship commit (L5-R2 K-03)
         ok(git_rc(t, "merge-base", "--is-ancestor", c, "main") == 0,
            f"ship {s['id']}: the shipped commit {c[:12]} is still an ancestor (history kept)")
     pre = ships[2].get("pre")
@@ -507,8 +520,12 @@ def chat_all(kw) -> None:
             if " chat turn " in r.get("act", "") and r.get("rc") == 0:
                 shown += json.loads(r["out"])["lines"]
     for e in told:
-        hit = [ln for ln in shown if ln.startswith(f"konstant {e['event']}: goal {e['goal']}")
-               and e["reason"][:60] in ln]
+        # konstant's own line, then the reason quoted as untrusted job text (L5-R2 K-07)
+        quoted = json.dumps(e["reason"][:60], ensure_ascii=True)[1:-1]
+        hit = [i for i, ln in enumerate(shown)
+               if ln.startswith(f"konstant {e['event']}: goal {e['goal']}")
+               and i + 1 < len(shown) and shown[i + 1].startswith("  detail (untrusted text")
+               and quoted in shown[i + 1]]
         ok(len(hit) == 1, f"shown once in the chat: {e['event']} {e['goal']}", len(hit))
     ok(any(ln.startswith("konstant outcomes since your last turn") for ln in shown),
        "outcomes came back as summary lines")

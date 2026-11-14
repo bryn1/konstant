@@ -8,7 +8,7 @@ composes its prompts from that catalog. `catalog/` is in machinery.DIRS (no jail
 it), but a closed level-4 phase is not jailed.
 
 So `konstant agents sync` records the sha256 of every file under `catalog/` in
-`var/machinery.json`, and every factory run and `konstant doctor` REFUSE (FAIL) when the catalog
+`var/machinery.json` (beside the pinned programs of konstant/pins.py), and every factory run and `konstant doctor` REFUSE (FAIL) when the catalog
 on disk differs from the manifest. The only way to change the catalog without a FAIL is to run
 `agents sync` again, which re-reads the catalog deliberately and re-records it. A level-4 phase's
 edit therefore stops the next factory run instead of steering its verifying phases.
@@ -51,8 +51,11 @@ def manifest_path(cfg) -> Path:
 
 
 def record(cfg) -> dict:
-    """Write the manifest from the catalog on disk (called by `agents sync`: a deliberate read)."""
-    data = {"schema": SCHEMA, "catalog": catalog_digest(cfg)}
+    """Write the manifest from the catalog on disk (called by `agents sync`: a deliberate read),
+    with the programs konstant may run unjailed pinned beside it (konstant/pins.py, REVIEW L5-R2
+    K-01)."""
+    from konstant import pins
+    data = {"schema": SCHEMA, "catalog": catalog_digest(cfg), "programs": pins.record(cfg)}
     p = manifest_path(cfg)
     p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = p.with_name(p.name + ".tmp")

@@ -42,7 +42,7 @@ def test_C2_ship_moves_the_target_to_the_verified_commit(sws):
     c = sws.commit(jid)
     r = sws.ship(jid, "--json")
     assert r.returncode == 0, r.stderr + r.stdout[-2000:]
-    assert git_out(sws.target, "rev-parse", "main") == c
+    assert sws.shipped_as(jid)          # the ship commit (L5-F2a K-03)
     ships = sws.ships()
     assert len(ships) == 1 and ships[0]["state"] == "shipped" and ships[0]["commit_sha"] == c
     assert ships[0]["post"]["ok"] is True
@@ -50,7 +50,7 @@ def test_C2_ship_moves_the_target_to_the_verified_commit(sws):
     assert {"probe", "tests", "regression"} <= checks
     # the checked-out worktree was rewritten by konstant (no checkout): content == the commit
     assert (sws.target / "greeter.py").read_bytes() == \
-        subprocess.run(["git", "-C", str(sws.target), "cat-file", "blob", f"{c}:greeter.py"],
+        subprocess.run(["git", "-C", str(sws.target), "cat-file", "blob", "main:greeter.py"],
                        capture_output=True).stdout
     assert any(e["event"] == "SHIPPED" for e in sws.events())
     assert sws.job(jid)["status"] == "verified"
@@ -102,7 +102,7 @@ def test_C4_holdouts_on_another_commit_than_the_evidence_are_refused_both_sides(
     sws.sql("UPDATE jobs SET evidence_json = json_set(evidence_json, '$.commit', ?) WHERE id=?",
             (c, jid))
     assert sws.ship(jid).returncode == 0
-    assert git_out(sws.target, "rev-parse", "main") == c
+    assert sws.shipped_as(jid)          # the ship commit (L5-F2a K-03)
 
 
 @needs_jail
@@ -127,7 +127,7 @@ def test_C5_C6_post_ship_failure_rolls_back_without_rewriting_history(sws):
     assert git_out(sws.target, "rev-parse", "main^{tree}") == \
         git_out(sws.target, "rev-parse", f"{pre}^{{tree}}")
     assert git_out(sws.target, "log", "-1", "--format=%s", "main") == "konstant: roll back ship 1"
-    assert git_rc(sws.target, "merge-base", "--is-ancestor", c, "main") == 0          # C6
+    assert git_rc(sws.target, "merge-base", "--is-ancestor", s["tip_sha"], "main") == 0  # C6
     assert (sws.target / "README.md").is_file()          # the worktree is the pre-ship tree again
     assert sws.job(jid)["status"] == "verified"         # terminal: the clone's verification held
     fu = sws.job(s["follow_up_id"])
@@ -182,7 +182,7 @@ def test_C10_an_instruction_surface_is_an_owner_decision_then_approved(sws):
     assert sws.ship(jid, "--approve-decision", role="factory").returncode == 1
     ok = sws.ship(jid, "--approve-decision", role="owner")
     assert ok.returncode == 0, ok.stderr
-    assert git_out(sws.target, "rev-parse", "main") == sws.commit(jid)
+    assert sws.shipped_as(jid)          # the ship commit (L5-F2a K-03)
 
 
 @needs_jail

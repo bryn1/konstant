@@ -129,8 +129,12 @@ def test_B11_an_escalation_of_the_chat_goal_appears_in_the_next_turn(cws):
     assert res.returncode == 3
     assert not (cws.home / "var" / "factory" / "notify.log").exists()     # kind chat: no file
     t = turn(cws, "what is the status?")
-    blocked = [ln for ln in t["lines"] if ln.startswith("konstant BLOCKED: goal greeter")]
-    assert blocked and "UNMET: job B2 DoD has no PROBE" in blocked[0]
+    lines = t["lines"]
+    at = [i for i, ln in enumerate(lines) if ln.startswith("konstant BLOCKED: goal greeter")]
+    # konstant's own wording, the reason on the next line quoted as untrusted (L5-R2 K-07)
+    assert at and "UNMET" not in lines[at[0]], lines
+    assert lines[at[0] + 1].startswith("  detail (untrusted text") and \
+        "UNMET: job B2 DoD has no PROBE" in lines[at[0] + 1], lines
     assert turn(cws, "and now?")["lines"] == []                # shown once per session
 
 

@@ -113,8 +113,8 @@ def code_decisions(cfg, client, plan: dict, sealed: list) -> list:
         reasons.append(f"job type {job['type']} is an owner decision ([ship] decision_types)")
     if shiprules.regression_only(sealed) and not conf["regression_only"]:
         reasons.append("only regression holdouts: nothing proved the change")
-    paths = [r[1] for r in shiprepo.changes(repo, plan["pre"], plan["commit"])]
-    reasons += shiprules.decision_paths(paths)
+    reasons += shiprules.history_rule(repo, plan["pre"], plan["commit"])
+    reasons += shiprules.decision_reasons(repo, plan["pre"], plan["commit"])
     if conf["target"] in ("github", "command"):
         try:
             found = shiprules.secret_findings(repo, plan["pre"], plan["commit"],

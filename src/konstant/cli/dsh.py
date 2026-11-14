@@ -16,7 +16,9 @@ sets instead of starting dsh. The session is NOT jailed, so before it starts dsh
   - packages installed into the session home's profiles (they resolve before dsh's own bundles);
   - a composition (`--dump-config`, no model call) that cannot be read, or that holds any layer
     besides dsh's own bundles and konstant's two patches (an insert-only or id-patch layer in the
-    session home, a launcher that forces its own DSH_HOME).
+    session home, a launcher that forces its own DSH_HOME);
+  - a dsh launcher that is not the one `agents sync` pinned (path, launcher, interpreter, entry
+    script: konstant/pins.py, REVIEW L5-R2 K-01): the session runs the pinned path only.
 No phase can write the session home: it is under var/harness/, which every adapter and the jail
 keep read-only for phases (konstant/machinery.py), and phases get a fresh dsh home each.
 
@@ -101,7 +103,8 @@ def cmd_dsh(ctx) -> int:
               "\"dsh\" or a [harness.types.<type>] row) and run `bin/konstant agents sync`",
               file=sys.stderr)
         return EXIT_USAGE
-    exe = shutil.which("dsh")
+    from konstant import pins
+    exe = shutil.which("dsh") and pins.load(ws).get("dsh", {}).get("exe")
     argv = [exe or "dsh", "--profile", ctx.args.app, "--patch", str(ws / dsh_adapter.PATCH),
             "--patch", str(ws / dsh_session.SESSION_PATCH), *ctx.args.args]
     extra = session_env(ws, ctx.cfg.data["harness"], ctx.cfg.confinement())
@@ -109,9 +112,13 @@ def cmd_dsh(ctx) -> int:
     if ctx.args.dry_run:
         print(json.dumps({"argv": argv, "cwd": str(cwd), "env": extra}, indent=2))
         return 0
-    if not exe:
+    if not shutil.which("dsh") and not exe:
         print("konstant dsh: dsh not found on PATH (npm @deepseek-ai/dsh)", file=sys.stderr)
         return 127
+    exe, why = pins.resolve(ws, "dsh")
+    if why:                 # the session runs unjailed: only the launcher `agents sync` pinned
+        print(f"konstant dsh: refused: {why}", file=sys.stderr)
+        return 1
     for k in ("DSH_HOME", "DSH_AGENTS_HOME"):
         private_dir(Path(extra[k]))
     if extra.get("KONSTANT_SHIM_DIR"):

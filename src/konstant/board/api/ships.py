@@ -150,8 +150,9 @@ def board_guard(request: Request, conn, job, body: ShipIn) -> list:
 
 
 def decision_rules(cfg, conn, job, conf, sealed, body, slug) -> list:
-    """5.4: the type, the diff's paths, a regression-only set and (github/command) the secret scan;
-    each may be passed by the owner's approval of this exact commit."""
+    """5.4: the type, the history (the commit descends from pre: K-04), the diff's decision list
+    (K-15), a regression-only set and (github/command) the secret scan; each may be passed by the
+    owner's approval of this exact commit."""
     from konstant.factory import shiprepo
     reasons = []
     if job["type"] in cfg.data["ship"]["decision_types"] or job["ship_mode"] == "decision":
@@ -161,11 +162,11 @@ def decision_rules(cfg, conn, job, conf, sealed, body, slug) -> list:
     repo = shiprepo.path_for(cfg, slug)
     try:
         shiprepo.out(repo, "cat-file", "-e", f"{body.commit}^{{commit}}")
-        paths = [p for _s, p, *_r in shiprepo.changes(repo, body.pre, body.commit)]
+        reasons += shiprules.history_rule(repo, body.pre, body.commit)
+        reasons += shiprules.decision_reasons(repo, body.pre, body.commit)
     except (shiprepo.ShipRepoError, OSError):
         return [shiprules.bad("import", f"the ship repository does not hold {body.commit[:12]} "
                                         "and its base: konstant imports it before it ships")]
-    reasons += shiprules.decision_paths(paths)
     if conf["target"] in ("github", "command"):
         try:
             found = shiprules.secret_findings(repo, body.pre, body.commit, shiprules.patterns(cfg))

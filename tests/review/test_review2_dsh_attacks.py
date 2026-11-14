@@ -43,6 +43,7 @@ def dws(tmp_path):
     w.bindir = tmp_path / "fakebin"
     w.bindir.mkdir()
     stub_dsh.install(w.bindir)
+    w.ok("agents", "sync", env=w.env(PATH=f"{w.bindir}:{os.environ['PATH']}"))   # pins it (K-01)
     return w
 
 

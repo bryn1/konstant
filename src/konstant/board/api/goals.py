@@ -171,8 +171,17 @@ def add_goal(body: GoalIn, request: Request, actor: Actor = Depends(writer)):
             (slug, proj["id"], body.spec, json.dumps(spec, sort_keys=True), sha, source,
              session or None, status, actor.label)).lastrowid
         out = serialize(conn, conn.execute("SELECT * FROM goals WHERE id=?", (gid,)).fetchone())
-    out["summary"] = goal_mod.summary(spec)
+    out["summary"] = owner_summary(cfg, spec)
     return out
+
+
+def owner_summary(cfg, spec: dict) -> str:
+    """goal.summary with the workspace's defaults and ship destination (K-02)."""
+    from konstant.factory import goal as goal_mod
+    from konstant.factory import shiprules
+    c = shiprules.conf(cfg, spec)
+    return goal_mod.summary(spec, cfg.data["factory"]["defaults"],
+                            cfg.data["holdout"]["min_per_job"], f"{c['target']} {c['branch']}")
 
 
 @router.get("/api/goals")
@@ -221,7 +230,7 @@ def _session_verb(request, ref: str, body: SessionIn, actor: Actor, verb: str) -
         out = serialize(conn, conn.execute("SELECT * FROM goals WHERE id=?",
                                            (row["id"],)).fetchone())
     if verb == "confirm":
-        out["summary"] = goal_mod.summary(spec)
+        out["summary"] = owner_summary(cfg, spec)
     out["reason"] = redact((body.reason or "").strip())[:300]
     return out
 

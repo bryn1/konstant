@@ -7,7 +7,7 @@ loop, before any new ship and only while no ship holds the ship lock, compares t
 row and never leaves it blocking:
 
   shipping, target still at the row's pre        -> `failed` (nothing moved); the job ships again
-  shipping, target at the shipped commit         -> `shipped` (branch: the worktree rewrite is
+  shipping, target at the ship commit            -> `shipped` (branch: the worktree rewrite is
             (github: a merge whose tree is it)      finished, github: the local target moved), then
                                                     the post-ship checks run as after a ship
   shipped without checks, target at its tip      -> the post-ship checks run (keep or roll back)
@@ -53,11 +53,14 @@ def now_of(plan: dict) -> str:
 
 
 def shipped_at(plan: dict, now: str) -> bool:
+    """The target is at konstant's ship commit (the squash of the verified commit onto pre,
+    recomputed: it is deterministic), or at a merge on top of it with the verified tree."""
     repo, commit = plan["repo"], plan["commit"]
-    if now == commit:
-        return True
     try:
-        return shiprepo.is_ancestor(repo, commit, now) and \
+        head = plan["tgt"].head
+        if now == head:
+            return True
+        return shiprepo.is_ancestor(repo, head, now) and \
             shiprepo.tree_of(repo, now) == shiprepo.tree_of(repo, commit)
     except shiprepo.ShipRepoError:
         return False

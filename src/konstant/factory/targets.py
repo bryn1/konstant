@@ -1,6 +1,10 @@
 """Ship targets (docs/LEVEL5.md 5.1): where a verified commit goes and how it comes back.
 
-Every target works from the ship repository (factory/shiprepo.py), never from the job clone:
+Every target works from the ship repository (factory/shiprepo.py), never from the job clone, and
+ships konstant's own SQUASH commit (`head`: the verified commit's tree on top of the target's tip
+`pre`, shiprepo.squash; REVIEW L5-R2 K-03/K-04), never the job's history: an intermediate commit,
+a merged side branch or an orphan the producer made never leaves the host, and every ship is a
+fast-forward of `pre`.
 
   github   push the commit to `konstant/ship-<n>` of [ship] remote, `gh pr create` into the
            branch, `gh pr merge --merge --match-head-commit <commit>` (GitHub refuses a head that
@@ -11,7 +15,9 @@ Every target works from the ship repository (factory/shiprepo.py), never from th
            (compare-and-swap). Rollback: the same revert commit, CAS again.
   apply    materialise the commit into [ship] apply_dir, keeping the previous tree beside it as
            `<apply_dir>.prev`. Rollback: swap it back.
-  command  the owner's ship_cmd / rollback_cmd ({commit}, {branch}, {job}), argv split, no shell.
+  command  the owner's ship_cmd / rollback_cmd ({commit} = `head`, {branch}, {job}), argv split, no
+           shell, the program pinned at `agents sync` (konstant/pins.py); `head` is copied into
+           the target's object store first.
 
 For github and branch the local target (the project the job clone was made from) moves too, so the
 next job's clone starts from the shipped state. When its checked-out branch is the ship branch,
@@ -63,6 +69,14 @@ class Base:
         self.job, self.pre, self.branch = job, pre, conf["branch"]
         self.ref = f"refs/heads/{self.branch}"
 
+    @property
+    def head(self) -> str:
+        """The commit this target ships: konstant's squash of the verified commit onto `pre`."""
+        if getattr(self, "_head", None) is None:
+            self._head = shiprepo.squash(self.repo, self.job["commit"], self.pre,
+                                         f"job {self.job.get('display_id') or self.job['id']}")
+        return self._head
+
     def precheck(self) -> list:
         return []
 
@@ -87,10 +101,10 @@ class BranchTarget(Base):
 
     def ship(self, n: int, commit: str) -> str:
         try:
-            move_local(self.repo, self.target, self.ref, self.pre, commit)
+            move_local(self.repo, self.target, self.ref, self.pre, self.head)
         except ShipRepoError as exc:
             raise TargetRefused(str(exc)) from None
-        return commit
+        return self.head
 
     def rollback(self, n: int, tip: str) -> str:
         try:
@@ -111,9 +125,17 @@ class GithubTarget(Base):
     TRACK = "refs/konstant/remote/"
 
     def gh(self) -> str:
-        from konstant import tools
+        """The gh konstant runs: [ship] gh (pinned at `agents sync`, re-checked before it runs:
+        konstant/pins.py), else gh from konstant's trusted directories."""
+        from konstant import pins, tools
         exe = self.conf["gh"] or tools.which("gh") or ""
-        return exe if exe and os.path.isfile(exe) and os.access(exe, os.X_OK) else ""
+        if not (exe and os.path.isfile(exe) and os.access(exe, os.X_OK)):
+            return ""
+        if self.conf["gh"]:
+            why = pins.check(self.cfg, "gh", exe)
+            if why:
+                raise ShipRepoError(why)
+        return exe
 
     def _net(self) -> tuple:
         url = self.conf["remote"]
@@ -171,7 +193,11 @@ class GithubTarget(Base):
         from konstant.factory.shiprules import bad, ok
         if not self.conf["github_repo"] or not self.conf["remote"]:
             return [bad("target", "the github target needs [ship] github_repo (OWNER/REPO)")]
-        if not self.gh():
+        try:
+            have = self.gh()
+        except ShipRepoError as exc:
+            return [bad("target", str(exc))]
+        if not have:
             return [bad("target", "no gh CLI: set [ship] gh to its absolute path (konstant does "
                                   "not take gh from PATH)")]
         try:
@@ -188,8 +214,8 @@ class GithubTarget(Base):
 
     def ship(self, n: int, commit: str) -> str:
         try:
-            self.push(commit, f"konstant/ship-{n}")
-            self.pull_request(commit, f"konstant/ship-{n}",
+            self.push(self.head, f"konstant/ship-{n}")
+            self.pull_request(self.head, f"konstant/ship-{n}",
                               f"konstant: ship job {self.job['display_id']} (ship {n})")
             tip = self.fetch()
         except ShipRepoError as exc:
@@ -281,35 +307,46 @@ class CommandTarget(Base):
     name = "command"
 
     def precheck(self) -> list:
+        from konstant import pins
         from konstant.factory.shiprules import bad, ok
         if not self.conf["ship_cmd"] or not self.conf["rollback_cmd"]:
             return [bad("target", "the command target needs ship_cmd AND rollback_cmd: a target "
                                   "that cannot roll back may not auto-ship")]
-        return [ok("target", "ship_cmd and rollback_cmd are set")]
+        for key in ("ship_cmd", "rollback_cmd"):
+            why = pins.check(self.cfg, key, self.conf[key])
+            if why:
+                return [bad("target", why)]
+        return [ok("target", "ship_cmd and rollback_cmd are set and pinned")]
 
-    def _run(self, template: str, commit: str) -> subprocess.CompletedProcess:
+    def _run(self, key: str, commit: str) -> subprocess.CompletedProcess:
+        from konstant import pins
+        why = pins.check(self.cfg, key, self.conf[key])
+        if why:
+            raise ValueError(why)
         subst = {"{commit}": commit, "{branch}": self.branch, "{job}": str(self.job["id"])}
         argv = []
-        for tok in shlex.split(template):
+        for tok in shlex.split(self.conf[key]):
             for k, v in subst.items():
                 tok = tok.replace(k, v)
             argv.append(tok)
-        env = {**own_env(), "KONSTANT_SHIP_COMMIT": commit}
+        env = {**own_env(), "KONSTANT_SHIP_COMMIT": commit,
+               "KONSTANT_VERIFIED_COMMIT": self.job["commit"]}
         return subprocess.run(argv, cwd=str(self.target), capture_output=True, text=True,
                               env=env, timeout=1800, stdin=subprocess.DEVNULL)
 
     def ship(self, n: int, commit: str) -> str:
         try:
-            r = self._run(self.conf["ship_cmd"], commit)
-        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            shiprepo.transfer(self.repo, self.target, self.head)
+            r = self._run("ship_cmd", self.head)
+        except (OSError, ValueError, ShipRepoError, subprocess.TimeoutExpired) as exc:
             raise TargetRefused(f"ship_cmd could not run: {exc}") from None
         if r.returncode != 0:
             raise TargetRefused(f"target refused: ship_cmd exited {r.returncode}")
-        return commit
+        return self.head
 
     def rollback(self, n: int, tip: str) -> str:
         try:
-            r = self._run(self.conf["rollback_cmd"], self.pre)
+            r = self._run("rollback_cmd", self.pre)
         except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             raise RollbackFailed(f"rollback_cmd could not run: {exc}") from None
         if r.returncode != 0:

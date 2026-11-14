@@ -250,6 +250,25 @@ def commit_tree(repo, tree: str, parents: list, message: str) -> str:
     return out(repo, *args, "-m", message, env=IDENT)
 
 
+def squash(repo, commit: str, pre: str, label: str) -> str:
+    """konstant's own ship commit (REVIEW L5-R2 K-03): the verified commit's TREE with the
+    target's tip `pre` as its only parent, written by konstant. It is what every target moves to,
+    so the history a producer made (an intermediate commit holding a secret, a merge of a side
+    branch, an orphan) never leaves the host: the one diff that is pushed is pre..tree, the diff
+    the secret scan and the decision rules read. Deterministic (fixed identity, the verified
+    commit's committer time, a message from ids only), so a resumed factory recomputes the same id
+    (factory/reconcile.py)."""
+    raw = read_batch(repo, [commit])[commit][1].decode("utf-8", "replace")
+    when = "0 +0000"
+    for line in raw.split("\n\n", 1)[0].splitlines():
+        if line.startswith("committer "):
+            when = " ".join(line.rsplit(" ", 2)[-2:])
+    env = {**IDENT, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    msg = (f"konstant: ship {label}\n\nThe tree of the verified commit {commit}, on top of {pre}"
+           ".\nWritten by konstant's ship step; the job's own history stays on this host.\n")
+    return out(repo, "commit-tree", tree_of(repo, commit), "-p", pre, "-m", msg, env=env)
+
+
 def update_ref(repo, ref: str, new: str, old: str) -> None:
     """Compare-and-swap: `ref` moves from `old` to `new` or not at all."""
     r = run(repo, "update-ref", ref, new, old)

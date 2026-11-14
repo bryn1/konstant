@@ -40,6 +40,7 @@ def workspace(tmp_path, toml: str) -> Workspace:
 
 def doctor(w, fakebin, home):
     env = w.env(PATH=f"{fakebin}:/usr/bin:/bin", HOME=str(home))
+    w.run("agents", "sync", env=env)       # pins the CLIs on this PATH, as install.sh does (K-01)
     return w.run("--json", "doctor", env=env)
 
 
@@ -107,6 +108,7 @@ def test_dsh_layer_check_red_and_green(tmp_path, fakebin, home, foreign):
     w = workspace(tmp_path, '[harness]\nname = "dsh"\n')
     stub_dsh.install(fakebin)
     env = w.env(PATH=f"{fakebin}:/usr/bin:/bin", HOME=str(home))
+    w.ok("agents", "sync", env=env)        # pins the stub dsh (K-01)
     if foreign:
         op = tmp_path / "operator-home"
         (op / "profiles" / "headless").mkdir(parents=True)

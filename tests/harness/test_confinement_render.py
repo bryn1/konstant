@@ -179,7 +179,8 @@ def test_jail_keeps_every_machinery_path_read_only_and_masks_the_core(ws, home, 
     assert effective(argv, str(ws / "var/secrets/owner.token")) == "masked"
     assert effective(argv, str(ws / "var/secrets/worker.token")) == "ro"
     assert effective(argv, str(ws / "var/holdout/2/H1.scenario")) == "masked"
-    assert effective(argv, str(home / ".ssh" / "id")) == ("rw" if conf.open else "masked")
+    # a FACTORY phase never gets ~/.ssh, open or not (REVIEW L5-R2 K-10; was "rw" when open)
+    assert effective(argv, str(home / ".ssh" / "id")) == "masked"
     assert effective(argv, str(home.parent / "outside")) == ("rw" if conf.open else "ro")
 
 

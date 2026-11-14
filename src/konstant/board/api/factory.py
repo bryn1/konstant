@@ -19,6 +19,8 @@ POST /api/factory/jobs/{ref}/exhausted  (factory) a job that used its max_attemp
 POST /api/factory/goals/{ref}/done  (factory) every job of the goal settled -> goal done
 GET/POST /api/factory/halt          the factory halt (notifier failure, internal error): halt by
                                     the factory or the owner, resume by the owner only
+POST /api/factory/switch            (owner) `factory stop` / `factory resume` ask here before they
+                                    touch the kill switch or the spool (REVIEW L5-R2 K-12)
 """
 from __future__ import annotations
 
@@ -209,6 +211,22 @@ def goal_done(ref: str, request: Request, actor: Actor = Depends(writer)):
         conn.execute("UPDATE goals SET status='done', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ',"
                      "'now') WHERE id=?", (g["id"],))
         return {"goal": g["slug"], "status": "done"}
+
+
+class SwitchIn(BaseModel):
+    action: str
+
+
+@router.post("/api/factory/switch")
+def switch(body: SwitchIn, request: Request, actor: Actor = Depends(writer)):
+    """The owner's kill switch: the CLI sets or clears var/factory/STOP (and redelivers the
+    spool) only after this answers; a viewer, worker or orchestrator token is refused."""
+    if body.action not in ("stop", "resume"):
+        raise HTTPException(422, "action is stop or resume")
+    if actor.role != "owner":
+        raise HTTPException(403, f"only the owner {'stops' if body.action == 'stop' else 'resumes'}"
+                                 f" the factory (this token is {actor.label}, role {actor.role})")
+    return {"action": body.action, "by": actor.label}
 
 
 @router.get("/api/factory/halt")

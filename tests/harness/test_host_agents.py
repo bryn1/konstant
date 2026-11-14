@@ -31,6 +31,7 @@ def make(tmp_path, home, conf: str = ""):
     fakebin = tmp_path / "fakebin"
     fakebin.mkdir()
     stub_dsh.install(fakebin)
+    w.ok("agents", "sync", env=w.env(PATH=f"{fakebin}:/usr/bin:/bin"))   # pins the stub (K-01)
     hostbin = tmp_path / "hostbin"              # the operator's own launcher, later on PATH
     hostbin.mkdir()
     marker = tmp_path / "HOST-LAUNCHER-RAN"

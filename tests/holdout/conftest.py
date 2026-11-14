@@ -58,6 +58,12 @@ class HWS(Workspace):
         super().__init__(home)
         self.src, self.bindir = src, bindir
 
+    def env(self, **extra) -> dict:
+        """The stub dsh is on PATH for every command of this workspace, `agents sync` included,
+        so sync pins it as install.sh pins the real one (konstant/pins.py, REVIEW L5-R2 K-01)."""
+        extra.setdefault("PATH", f"{self.bindir}:{os.environ['PATH']}")
+        return super().env(**extra)
+
     def henv(self, **extra) -> dict:
         return self.env(PATH=f"{self.bindir}:{os.environ['PATH']}", STUB_DSH_THEN="fake",
                         FAKE_HARNESS_MODULE="greeter", **extra)

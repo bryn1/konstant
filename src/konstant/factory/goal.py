@@ -2,11 +2,16 @@
 
 A goal file is TOML with four tables: `[goal]` (id, project, text), `[limits]` (only
 `max_attempts` is required, owner decision Q5; every other limit is optional and 0 / absent means
-not limited), `[ship]` (target, branch, post_probes and the target's own keys; consumed by the
-ship wave) and `[holdout]` (author agent|owner, min_per_job). What a file does not name comes from
-the workspace's `[factory] defaults` (and `[holdout] min_per_job`). Validation is deterministic and
+not limited), `[ship]` (only `post_probes`: more post-ship checks, which can only stop a ship) and
+`[holdout]` (author agent|owner, min_per_job: at least the workspace's). WHERE and HOW a job ships
+(the target, branch, ship and rollback commands, apply dir, repository, remote) is the
+workspace's alone: konstant.toml `[ship]` and `[factory] defaults`. A goal is written by the
+orchestrator model from untrusted input, so a goal naming any of those keys is refused, from a
+file and from the chat alike (REVIEW L5-R2 K-02). What a file does not name comes from the
+workspace's `[factory] defaults` (and `[holdout] min_per_job`). Validation is deterministic and
 fails closed: an unknown table or key, a wrong type or an out-of-range value refuses the whole
-file with one `goal: ...` reason per problem.
+file with one `goal: ...` reason per problem. `settings()` lists every value a goal sets beyond
+the defaults, verbatim: the chat proposal and the FILED line show them all.
 
 The board validates a goal with `parse()` when it is filed (`POST /api/goals`), copies the bytes
 it was given into var/factory/goals/<id>.toml (machinery: no phase writes it) and records
@@ -14,6 +19,7 @@ sha256(bytes) as the goal's immutable `spec_sha256`. The factory reads only that
 """
 from __future__ import annotations
 
+import json
 import re
 
 try:  # Python >= 3.11
@@ -31,8 +37,12 @@ DEFAULTS = {"max_attempts": 3, "wall_clock": "0", "max_task_runs": 0, "max_jobs"
 LIMIT_KEYS = ("max_attempts", "wall_clock", *INT_LIMITS, "max_cost_usd")
 SHIP_KEYS = ("target", "branch", "post_probes", "github_repo", "apply_dir", "ship_cmd",
              "rollback_cmd")
-TABLES = {"goal": ("id", "project", "text"), "limits": LIMIT_KEYS, "ship": SHIP_KEYS,
-          "holdout": ("author", "min_per_job")}
+# the only [ship] key a goal may set: more post-ship probes (allowlisted PROBE shapes) can only stop
+# a ship, never send it somewhere else; every other key is the workspace's (REVIEW L5-R2 K-02)
+GOAL_SHIP_KEYS = ("post_probes",)
+WORKSPACE_ONLY = tuple(k for k in SHIP_KEYS if k not in GOAL_SHIP_KEYS) + ("remote", "gh")
+TABLES = {"goal": ("id", "project", "text"), "limits": LIMIT_KEYS,
+          "ship": SHIP_KEYS + ("remote", "gh", "denylist"), "holdout": ("author", "min_per_job")}
 _WALL = re.compile(r"(\d+)([smhd]?)")
 MAX_TEXT = 8000
 
@@ -112,6 +122,11 @@ def parse(text: str, defaults: dict | None = None, min_per_job: int = 2) -> dict
             reasons += [f"goal: unknown key {table}.{k}" for k in value if k not in TABLES[table]]
     if reasons:
         raise GoalError(reasons)
+    for k in raw.get("ship", {}):
+        if k not in GOAL_SHIP_KEYS:
+            reasons.append(f"goal: ship.{k} is the workspace's setting (konstant.toml [ship] / "
+                           "[factory] defaults), never a goal's: a goal cannot choose where or how "
+                           "its work ships (it may add ship.post_probes)")
     g = raw.get("goal", {})
     gid, project, gtext = g.get("id"), g.get("project"), g.get("text")
     if not isinstance(gid, str) or not SLUG.fullmatch(gid):
@@ -125,24 +140,21 @@ def parse(text: str, defaults: dict | None = None, min_per_job: int = 2) -> dict
     limits = {k: d[k] for k in LIMIT_KEYS}
     limits.update(raw.get("limits", {}))
     reasons += check_limits(limits)
-    ship = {"target": d["ship_target"], "branch": d["ship_branch"], "post_probes": []}
-    ship.update(raw.get("ship", {}))
-    if ship["target"] not in TARGETS:
-        reasons.append(f"goal: ship.target must be one of {', '.join(TARGETS)}")
-    for k in SHIP_KEYS:
-        if k == "post_probes":
-            v = ship[k]
-            if not isinstance(v, list) or not all(isinstance(p, str) and
-                                                  p.lstrip().startswith("PROBE:") for p in v):
-                reasons.append("goal: ship.post_probes must be a list of `PROBE: ...` lines")
-        elif k in ship and not isinstance(ship[k], str):
-            reasons.append(f"goal: ship.{k} must be a string")
+    ship = {"target": d["ship_target"], "branch": d["ship_branch"],
+            "post_probes": raw.get("ship", {}).get("post_probes", [])}
+    v = ship["post_probes"]
+    if not isinstance(v, list) or not all(isinstance(p, str) and
+                                          p.lstrip().startswith("PROBE:") for p in v):
+        reasons.append("goal: ship.post_probes must be a list of `PROBE: ...` lines")
     hold = {"author": d["holdout_author"], "min_per_job": min_per_job}
     hold.update(raw.get("holdout", {}))
     if hold["author"] not in AUTHORS:
         reasons.append(f"goal: holdout.author must be one of {', '.join(AUTHORS)}")
     if not _int(hold["min_per_job"]) or hold["min_per_job"] < 1:
         reasons.append("goal: holdout.min_per_job must be an integer >= 1")
+    elif hold["min_per_job"] < min_per_job:
+        reasons.append(f"goal: holdout.min_per_job may raise the workspace's {min_per_job}, "
+                       "never lower it")
     if reasons:
         raise GoalError(reasons)
     return {"goal": {"id": gid, "project": project.strip(), "text": gtext.strip()},
@@ -159,11 +171,32 @@ def job_budget(spec: dict) -> dict:
     return {"max_attempts": lim["max_attempts"], "goal_limits": goal_wide}
 
 
-def summary(spec: dict) -> str:
-    """One line: project, goal text (shortened), the limits that are set."""
-    lim = spec["limits"]
-    set_ = [f"{k} {lim[k]}" for k in LIMIT_KEYS if k == "max_attempts" or lim[k] not in
-            (0, "0", 0.0)]
-    text = " ".join(spec["goal"]["text"].split())
-    text = text if len(text) <= 120 else text[:117] + "..."
-    return f"project {spec['goal']['project']}: \"{text}\" ({', '.join(set_)})"
+def settings(spec: dict, defaults: dict | None = None, min_per_job: int = 2) -> list:
+    """`table.key = value` (TOML values, verbatim) for every setting of the goal beyond the
+    workspace defaults: what the owner's yes covers, shown in full (REVIEW L5-R2 K-02)."""
+    d = effective_defaults(defaults)
+    out = []
+    for k in LIMIT_KEYS:
+        v = spec["limits"].get(k)
+        if k == "max_attempts" or v != d[k]:
+            out.append(f"limits.{k} = {json.dumps(v)}")
+    if spec["ship"].get("post_probes"):
+        out.append(f"ship.post_probes = {json.dumps(spec['ship']['post_probes'])}")
+    h = spec["holdout"]
+    if h["author"] != d["holdout_author"]:
+        out.append(f"holdout.author = {json.dumps(h['author'])}")
+    if h["min_per_job"] != min_per_job:
+        out.append(f"holdout.min_per_job = {h['min_per_job']}")
+    return out
+
+
+def summary(spec: dict, defaults: dict | None = None, min_per_job: int = 2,
+            ships_to: str = "") -> str:
+    """What the owner confirms, in full: the project, the goal text VERBATIM (JSON-quoted, so a
+    newline or a quote in it cannot fake another line), every setting beyond the defaults and,
+    when given, where the workspace ships it (REVIEW L5-R2 K-02: nothing the yes covers is
+    hidden)."""
+    text = json.dumps(spec["goal"]["text"], ensure_ascii=False)
+    out = f"project {spec['goal']['project']}: {text}; settings: " + \
+        "; ".join(settings(spec, defaults, min_per_job))
+    return out + (f"; ships to {ships_to} (konstant.toml, not the goal)" if ships_to else "")

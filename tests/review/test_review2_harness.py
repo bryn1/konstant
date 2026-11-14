@@ -47,6 +47,7 @@ def dws(tmp_path, home):
     w.bindir = tmp_path / "fakebin"
     w.bindir.mkdir()
     stub_dsh.install(w.bindir)
+    w.ok("agents", "sync", env=w.env(PATH=f"{w.bindir}:{os.environ['PATH']}"))   # pins it (K-01)
     w.log = w.home / "var" / "runs" / "r1" / "out" / "stub.log"   # writable inside the jail
     w.log.parent.mkdir(parents=True)
     return w

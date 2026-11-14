@@ -121,6 +121,16 @@ def own_how(name: str, opt: str, c) -> tuple:
     return rows[opt]
 
 
+def creds_how(c, jailed: bool) -> tuple:
+    """factory_host_credentials for one phase confinement (REVIEW L5-R2 K-10)."""
+    if not c.withhold:
+        return ("enforced", "the push credentials follow `credentials` and `ssh_agent`")
+    return ("enforced" if jailed else "partial",
+            "push credentials withheld: the token variables dropped, ~/.ssh, ~/.config/gh and "
+            "the git credential stores masked, the ssh agent withheld, git's credential helpers "
+            "reset" + ("" if jailed else " (without the jail only the variables are dropped)"))
+
+
 def core_how(name: str, jailed: bool, c) -> tuple:
     if not c.integrity:
         return ("no", "OFF ([confinement] integrity = \"off\"): tokens, the holdout store and "
@@ -161,8 +171,9 @@ def matrix(cfg) -> dict:
         for mode, factory in (("level4", False), ("factory", True)):
             cc = c.for_phase("worker", factory)
             jailed = ad.confines(on, factory, cc)
-            rows = {o: dict(zip(("enforced", "how"), jail_how(o, cc, name) if jailed
-                                else own_how(name, o, cc)))
+            rows = {o: dict(zip(("enforced", "how"), creds_how(cc, jailed)
+                                if o == "factory_host_credentials" else jail_how(o, cc, name)
+                                if jailed else own_how(name, o, cc)))
                     for o in conf_mod.OPTIONS if o not in BOARD_HELD}
             rows["integrity core"] = dict(zip(("enforced", "how"), core_how(name, jailed, cc)))
             per[mode] = {"jailed": jailed, "options": rows}
@@ -225,6 +236,27 @@ def rows(cfg) -> list:
             out.append(("WARN", "ssh to this host", f"{hit} is in your own authorized_keys: a "
                         "phase with your ssh credentials can log in to THIS host and leave "
                         "konstant's jail (the integrity core then does not hold)"))
+    from konstant import jail as jail_mod
+    from konstant import machinery
+    if machinery.factory_state(cfg.home):
+        if not (cfg.data["gate"]["jail"] and jail_mod.available()):
+            out.append(("FAIL", "level-4 phases", "this workspace holds factory state (sealed "
+                        "holdouts or var/factory/), and konstant's jail is off or unavailable: "
+                        "no phase starts, level 4 included (a phase outside the jail could read "
+                        "the sealed store or forge the factory's records)"))
+        else:
+            out.append(("PASS", "level-4 phases", "this workspace holds factory state: every "
+                        "phase, level 4 and every harness included, runs in konstant's jail"))
+    if c.factory_host_credentials:
+        out.append(("FAIL", "factory credentials", "[confinement] factory_host_credentials = "
+                    "true: factory phases keep your push credentials (GH_TOKEN, ~/.config/gh, "
+                    "~/.ssh, the ssh agent), so a producer can push or merge around verify and "
+                    "the holdouts: verified/shipped are no longer guaranteed (docs/CONCEPTS.md "
+                    "\"Confinement profiles\")"))
+    else:
+        out.append(("PASS", "factory credentials", "factory phases get no push credentials "
+                    "(GH_TOKEN/GITHUB_TOKEN, ~/.config/gh, git credential stores, ~/.ssh, the ssh "
+                    "agent) in any profile; only the ship step pushes"))
     if c.host_agents:
         out.append(("WARN", "host agents", "the `konstant dsh` session may run the host's own "
                     "agent launchers (your personal agent setup) by name"))

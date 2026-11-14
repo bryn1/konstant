@@ -407,9 +407,17 @@ owner factory resume-shipping`; nothing is retried or forced.
 with an environment it builds itself (your `HOME` for `~/.config/gh`, `GH_TOKEN`/`GITHUB_TOKEN`
 when set, the ssh agent), in the factory process, never in a phase. Under the closed profile no
 phase can read them (`~/.config/gh`, `~/.git-credentials` and the token variables are masked or
-dropped). Under the open profile a phase holds your environment and host by your choice; the
-ship's push does not use anything a phase set, but an open phase could push with your
-credentials itself (that is the open profile's stated risk, not something the ship step adds).
+dropped). Under the open profile a LEVEL-4 phase holds your environment and host by your
+choice. A FACTORY phase never gets the push credentials, in any profile: `GH_TOKEN`,
+`GITHUB_TOKEN` and the other token variables are dropped, `~/.config/gh`, `~/.git-credentials`,
+`~/.config/git/credentials`, `~/.netrc` and `~/.ssh` are masked, the ssh agent is withheld and
+git's credential helpers are reset. With them a producer could push or merge to your remote
+itself and skip verify, the holdouts and the secret scan. If you want them anyway, set
+`[confinement] factory_host_credentials = true`; `doctor` then reports a FAIL, because `verified`
+and `shipped` are no longer guaranteed. What a ship pushes is konstant's own ship commit (the
+verified tree on top of the target's tip), never the job's history, so a secret a producer
+committed and removed again never leaves the host. A credential helper that reaches a desktop
+keyring over D-Bus is not masked: keep push credentials in the listed places.
 
 ## Factory
 
@@ -624,6 +632,7 @@ open level-4 phase gets only its harness's own rules, and `doctor` says so).
 | `ssh_agent` | false | true | use your ssh agent (SSH_AUTH_SOCK and its socket) | ssh to every server your agent's keys open, without seeing a key; an ssh login into THIS host leaves konstant's jail |
 | `docker_socket` | false | true | use the docker daemon (its socket, DOCKER_HOST); never in factory mode | the docker socket is root on this host: a phase that uses it can read and change anything, the integrity core included (so factory mode never passes it) |
 | `memory_share` | false | true | the memory vault is shared with your own tools: notes you add or edit in `memory/` yourself (an editor, Obsidian) are recalled by phases as well as the notes konstant wrote | anything that can write `memory/` outside konstant steers every later phase, unattributed; private notes you keep there reach the model |
+| `factory_host_credentials` | false | false | factory phases keep the push credentials the profile passes (GH_TOKEN, GITHUB_TOKEN, ~/.config/gh, git credential stores, ~/.ssh, the ssh agent); without it a factory phase never gets them, in any profile | a producer can push or merge to the real remote itself, around verify, the holdouts and the secret scan: `verified` and `shipped` are no longer guaranteed (doctor FAIL) |
 | `host_agents` | false | false | the orchestrator session started by `konstant dsh` may run the host's own agent launchers (dsh, claude, codex, gemini) by name | a launcher that loads your personal agent setup (its profiles, servers, passwords) runs outside the workspace's composition and every gate |
 
 `bin/konstant confinement show` prints the effective value and source of every option and, per

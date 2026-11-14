@@ -7,8 +7,15 @@ is ok, and the decision rules (5.4) may be ok because the owner approved that ex
   result of the sealed set: at least min_per_job rows, every one passed, the commitment digest of
   the sealed set, no LEAK, and every row ran on the SAME commit the evidence names and the ship
   is about to ship. A level-4 job (no holdouts) fails here: never ship without a matched holdout.
-- `decision_paths`: a diff that touches a project instruction surface, an import hook, a
-  `conftest.py` outside a test dir or a CI workflow is an owner decision, whatever the type.
+- `decision_paths` / `decision_reasons`: a diff that touches any path of DECISION_LIST (agent
+  instruction surfaces, import hooks, code-loading config, `conftest.py` anywhere, editor tasks,
+  submodules, all of `.github/`, the scripts of `package.json`, `[tool.pytest]` of
+  `pyproject.toml`) is an owner decision, whatever the type. DECISION_LIST is the ONE list: the
+  docs (docs/LEVEL5.md 5.4) name every entry and tests/review/test_level5_r2_ship.py checks they
+  agree (REVIEW L5-R2 K-15).
+- `history_rule`: the verified commit must descend from the target's tip `pre` (a fast-forward);
+  an orphan or unrelated history is an owner decision (REVIEW L5-R2 K-04). What is pushed is never
+  that history anyway: the ship moves the target to konstant's own squash commit (shiprepo.squash).
 - `secret_findings`: the release scanner's patterns (release/patterns.toml plus a denylist when one
   is configured) over the ADDED lines of every changed text file and over every changed path: a
   finding is an owner decision and nothing is pushed. Findings name the path and the pattern,
@@ -20,11 +27,41 @@ import difflib
 import json
 from pathlib import Path, PurePosixPath
 
-INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")
-INSTRUCTION_DIRS = (".claude", ".agents", ".dsh", ".gemini")
-IMPORT_HOOKS = ("sitecustomize.py", "usercustomize.py")
-TEST_DIRS = ("tests", "test", "testing")
-CI_PREFIXES = (".github/workflows/", ".github/actions/")
+try:  # Python >= 3.11
+    import tomllib as _toml
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+    import tomli as _toml
+
+# DECISION_LIST (docs/LEVEL5.md 5.4): (kind, name, what). Names compare case-insensitively.
+#   name    a file of that name in any directory
+#   dir     any path below a directory of that name, at any depth
+#   suffix  a file name ending so
+#   content the file's code-loading part changed (decision_content reads old and new)
+DECISION_LIST = (
+    ("name", "AGENTS.md", "instruction surface"), ("name", "CLAUDE.md", "instruction surface"),
+    ("name", "CLAUDE.local.md", "instruction surface"), ("name", "GEMINI.md", "instruction surface"),
+    ("dir", ".claude", "instruction surface"), ("dir", ".agents", "instruction surface"),
+    ("dir", ".dsh", "instruction surface"), ("dir", ".gemini", "instruction surface"),
+    ("dir", ".codex", "instruction surface"), ("dir", ".cursor", "instruction surface"),
+    ("dir", ".github", "GitHub configuration (workflows, actions, bots, instructions)"),
+    ("name", "sitecustomize.py", "import hook"), ("name", "usercustomize.py", "import hook"),
+    ("suffix", ".pth", "import hook"),
+    ("name", "conftest.py", "test-runner hook"), ("name", "pytest.ini", "test-runner config"),
+    ("name", "setup.cfg", "test-runner config"), ("name", "tox.ini", "test-runner config"),
+    ("name", "noxfile.py", "test-runner config"),
+    ("name", ".envrc", "shell environment hook"),
+    ("name", ".pre-commit-config.yaml", "git hook config"),
+    ("name", ".gitmodules", "submodule"), ("name", ".gitattributes", "git filter config"),
+    ("name", "Makefile", "build commands"), ("name", "GNUmakefile", "build commands"),
+    ("name", "justfile", "build commands"),
+    ("dir", ".vscode", "editor tasks"), ("dir", ".idea", "editor tasks"),
+    ("dir", ".devcontainer", "container config"),
+    ("content", "package.json", "package scripts or hooks"),
+    ("content", "pyproject.toml", "[tool.pytest] of pyproject.toml"),
+)
+# package.json keys that make a tool run code (npm scripts and the git-hook managers)
+PACKAGE_KEYS = ("scripts", "husky", "simple-git-hooks", "lint-staged", "pre-commit",
+                "gitHooks", "config")
 
 
 def ok(rule: str, reason: str = "ok") -> tuple:
@@ -93,21 +130,87 @@ def regression_only(sealed: list) -> bool:
     return bool(sealed) and all(r.get("kind") == "regression" for r in sealed)
 
 
+def _match(kind: str, name: str, p: PurePosixPath) -> bool:
+    low = name.lower()
+    if kind in ("name", "content"):
+        return p.name.lower() == low
+    if kind == "dir":
+        return any(x.lower() == low for x in p.parts[:-1])
+    return p.name.lower().endswith(low)
+
+
 def decision_paths(changed: list) -> list:
-    """One reason per changed path that only the owner may ship (5.4)."""
+    """One reason per changed path that only the owner may ship (5.4), by its path alone (the
+    `content` rows need the file: decision_reasons)."""
     out = []
     for path in changed:
         p = PurePosixPath(path)
-        parts = p.parts
-        if p.name in INSTRUCTION_FILES or any(x in INSTRUCTION_DIRS for x in parts[:-1]):
-            out.append(f"instruction surface changed ({path})")
-        elif p.name in IMPORT_HOOKS or p.suffix == ".pth":
-            out.append(f"import hook changed ({path})")
-        elif p.name == "conftest.py" and not any(x in TEST_DIRS for x in parts[:-1]):
-            out.append(f"conftest.py outside a test dir changed ({path})")
-        elif any(str(p).startswith(c) for c in CI_PREFIXES):
-            out.append(f"CI workflow changed ({path})")
+        for kind, name, what in DECISION_LIST:
+            if kind != "content" and _match(kind, name, p):
+                out.append(f"{what} changed ({path})")
+                break
     return out
+
+
+def _pytest_tables(data: bytes | None) -> str:
+    if not data:
+        return ""
+    try:
+        raw = _toml.loads(data.decode("utf-8", "replace"))
+    except (ValueError, UnicodeError):
+        return "<unparsable>"
+    return json.dumps(((raw.get("tool") or {}).get("pytest")), sort_keys=True)
+
+
+def _package_keys(data: bytes | None) -> str:
+    if not data:
+        return ""
+    try:
+        raw = json.loads(data.decode("utf-8", "replace"))
+    except ValueError:
+        return "<unparsable>"
+    if not isinstance(raw, dict):
+        return "<not an object>"
+    return json.dumps({k: raw.get(k) for k in PACKAGE_KEYS}, sort_keys=True)
+
+
+def decision_content(path: str, old: bytes | None, new: bytes | None) -> str | None:
+    """The reason a `content` row of DECISION_LIST stops this change (None: it does not)."""
+    p = PurePosixPath(path)
+    for kind, name, what in DECISION_LIST:
+        if kind == "content" and _match(kind, name, p):
+            f = _package_keys if name == "package.json" else _pytest_tables
+            if f(old) != f(new):
+                return f"{what} changed ({path})"
+    return None
+
+
+def decision_reasons(repo, pre: str, commit: str) -> list:
+    """Every DECISION_LIST reason of the change pre..commit in ship repository `repo` (both
+    sides of the guard call this)."""
+    from konstant.factory import shiprepo
+    rows = shiprepo.changes(repo, pre, commit)
+    reasons = decision_paths([r[1] for r in rows])
+    zero = {"0" * 40, "0" * 64}
+    content = [r for r in rows if any(k == "content" and _match(k, n, PurePosixPath(r[1]))
+                                      for k, n, _w in DECISION_LIST)]
+    oids = [o for _s, _p, oo, no, _m in content for o in (oo, no) if o not in zero]
+    blobs = shiprepo.read_batch(repo, list(dict.fromkeys(oids)))
+    for _st, path, oo, no, _m in content:
+        why = decision_content(path, blobs[oo][1] if oo not in zero else None,
+                               blobs[no][1] if no not in zero else None)
+        if why:
+            reasons.append(why)
+    return reasons
+
+
+def history_rule(repo, pre: str, commit: str) -> list:
+    """[reason] when `commit` does not descend from `pre` (K-04): an owner decision."""
+    from konstant.factory import shiprepo
+    if shiprepo.is_ancestor(repo, pre, commit):
+        return []
+    return [f"the verified commit {commit[:12]} does not descend from the target's tip "
+            f"{pre[:12]} (unrelated or rewritten history)"]
 
 
 def patterns(cfg) -> list:
@@ -155,20 +258,21 @@ def secret_findings(repo, pre: str, commit: str, pats: list) -> list:
 
 
 def conf(cfg, spec: dict | None) -> dict:
-    """Where and how a job ships: the goal's [ship] (defaults applied when it was filed), else the
-    workspace's [factory] defaults; konstant.toml [ship] fills what the goal does not name. The push
-    URL (`remote`), the gh binary and the denylist are the operator's alone: a goal names none."""
+    """Where and how a job ships: konstant.toml [ship] and [factory] defaults ONLY. A goal adds
+    post_probes (more checks, which can only stop a ship) and nothing else: target, branch,
+    commands, apply dir, repository, remote and gh are the operator's (REVIEW L5-R2 K-02). A goal
+    filed before that rule carries [ship] keys in its spec: they are ignored here, on both sides
+    of the guard."""
     from konstant.factory.goal import effective_defaults
     d = effective_defaults(cfg.data["factory"]["defaults"])
     s = cfg.data["ship"]
     g = (spec or {}).get("ship") or {}
-    out = {"target": g.get("target") or d["ship_target"],
-           "branch": g.get("branch") or d["ship_branch"],
+    out = {"target": d["ship_target"], "branch": d["ship_branch"],
            "post_probes": list(s["post_probes"]) + [p for p in g.get("post_probes") or []
                                                     if p not in s["post_probes"]],
            "remote": s["remote"], "gh": s["gh"], "regression_only": s["regression_only"]}
     for k in ("github_repo", "apply_dir", "ship_cmd", "rollback_cmd"):
-        out[k] = g.get(k) or s[k]
+        out[k] = s[k]
     if out["target"] == "github" and not out["remote"] and out["github_repo"]:
         out["remote"] = f"https://github.com/{out['github_repo']}.git"
     return out

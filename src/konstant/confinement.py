@@ -120,6 +120,14 @@ OPTIONS = {
                "notes konstant wrote",
         risks="anything that can write memory/ outside konstant steers every later phase, "
               "unattributed; private notes you keep there reach the model"),
+    "factory_host_credentials": dict(
+        kind="flag", closed=False, open=False,
+        allows="factory phases keep the push credentials the profile passes (GH_TOKEN, "
+               "GITHUB_TOKEN, ~/.config/gh, git credential stores, ~/.ssh, the ssh agent); "
+               "without it a factory phase never gets them, in any profile",
+        risks="a producer can push or merge to the real remote itself, around verify, the "
+              "holdouts and the secret scan: `verified` and `shipped` are no longer guaranteed "
+              "(doctor FAIL)"),
     "host_agents": dict(
         kind="flag", closed=False, open=False,
         allows="the orchestrator session started by `konstant dsh` may run the host's own agent "
@@ -151,7 +159,11 @@ class Confinement:
     docker_socket: bool = False
     host_agents: bool = False
     memory_share: bool = False
+    factory_host_credentials: bool = False
     set_by: tuple = ()              # the options konstant.toml sets (the rest: the profile)
+    # credential paths and $VARS a phase never gets whatever `credentials` says (a factory phase:
+    # machinery.SHIP_CREDENTIALS, REVIEW L5-R2 K-10); set by for_phase only
+    withhold: tuple = ()
 
     @property
     def open(self) -> bool:
@@ -179,18 +191,31 @@ class Confinement:
         if identity == "researcher":
             return RESEARCH
         if factory:
-            return replace(self, docker_socket=False, integrity=True)
+            if self.factory_host_credentials:
+                return replace(self, docker_socket=False, integrity=True)
+            # no push credentials in a factory phase, in ANY profile (REVIEW L5-R2 K-10): with
+            # them a producer could push or merge around verify, holdouts and the secret scan
+            return replace(self, docker_socket=False, integrity=True, ssh_agent=False,
+                           withhold=machinery.SHIP_CREDENTIALS + tuple(
+                               "$" + v for v in machinery.SHIP_CREDENTIAL_ENV))
         return self
 
+    def _withheld_paths(self) -> list:
+        return [os.path.realpath(os.path.expanduser(w)) for w in self.withhold
+                if not w.startswith("$")]
+
     def cred_paths(self, env=None) -> list:
-        """The credential locations passed through, expanded (`*`: every one konstant lists)."""
+        """The credential locations passed through, expanded (`*`: every one konstant lists),
+        minus what this phase is withheld (a factory phase: the push credentials)."""
         out = []
         for c in self.credentials:
             if c == ALL:
                 out += machinery.credentials(env=env)
             elif not c.startswith("$"):
                 out.append(c)
-        return list(dict.fromkeys(os.path.realpath(os.path.expanduser(p)) for p in out))
+        held = self._withheld_paths()
+        return [p for p in dict.fromkeys(os.path.realpath(os.path.expanduser(p)) for p in out)
+                if not any(_inside(p, w) or _inside(w, p) for w in held)]
 
     def cred_env(self) -> set:
         names = set()
@@ -199,13 +224,15 @@ class Confinement:
                 names |= set(machinery.CREDENTIAL_ENV)
             elif c.startswith("$"):
                 names.add(c[1:])
-        return names
+        return names - {w[1:] for w in self.withhold if w.startswith("$")}
 
     def masked_credentials(self, harness: str | None = None, env=None) -> list:
-        """machinery.credentials() minus what `credentials` passes through (expanded)."""
+        """machinery.credentials() minus what `credentials` passes through (expanded), plus the
+        withheld push credentials (a factory phase)."""
         keep = set(self.cred_paths(env))
         out = [os.path.expanduser(c) for c in machinery.credentials(harness, env=env)]
-        return [c for c in out if os.path.realpath(c) not in keep]
+        out += [os.path.expanduser(w) for w in self.withhold if not w.startswith("$")]
+        return list(dict.fromkeys(c for c in out if os.path.realpath(c) not in keep))
 
     def allowlists_env(self) -> bool:
         """Whether a phase's host environment is an ALLOWLIST, not a denylist (REVIEW L5-R1 H-05):
@@ -219,12 +246,25 @@ class Confinement:
         documented names, the LC_*/KONSTANT_*/harness prefixes, the adapter's own model keys and
         the operator's [harness] env_passthrough names. Open: the host as-is minus the credential
         denylist (env_drop)."""
+        held = {w[1:] for w in self.withhold if w.startswith("$")}
         if not self.allowlists_env():
             drop = set(self.env_drop())
             return {k: v for k, v in environ.items() if k not in drop}
         keep = set(self.cred_env()) | set(adapter_keys or ())
         return {k: v for k, v in environ.items()
-                if _allowed_env_name(k, keep, passthrough)}
+                if k not in held and _allowed_env_name(k, keep, passthrough)}
+
+    def withheld_env(self, env: dict) -> dict:
+        """`env` (a phase's final environment) without the withheld variables, and with git's
+        credential helpers reset (credential.helper = "": a helper in ~/.gitconfig would reach a
+        store konstant does not list) when push credentials are withheld (K-10)."""
+        held = {w[1:] for w in self.withhold if w.startswith("$")}
+        if not held:
+            return env
+        out = {k: v for k, v in env.items() if k not in held}
+        out.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="credential.helper",
+                   GIT_CONFIG_VALUE_0="", GIT_TERMINAL_PROMPT="0")
+        return out
 
     def env_drop(self) -> list:
         """Environment variables a phase does not get: the credential variables konstant lists
@@ -232,6 +272,7 @@ class Confinement:
         ssh_agent, DOCKER_HOST without docker_socket."""
         keep = self.cred_env()
         out = [v for v in machinery.CREDENTIAL_ENV if v not in keep]
+        out += [w[1:] for w in self.withhold if w.startswith("$")]
         if not self.ssh_agent:
             out.append("SSH_AUTH_SOCK")
         if not self.docker_socket:

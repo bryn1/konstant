@@ -37,14 +37,17 @@ def board_post(s, route: str, body: dict, label: str = "factory") -> dict:
                                   "x/.dsh/a.yml", ".gemini/s.json", ".agents/skills/a.md",
                                   ".github/workflows/ci.yml", "sitecustomize.py",
                                   "lib/usercustomize.py", "evil.pth", "conftest.py",
-                                  "src/conftest.py", "GEMINI.md"])
+                                  "src/conftest.py", "GEMINI.md",
+                                  # K-15 (L5-R2): conftest anywhere, case-insensitive names, all
+                                  # of .github/ (these four were green before)
+                                  "tests/conftest.py", "test/conftest.py", "docs/agents.md",
+                                  ".github/CODEOWNERS"])
 def test_decision_paths_red(path):
     assert shiprules.decision_paths([path]), path
 
 
-@pytest.mark.parametrize("path", ["greeter.py", "README.md", "tests/conftest.py",
-                                  "test/conftest.py", "docs/agents.md", ".github/CODEOWNERS",
-                                  "src/pathlib_extra.py"])
+@pytest.mark.parametrize("path", ["greeter.py", "README.md", "tests/test_greet.py",
+                                  "docs/guide.md", "src/pathlib_extra.py"])
 def test_decision_paths_green(path):
     assert shiprules.decision_paths([path]) == [], path
 
@@ -248,12 +251,19 @@ def test_ship_and_factory_verbs_are_refused_inside_a_task_run_and_the_chat(bws):
     for env in ({"KONSTANT_IN_TASK": "1"}, {"KONSTANT_CHAT_SESSION": "s1"}):
         r = bws.w.run("ship", "1", "--dry-run", env=bws.w.env(**env))
         assert r.returncode == 1 and "refused" in r.stderr, r.stderr
-        r = bws.w.run("--as", "owner", "factory", "resume-shipping", env=bws.w.env(**env))
-        assert r.returncode == 1 and "refused" in r.stderr
+    r = bws.w.run("--as", "owner", "factory", "resume-shipping",
+                  env=bws.w.env(KONSTANT_IN_TASK="1"))
+    assert r.returncode == 1 and "refused" in r.stderr
+    # in the chat an owner verb is a PROPOSAL the owner's next yes confirms (L5-R2 K-07)
+    r = bws.w.run("--as", "owner", "factory", "resume-shipping",
+                  env=bws.w.env(KONSTANT_CHAT_SESSION="s1"))
+    assert r.returncode == 0 and r.stdout.startswith("PROPOSED owner action"), r.stderr
     assert bws.w.run("ship", "list").returncode == 0                       # green: a read
 
 
-def test_conf_resolution_goal_over_workspace(tmp_path):
+def test_conf_resolution_workspace_only_goal_adds_probes(tmp_path):
+    """REVIEW L5-R2 K-02 (was goal-over-workspace): a goal's [ship] target/branch/repo is ignored
+    (an old spec may still carry them); only its post_probes are added."""
     from konstant import config
     (tmp_path / "konstant.toml").write_text('[ship]\ngithub_repo = "ws-org/ws"\n'
                                             'remote = "/x/remote.git"\n')
@@ -263,7 +273,7 @@ def test_conf_resolution_goal_over_workspace(tmp_path):
     spec = {"ship": {"target": "github", "branch": "trunk", "post_probes": ["PROBE: a => ^b$"],
                      "github_repo": "goal-org/g"}}
     c = shiprules.conf(cfg, spec)
-    assert (c["target"], c["branch"], c["github_repo"]) == ("github", "trunk", "goal-org/g")
+    assert (c["target"], c["branch"], c["github_repo"]) == ("branch", "main", "ws-org/ws")
     assert c["remote"] == "/x/remote.git" and c["post_probes"] == ["PROBE: a => ^b$"]
     (tmp_path / "konstant.toml").write_text('[ship]\ngh = "gh"\n')
     with pytest.raises(config.ConfigError, match="absolute path"):

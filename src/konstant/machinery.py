@@ -79,8 +79,17 @@ CREDENTIALS = ("~/.ssh", "~/.aws", "~/.gnupg", "~/.config/gcloud", "~/.config/gh
 # harness needs it to reach its model)
 CREDENTIAL_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
                   "AZURE_CLIENT_SECRET", "GOOGLE_APPLICATION_CREDENTIALS", "GH_TOKEN",
-                  "GITHUB_TOKEN", "GITLAB_TOKEN", "HF_TOKEN", "NPM_TOKEN", "TWINE_PASSWORD",
+                  "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+                  "GITLAB_TOKEN", "HF_TOKEN", "NPM_TOKEN", "TWINE_PASSWORD",
                   "VAULT_TOKEN", "KUBECONFIG", "DIGITALOCEAN_ACCESS_TOKEN", "CLOUDFLARE_API_TOKEN")
+# what can push or merge to a remote around the factory's verify-holdout-ship path (REVIEW L5-R2
+# K-10): a FACTORY phase never gets these, in any profile, unless the owner sets
+# [confinement] factory_host_credentials = true (doctor FAIL: verified/shipped no longer
+# guaranteed). Paths are masked, variables dropped; the ssh agent is withheld with them.
+SHIP_CREDENTIALS = ("~/.ssh", "~/.config/gh", "~/.git-credentials", "~/.config/git/credentials",
+                    "~/.netrc", "~/.config/hub")
+SHIP_CREDENTIAL_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN",
+                       "GITHUB_ENTERPRISE_TOKEN", "GITLAB_TOKEN", "GIT_ASKPASS", "SSH_ASKPASS")
 # the docker daemon's usual sockets (root-equivalent: [confinement] docker_socket)
 DOCKER_SOCKETS = ("/var/run/docker.sock", "/run/docker.sock")
 # an agent CLI's own home may be relocated by an environment variable: masked as well
@@ -136,6 +145,22 @@ def sealed(ws) -> list:
     """The absolute sealed paths of workspace `ws` (read at call time: tests empty SEALED), plus
     a holdout store configured outside the workspace (external_store)."""
     return [Path(ws) / d for d in SEALED] + external_store(ws)
+
+
+def factory_state(ws) -> bool:
+    """Whether workspace `ws` holds level-5 state a phase must never reach: a sealed holdout store
+    with anything in it, or var/factory/ (goals, events, the chat inboxes, the kill switch, the
+    spool, the ship repositories). While it does, EVERY phase runs in konstant's jail, level-4
+    phases and every harness included, or does not run at all (REVIEW L5-R2 K-06: the integrity
+    core cannot depend on "only factory phases are jailed")."""
+    for d in [Path(ws) / "var" / "factory", Path(ws) / "var" / "holdout", *external_store(ws)]:
+        try:
+            with os.scandir(d) as it:
+                if any(True for _ in it):
+                    return True
+        except OSError:
+            continue
+    return False
 
 
 def files(ws) -> list:

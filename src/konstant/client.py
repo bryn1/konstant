@@ -64,6 +64,12 @@ def identity() -> str:
 def token_for(cfg: Config, role: str) -> str:
     """The token of `role` (a role, or a factory identity's label)."""
     label = role
+    if in_chat() and role in ("owner", "verifier"):
+        raise ClientError(f"refused: --as {role} is not available in the orchestrator chat "
+                          "(KONSTANT_CHAT_SESSION): the chat holds no owner power. An owner "
+                          "action (factory ack/resume/resume-shipping, ship --approve-decision, "
+                          "goal pause/resume/cancel) run here is PROPOSED and done by konstant "
+                          "only when the owner's next message is a yes (REVIEW L5-R2 K-07)")
     if in_chat() and role in CHAT_REFUSED_LABELS:
         raise ClientError(f"refused: --as {role} is not available in the orchestrator chat "
                           "(KONSTANT_CHAT_SESSION): the orchestrator proposes goals; the factory "

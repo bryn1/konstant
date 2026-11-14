@@ -106,9 +106,15 @@ def test_factory_phase_never_starts_unjailed(ws, monkeypatch):
     h = Harness("true {prompt_file}", workspace=ws, factory=True)
     with pytest.raises(HarnessError, match="holdouts need a confined phase"):
         h.run("p", agent="coder", cwd=ws, run_dir=ws / "var/runs/r1", label="x")
+    # ... and in a workspace holding factory state (var/holdout/2 here) no phase starts
+    # unjailed at level 4 either (REVIEW L5-R2 K-06; this twin ran unjailed before L5-F2a)
+    with pytest.raises(HarnessError, match="holds factory state"):
+        Harness("true {prompt_file}", workspace=ws).run("p", agent="coder", cwd=ws,
+                                                        run_dir=ws / "var/runs/r1", label="y")
+    (ws / "var" / "holdout" / "2").rmdir()
     ok = Harness("true {prompt_file}", workspace=ws).run("p", agent="coder", cwd=ws,
                                                          run_dir=ws / "var/runs/r1", label="y")
-    assert ok.rc == 0
+    assert ok.rc == 0                    # green twin: no factory state, level 4 starts
 
 
 def test_relocatable_home_per_adapter():
