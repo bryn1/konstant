@@ -144,11 +144,13 @@ goal_roles = ["owner", "orchestrator"]
 kind = "chat"
 EOF
 cp "$WS/konstant.toml" "$WORK/konstant.base.toml"
-# config GATE SHIP: konstant.toml = the base + [gate] + [ship] lines; the board restarts
+# config GATE SHIP [TAIL]: konstant.toml = the base + [gate] + [ship] lines (+ raw TAIL); the
+# board restarts
 config() {
   { cat "$WORK/konstant.base.toml"
     printf '\n[gate]\nmax_cycles = 1\nmax_resumes = 0\n%s\n' "$1"
-    printf '\n[ship]\n%s\n' "$2"; } > "$WS/konstant.toml"
+    printf '\n[ship]\n%s\n' "$2"
+    printf '\n%s\n' "${3:-}"; } > "$WS/konstant.toml"
   if [ -f "$WS/var/board.pid" ]; then "$K" board stop >/dev/null; fi
   "$K" agents sync >/dev/null || fail "agents sync"     # [notify] chat renders the session patch
   "$K" board start >/dev/null || fail "the board did not start"
@@ -174,7 +176,8 @@ want_rc 0
 base() { git -C "$WS/projects/$1" rev-parse main; }
 
 # github PROJECT: a bare repository standing in for GitHub + the gh stand-in on a pinned path;
-# [ship] remote / gh are operator keys of konstant.toml, so each github leg points them at its repo
+# where and how a job ships is konstant.toml's alone (a goal names none of it: REVIEW L5-R2 K-02),
+# so each github leg points [ship] remote / gh / github_repo and the target at its repo
 github() {
   REMOTE="$WORK/github/$1.git"; GHLOG="$WORK/gh-$1.log"
   mkdir -p "$WORK/github"
@@ -182,10 +185,12 @@ github() {
   GH=$("$VPY" -c 'import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from tests.fixtures import fake_gh; print(fake_gh.install(Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4])))' \
        "$WS" "$WORK/pinned-$1" "$REMOTE" "$GHLOG")
   config "" "remote = \"$REMOTE\"
-gh = \"$GH\""
+gh = \"$GH\"
+github_repo = \"example-org/$1\"" "[factory.defaults]
+ship_target = \"github\""
   echo "github stand-in for $1: a bare repository + gh on a pinned path (config: [ship] remote, gh)"
 }
-GITHUB_GOAL=(--ship 'target = "github"')
+GITHUB_GOAL=()                     # the github target is konstant.toml's (github() sets it)
 
 # --- the orchestrator chat ----------------------------------------------------------------------
 TURN=0
@@ -243,7 +248,7 @@ owner_shut
 leg "P0 chat intake: the owner asks in chat, the orchestrator proposes, the owner's yes files it"
 github greeter
 B_GREETER=$(base greeter)
-chat_goal greeter greeter "${GITHUB_GOAL[@]}" --ship 'github_repo = "example-org/greeter"'
+chat_goal greeter greeter "${GITHUB_GOAL[@]}"
 check p0 goal=greeter request_log="$REQ_LOG" yes_log="$YES_LOG" spec="$WORK/src/greeter.toml" \
   before_yes="$WORK/src/greeter.before-yes.json"
 
@@ -287,7 +292,7 @@ check p3 goal=reader
 # --- P4 + P6 rollback ---------------------------------------------------------------------------
 leg "P4 post-ship failure: rollback through a revert PR, a follow-up job, then max_rollbacks"
 github breaks
-chat_goal breaks breaks "${GITHUB_GOAL[@]}" --ship 'github_repo = "example-org/breaks"' \
+chat_goal breaks breaks "${GITHUB_GOAL[@]}" \
   --limits 'max_rollbacks = 1'
 owner_shut
 run "$K" factory run breaks --once
@@ -321,7 +326,7 @@ leg "P6 github refusals: a secret in the diff and a CI workflow change are owner
 github secret
 B=$(base secret)
 REFS=$(git -C "$REMOTE" for-each-ref --format='%(refname) %(objectname)')
-chat_goal secret secret "${GITHUB_GOAL[@]}" --ship 'github_repo = "example-org/secret"'
+chat_goal secret secret "${GITHUB_GOAL[@]}"
 # a token-shaped string, built at run time (never in the repository, never printed)
 SHAPE="gh""p_$(printf 'Zz9%.0s' $(seq 12))"
 export FAKE_HARNESS_EXTRA_TEXT="TOKEN = '$SHAPE'"
@@ -334,7 +339,7 @@ unset FAKE_HARNESS_EXTRA_TEXT SHAPE
 github workflow
 B=$(base workflow)
 REFS=$(git -C "$REMOTE" for-each-ref --format='%(refname) %(objectname)')
-chat_goal workflow workflow "${GITHUB_GOAL[@]}" --ship 'github_repo = "example-org/workflow"'
+chat_goal workflow workflow "${GITHUB_GOAL[@]}"
 factory workflow FAKE_HARNESS_MODE=ship-extra FAKE_HARNESS_EXTRA=.github/workflows/ci.yml \
   FAKE_HARNESS_EXTRA_TEXT=on:push
 want_rc 4

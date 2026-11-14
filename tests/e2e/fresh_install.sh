@@ -276,10 +276,13 @@ else
   want_rc 0; want_out 'branch main: ship'
   run "$K" ship "$J3"
   want_rc 0; want_out 'state: shipped'
-  [ "$(git -C "$WS/projects/greeter" rev-parse main)" = "$C3" ] || fail "main is not the verified commit"
+  # main is konstant's ship commit: the verified tree on top of the old tip (REVIEW L5-R2 K-03)
+  T3=$(git -C "$WS/var/factory/ship/greeter.git" rev-parse "$C3^{tree}")
+  [ "$(git -C "$WS/projects/greeter" rev-parse 'main^{tree}')" = "$T3" ] || fail "main's tree is not the verified tree"
+  git -C "$WS/projects/greeter" cat-file -e "$C3" 2>/dev/null && fail "the job's own commit reached the target"
   run "$K" ship list
   want_rc 0; want_out 'shipped'
-  echo "projects/greeter main = $C3 (the commit the holdouts ran on)"
+  echo "projects/greeter main^{tree} = $T3 (the tree the holdouts ran on, commit $C3)"
 fi
 
 step "level 5: the factory loop (one per workspace), its kill switch, the unit file, the notifier"
