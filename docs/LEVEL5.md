@@ -844,7 +844,7 @@ workspace (an flock under `var/locks/`). Each tick:
 `--until-idle` exits when no goal has work left: 0 when every goal is done, 4 when any goal ended
 in an escalation, 2 for a refusal before the start (no jail, unmeasurable budget, a foreign
 harness composition from `Adapter.preflight`), 5 for an internal error. An internal error stops
-the factory and escalates: a dark factory that does not understand its own state must not keep
+the factory (and every step it started but a ship, L5-L) and escalates: a dark factory that does not understand its own state must not keep
 shipping. The loop never needs the owner token, and a test proves it (6.6, D8).
 
 **Surviving a reboot (REVIEW L5-R2 K-13).** `bin/konstant factory install-unit` WRITES two systemd
@@ -893,7 +893,8 @@ is killed (rc 124) and the loop runs it again; no integrity rule depends on it.
 one owner inbox every `konstant dsh` session shows), plus the optional second channel `[notify]
 mirror = "file" | "webhook"` (`mirror_url`), which gets every escalation as well; a mirror that
 fails is told locally, only the primary channel's failure halts. While the board is unreachable
-the loop (forever mode, the systemd unit) waits and retries instead of exiting, and after
+the loop (forever mode, the systemd unit; `--until-idle` and `--once` for `[factory]
+down_after_s` at most, then HALTED: wave L5-L) waits and retries instead of exiting, and after
 `[factory] down_after_s` (600) tells the owner "factory down" once through stderr, notify.log, the
 mirror and a primary channel that needs no board (REVIEW L5-R2 K-13):
 

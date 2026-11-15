@@ -565,7 +565,11 @@ The runner is the enforcing mode: konstant, not the model, drives the phases.
    → sha256); run the harness (§9); SIGKILL every process the phase left running (a detached
    process is re-parented to the subreaper, so it stays findable; `gate/reaper.py`, F-05);
    snapshot again; write `phases/<n>-<agent>-c<cycle>.json` with created/modified/deleted files,
-   the sha256 of each verdict file it left, exit code, duration.
+   the sha256 of each verdict file it left, exit code, duration. A verifying phase whose
+   harness CRASHED (exit neither 0 nor the timeout's 124) before it wrote its verdict file is run
+   once more in the same cycle (`<label>-retry.log`, manifest `retried: true`; wave L5-L: a
+   malformed model tool call ended a live DoD reviewer in 2 minutes, and as "no verdict file" it
+   cost the producer a whole cycle). Its verdict is then judged by every rule as before.
 4. Back-edge: a verifying phase whose verdict is FAIL/FIX/RECONSIDER re-runs the producer with the
    verdict text as context, then the verifiers again (new suffixed verdict files). Cap: 3 cycles.
 5. Close-out phase: the `orchestrator` profile writes DONE.md and CYCLES.md from the artifacts.
@@ -1078,7 +1082,11 @@ dark factory: code only, no model decides. `factory start` runs the same loop in
   factory is `stale` (status view, `doctor` WARN). Progress = a change of the board's ships, goals
   or job states, or new output of a running step (its log, its run's phase files); none for
   `[factory] stall_after_s` while work is ready or running -> BLOCKED `factory stalled: ...`.
-  An internal error halts the factory, escalates HALTED, exit 5.
+  An internal error halts the factory, escalates HALTED, exit 5, and STOPS the steps it started
+  (SIGTERM, SIGKILL after 120 s; a ship is never cut: `proc.stop_steps`). A board that stops
+  answering mid-run is waited out by `--until-idle`/`--once` too, for `[factory] down_after_s` at
+  most, then it is that internal error (wave L5-L: one 30 s timeout halted the live run and left
+  its intake running).
 - **View** (`board/api/factory.py`, any token reads): `GET /api/factory/status`, `/goals`,
   `/goals/{ref}` (budget used and limit per kind, jobs with attempts left and sealed-holdout
   counts, ships, escalations, the last tick), `/escalations`; the factory identity writes

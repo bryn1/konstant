@@ -48,6 +48,7 @@ class Factory:
         self.log = log or (lambda m: print(m, file=sys.stderr, flush=True))
         f = cfg.data["factory"]
         self.tick_s, self.stall_s = int(f["tick_s"]), int(f["stall_after_s"])
+        self.down_after = int(f["down_after_s"])
         from konstant.triage import tiers
         self.cap = tiers.cap_of(cfg.data["harness"])[0]
         self.running: list = []
@@ -338,8 +339,7 @@ class Factory:
                             "`konstant --as owner factory resume`", client=self.factory)
             except Exception:  # noqa: BLE001 - the halt line is on stderr and in notify.log
                 pass
-            for st in self.running:
-                st.poll()
+            proc.stop_steps(self.running)      # an internal error STOPS the factory
             return EXIT_ERROR
 
     def _run(self) -> int:
@@ -365,9 +365,12 @@ class Factory:
                 self.reap()
                 did = self.tick()
             except ClientError as exc:
-                if self.mode != "forever" or not health.unreachable(exc):
+                # K-13: a down board is waited out; --until-idle/--once wait [factory]
+                # down_after_s at most, then halt (live run L5-L: ONE 30 s timeout halted it)
+                if not health.unreachable(exc) or (self.mode != "forever" and
+                                                    health.down_for(self) >= self.down_after):
                     raise
-                health.board_down(self, exc)      # K-13: a down board is waited out
+                health.board_down(self, exc)
                 continue
             health.board_back(self)
             if notify.spooled(self.home):

@@ -81,6 +81,12 @@ def unreachable(exc) -> bool:
     return isinstance(exc, ClientError) and not getattr(exc, "status", 0)
 
 
+def down_for(f) -> float:
+    """Seconds the board has not answered (0: it answers)."""
+    since = getattr(f, "down_since", 0)
+    return time.time() - since if since else 0.0
+
+
 def board_down(f, exc, sleep=time.sleep) -> None:
     """The board does not answer (REVIEW L5-R2 K-13): wait one tick and try again; once it has
     been down for [factory] down_after_s, tell the owner ONCE per outage through the channels

@@ -258,6 +258,17 @@ class PhaseRunner:
         else:
             with ThreadPoolExecutor(max_workers=min(self.max_parallel, len(jobs))) as ex:
                 results = list(ex.map(one, jobs))
+        retried = set()
+        for i, ((ph, t, label, cyc, prompt), res) in enumerate(zip(jobs, results)):
+            # a verifying phase whose harness CRASHED (exit not 0, not a timeout) before it wrote
+            # its verdict is run once more, same cycle (live run L5-L: a malformed model tool call
+            # ended the DoD reviewer in 2 min; routed as "no verdict file", it cost the planner
+            # a whole cycle). Its verdict, if any, is still judged by every rule as before.
+            if t and res.rc not in (0, 124) and not res.timed_out and not (self.out / t).exists():
+                self.log(f"konstant task: phase {label} exited {res.rc} without its verdict "
+                         "(the harness run crashed); retried once")
+                results[i] = one((ph, t, f"{label}-retry", cyc, prompt))
+                retried.add(i)
         left = reaper.kill_leftovers() if self.isolate else 0
         if left:
             self.log(f"konstant task: phase {jobs[0][2]}{' group' if len(jobs) > 1 else ''} left "
@@ -268,13 +279,13 @@ class PhaseRunner:
                 if is_verdict_file(Path(n))}
         verdicts = [t for _p, t, _l, _c, _pr in jobs if t]
         manifests = []
-        for (ph, target, label, cyc, _pr), res in zip(jobs, results):
+        for i, ((ph, target, label, cyc, _pr), res) in enumerate(zip(jobs, results)):
             self.runs[ph["n"]] = cyc
             m = {"n": ph["n"], "agent": ph["agent"], "step": ph.get("step"), "cycle": cyc,
                  "label": label, "verdict": target, "closeout": closeout, "rc": res.rc,
                  "seconds": res.seconds, "timed_out": res.timed_out, "log": res.log, **changes,
                  "shas": shas, "left_running": left, **self._harness_of(ph["agent"]),
-                 "identity": self.identity(ph, closeout)}
+                 "identity": self.identity(ph, closeout), "retried": i in retried}
             if len(jobs) > 1:
                 m["group"] = [j[2] for j in jobs]
                 m["group_verdicts"] = verdicts

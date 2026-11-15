@@ -166,3 +166,46 @@ def test_gate_with_an_unknown_job_is_exit_2(tmp_path):
 
 def test_free_port_helper_is_loopback():
     assert 0 < free_port() < 65536
+
+
+CRASH_ONCE = """import os, pathlib, sys
+prompt = pathlib.Path(sys.argv[1]).read_text()
+mark = pathlib.Path(sys.argv[2])
+if "KONSTANT-AGENT: tester" in prompt and not mark.exists():
+    mark.write_text("crashed")
+    print("MALFORMED_RESPONSE: tool call arguments are not JSON", flush=True)
+    sys.exit(1)
+os.execv(sys.executable, [sys.executable, sys.argv[3], sys.argv[1]])
+"""
+
+
+def test_a_crashed_verifier_is_retried_once_in_its_cycle_red(ws, tmp_path):
+    """Live run L5-L: the DoD reviewer's harness crashed on a malformed model tool call before
+    it wrote its verdict; routed as a missing verdict, the crash cost a whole cycle. The runner
+    now runs such a phase once more in the same cycle; its verdict is judged as before."""
+    wrapper = tmp_path / "crash_once.py"
+    wrapper.write_text(CRASH_ONCE)
+    harness = (f"{sys.executable} {wrapper} {{prompt_file}} {tmp_path / 'crashed'} "
+               f"{REPO / 'tests' / 'fixtures' / 'fake_harness.py'}")
+    env = ws.env()
+    res = subprocess.run([sys.executable, "-m", "konstant", "task", "run", "[type:code] add greet()",
+                          "--project", "demo", "--harness", harness], capture_output=True,
+                         text=True, env=env, timeout=300, cwd=str(ws.home))
+    rd = sorted((ws.home / "var" / "runs").iterdir())[-1]
+    assert res.returncode == 0, res.stderr
+    assert "without its verdict (the harness run crashed); retried once" in res.stderr
+    assert "resume" not in res.stderr, res.stderr                   # no DoD-loop cycle spent
+    tester = [json.loads(m.read_text()) for m in sorted((rd / "phases").glob("*.json"))
+              if json.loads(m.read_text())["agent"] == "tester"]
+    assert len(tester) == 1 and tester[0]["retried"] and tester[0]["rc"] == 0, tester
+    assert tester[0]["log"].endswith("-retry.log")
+    assert (out_of(rd) / "TEST-verdict.md").is_file()
+    assert not (out_of(rd) / "TEST-verdict-c2.md").exists()
+
+
+def test_a_verifier_that_ran_to_its_end_is_never_retried_green(ws):
+    """The twin: an honest FAIL (exit 0, a verdict) is a verdict, never a crash to retry."""
+    res, rd = run(ws, "tester-fails-3x")
+    assert "retried once" not in res.stderr
+    assert not any(json.loads(m.read_text()).get("retried")
+                   for m in (rd / "phases").glob("*.json"))

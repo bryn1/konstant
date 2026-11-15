@@ -150,3 +150,22 @@ class Step:
         return {"kind": a.kind, "goal": a.goal, "job": a.job, "pid": self.proc.pid,
                 "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.started)),
                 "log": str(self.log)}
+
+
+def stop_steps(running: list, grace: float = 120.0) -> None:
+    """An internal error STOPS the factory (docs/LEVEL5.md 6.1): nothing it started outlives it
+    (live run L5-L: a halted --until-idle factory left its intake running). A ship is never cut;
+    every other step gets SIGTERM, then SIGKILL after `grace` seconds."""
+    import signal
+    for st in running:
+        if st.action.kind != "ship" and st.proc.poll() is None:
+            try:
+                st.proc.send_signal(signal.SIGTERM)
+            except OSError:
+                pass
+    for st in running:
+        try:
+            st.proc.wait(None if st.action.kind == "ship" else grace)
+        except subprocess.TimeoutExpired:
+            st.proc.kill()
+            st.proc.wait()
