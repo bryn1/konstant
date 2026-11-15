@@ -1762,6 +1762,30 @@ a class with must-fail tests (`tests/review/test_level5_r2_seat.py`, `..._speed.
   jail makes it read-only to every other phase and the files it judges read-only to it; its pin
   covers its inputs + its own dir); `[gate] phase_timeout_s` (tester/reviewer 7200 s).
 
+**The live run** (`tests/e2e/factory_live.sh` on 433d2a1, one local model for every role,
+the same rules as L5-7; one 12 h box, 03:34-14:31Z): **PARTIAL** (`factory exit 4`). P0 held on a
+plain request ("make greeter greet by name, with a CLI and a README", no keyword): proposed in the
+request's turn (20 s), filed on "yes" (9 s). Intake 2 h 31 min, two jobs (B1 code, B2 docs), both
+sets sealed on the scenario writer's first attempt (257 s, 860 s). Job 1.1 then used its three
+attempts (2 h 37 min, 2 h 02 min, 3 h 43 min) and was BLOCKED; job 1.2 waited behind it; nothing
+shipped. The BLOCKED reached the owner's next chat turn, and the board marked it delivered by that
+turn. No phase hit a timeout. No sealed canary was found in any producer-readable file.
+
+**The live finding, fixed in 8f6423b**: every git call inside a dsh factory phase failed
+(`missing config key GIT_CONFIG_KEY_0`). L5-F2a reset git's credential helpers with a
+`GIT_CONFIG_COUNT`/`KEY_0`/`VALUE_0` triple, and a filter on the way into the phase's shell
+dropped the `*KEY*` name (INFERRED: the harness's secret-name filter). So the verifier's pin,
+computed inside the jail, hashed the clone as a plain tree, while the check outside hashed it as
+git. Every pin was stale whatever happened, and each attempt ended UNMET after re-judging the
+tester three times. No integrity rule was weakened by it (the stale pins were refused, exactly as
+designed), but no job could pass. It went unseen until now because F2a had no live run. The fix:
+the reset is one `GIT_CONFIG_PARAMETERS` entry; konstant's own git view drops every inherited
+`GIT_CONFIG_*`/`GIT_DIR`-type variable; the judge refuses to pin a git project it cannot read.
+The speed effect of the scoped pins could not be measured in this run: the git mismatch
+dominated. In attempts 2 and 3 no stale reason named an OUT file. In attempt 1 the first one
+did, `out/evidence/closeout-*`, written by the close-out into shared OUT after the verifiers
+pinned. Shared OUT is in every pin by design, so the narrowing correctly does not cover it.
+
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
 
