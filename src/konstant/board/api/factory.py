@@ -11,6 +11,8 @@ GET  /api/factory/escalations       ?open=true for the unacknowledged ones
 POST /api/factory/escalations       (factory) register one: one OPEN row per (goal, job, kind);
                                     a repeat answers the open row with `new: false`
 POST /api/factory/escalations/{id}/delivered   (factory) where it went
+POST /api/factory/escalations/{id}/shown   (orchestrator, owner) an owner turn in the chat showed
+                                    it: that is its delivery under [notify] kind = chat (K-08)
 POST /api/factory/escalations/{id}/ack         (owner) acknowledged: the next one is told again,
                                     and the limit that raised it gets a fresh window
 POST /api/factory/ledger            (factory) one charge; idempotent by `ref`
@@ -119,6 +121,30 @@ def delivered(eid: int, body: ToIn, request: Request, actor: Actor = Depends(wri
     with db.transaction(request.app.state.db_path) as conn:
         conn.execute("UPDATE escalations SET delivered_at=strftime('%Y-%m-%dT%H:%M:%SZ','now'), "
                      "delivered_to=? WHERE id=? AND delivered_at IS NULL", (body.to[:200], eid))
+    return {"id": eid}
+
+
+class ShownIn(BaseModel):
+    session: str = ""
+
+
+@router.post("/api/factory/escalations/{eid}/shown")
+def shown(eid: int, body: ShownIn, request: Request, actor: Actor = Depends(writer)):
+    """`chat turn` (the orchestrator's role, run by the plugin on the owner's own message)
+    showed this escalation: the first such turn is its delivery (REVIEW L5-R2 K-08)."""
+    if actor.role not in ("orchestrator", "owner"):
+        raise HTTPException(403, "an escalation is marked shown by the owner's chat turn")
+    from konstant.factory.notify import session_id
+    try:
+        sid = session_id(body.session)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    with db.transaction(request.app.state.db_path) as conn:
+        if conn.execute("SELECT id FROM escalations WHERE id=?", (eid,)).fetchone() is None:
+            raise HTTPException(404, f"escalation {eid} not found")
+        conn.execute("UPDATE escalations SET delivered_at=strftime('%Y-%m-%dT%H:%M:%SZ','now'), "
+                     "delivered_to=? WHERE id=? AND delivered_at IS NULL",
+                     (f"chat session {sid}"[:200], eid))
     return {"id": eid}
 
 

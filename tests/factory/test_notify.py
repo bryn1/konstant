@@ -166,8 +166,9 @@ def test_one_notification_per_goal_job_event_until_ack_red_green(tmp_path):
 @needs_jail
 def test_chat_escalation_reaches_the_session_the_goal_came_from(tmp_path):
     """[notify] kind = chat: the goal is proposed in session S and confirmed by the owner's yes;
-    the factory's BLOCKED is posted into S's inbox, and the session's next turn shows it. A
-    goal-less second session sees nothing of it."""
+    the factory's BLOCKED is posted into the ONE owner inbox, and the session's next turn shows
+    it. A second session, which had no turn before, shows it too: it is still open (L5-F2b,
+    REVIEW L5-R2 K-08; this test asserted the opposite before)."""
     from tests.fixtures import stub_dsh  # noqa: F401 - installed on PATH by make_ws
     s = make_lws(tmp_path, notify='kind = "chat"', goal=False)
     try:
@@ -186,8 +187,8 @@ def test_chat_escalation_reaches_the_session_the_goal_came_from(tmp_path):
         assert t.returncode == 0 and json.loads(t.stdout)["confirmed"] == "greeter", t.stderr
         r = factory(s, "run", "greeter", "--until-idle", mode="tester-fails-3x")
         assert r.returncode == 4, r.stderr[-3000:]
-        inbox = notify.read_inbox(s.w.home, "sess-a")
-        assert [e["event"] for e in inbox] == ["BLOCKED"]
+        inbox = notify.read_inbox(s.w.home)
+        assert [e["event"] for e in inbox] == ["BLOCKED"] and inbox[0]["session"] == "sess-a"
         log = tmp_path / "dsh.log"
         k = f"{sys.executable} -m konstant chat turn --session"
         env = s.w.env(PATH=f"{s.w.bindir}:{os.environ['PATH']}", STUB_DSH_LOG=str(log),
@@ -199,20 +200,25 @@ def test_chat_escalation_reaches_the_session_the_goal_came_from(tmp_path):
         a = json.loads(acts[f"run:{k} sess-a how is it going"]["out"])
         assert any(x.startswith("konstant BLOCKED: goal greeter job 1.1:") for x in a["lines"])
         b = json.loads(acts[f"run:{k} sess-b anything for me"]["out"])
-        assert not any("BLOCKED" in x for x in b["lines"])
+        assert any(x.startswith("konstant BLOCKED: goal greeter job 1.1:") for x in b["lines"])
     finally:
         s.w.stop_board()
 
 
-def test_chat_delivery_to_a_bad_session_spools_red(tmp_path):
+def test_chat_delivery_never_derives_a_path_from_a_session(tmp_path):
+    """L5-F2b (REVIEW L5-R2 K-05): the session id is a label of the record, never part of a path,
+    so a bad one cannot escape the inbox or make an event undeliverable (this test expected a
+    spool before: an undeliverable inbox name was the defect)."""
     s = make_lws(tmp_path, notify='kind = "chat"', goal=False)
     try:
         from konstant import config
         cfg = config.load(config_path=str(s.w.home / "konstant.toml"))
-        with pytest.raises(notify.NotifyError):
-            notify.deliver(cfg, {"id": 1, "event": "BLOCKED", "session": "../escape",
-                                 "reason": "x"})
+        rec = {"id": 1, "event": "BLOCKED", "session": "../escape", "reason": "x"}
+        assert notify.deliver(cfg, rec).startswith("chat owner inbox")
+        assert rec["session"] == ""
         assert notify.deliver(cfg, {"id": 2, "event": "BLOCKED", "session": "ok-1",
-                                    "reason": "x"}) == "chat ok-1"
+                                    "reason": "x"}).startswith("chat owner inbox")
+        assert [r["id"] for r in notify.read_inbox(s.w.home)] == [1, 2]
+        assert not (s.w.home / "var" / "factory" / "escape.jsonl").exists()
     finally:
         s.w.stop_board()

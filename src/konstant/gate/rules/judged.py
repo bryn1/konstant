@@ -15,6 +15,17 @@ The judge saves the full map and the EXACT args it hashed with under OUT/.tmp/ju
 REPLAYS those args: a pin with no recorded args is UNMET (PIN-ARGS-UNRECORDED), a pin judged
 against another base than the record's is UNMET (PIN-BASE-DIFFERS), a different hash means the
 deliverable changed after it was judged. An EMPTY state is refused: a pin over nothing pins nothing.
+
+Scoped pins (wave L5-F2b; REVIEW L5-R2 item 5a): every verifying phase that is not its type's
+producer owns a private dir OUT/verify-<stem>/ (TEST-verdict.md -> verify-test; the record's
+`own_dirs`, from the catalog). The jail binds every other phase's view of it read-only
+(harnesses/base.py jail_layout), so only that phase writes it. `task judge --for <verdict file>`
+pins the phase's INPUTS (all of OUT outside the private dirs, the project drift) plus ITS OWN
+dir; the other verifiers' private dirs are left out, so a later verifier's evidence there no
+longer stales it. Safe because every private dir is pinned by its own verifier's verdict: the
+check derives the scope from the verdict file's NAME, never from the recorded args (another
+scope is PIN-SCOPE-DIFFERS); a private dir holding files with no decisive verdict of its owner
+is UNMET (UNPINNED). A pin made without --for covers everything, as before.
 """
 from __future__ import annotations
 
@@ -45,14 +56,24 @@ def _sha(path) -> str:
     return h.hexdigest()
 
 
-def out_state(out: Path) -> dict:
+def own_dir(verdict: str) -> str:
+    """The private OUT dir of a scoped verifying phase: TEST-verdict.md -> verify-test."""
+    from konstant.gate.rules.common import verdict_stem
+    return "verify-" + verdict_stem(os.path.basename(verdict)).lower()
+
+
+def out_state(out: Path, exclude=()) -> dict:
+    """`exclude`: top-level OUT dir names left out of the state (other verifiers' private dirs)."""
     state = {}
     if not out.is_dir():
         return state
     for f in out_files(out):
         if f.name.lower() in META_NAMES or is_verdict_file(f):
             continue
-        state["out/" + os.path.relpath(f, out)] = _sha(f)
+        rel = os.path.relpath(f, out)
+        if rel.split(os.sep, 1)[0] in exclude:
+            continue
+        state["out/" + rel] = _sha(f)
     return state
 
 
@@ -95,8 +116,21 @@ def project_state(args: dict, since=None) -> dict:
     return _tree(Path(project), out, since)
 
 
+def excluded(own_dirs, scope) -> tuple:
+    """The private dirs a pin for `scope` (a verdict file name, or None: the full state) leaves
+    out: every scoped verifier's dir but its own."""
+    if not scope:
+        return ()
+    mine = own_dir(scope)
+    return tuple(sorted(d for d in own_dirs if d != mine))
+
+
 def state_of(args: dict) -> dict:
-    return {**out_state(Path(args["out"])), **project_state(args)}
+    ex = excluded(args.get("own_dirs") or (), args.get("scope"))
+    state = {**out_state(Path(args["out"]), ex), **project_state(args)}
+    if args.get("scope") and state:       # two scopes over one state never share a pin file
+        state["scope/" + args["scope"]] = ",".join(ex)
+    return state
 
 
 def digest(state: dict) -> str:
@@ -104,13 +138,24 @@ def digest(state: dict) -> str:
                           .encode()).hexdigest()
 
 
-def pin_args(rec: dict) -> dict:
-    return {"out": rec["out"], "project": rec.get("project"), "git_base": rec.get("git_base")}
+def own_dirs_of(rec: dict) -> list:
+    return sorted({own_dir(v) for v in (rec.get("own_dirs") or [])})
 
 
-def judge(rec: dict) -> str:
-    """Compute, save (map + args) and return the pin for a record. Raises JudgeRefused."""
-    args = pin_args(rec)
+def pin_args(rec: dict, scope: str = "") -> dict:
+    args = {"out": rec["out"], "project": rec.get("project"), "git_base": rec.get("git_base")}
+    if scope:
+        args.update(scope=os.path.basename(scope), own_dirs=own_dirs_of(rec))
+    return args
+
+
+def judge(rec: dict, scope: str = "") -> str:
+    """Compute, save (map + args) and return the pin for a record; `scope`: the verdict file of
+    the phase asking (its private dir in, the other verifiers' out). Raises JudgeRefused."""
+    if scope and os.path.basename(scope) not in (rec.get("own_dirs") or []):
+        raise JudgeRefused(f"--for {scope}: not a scoped verifying phase of this run (scoped: "
+                           f"{', '.join(rec.get('own_dirs') or []) or 'none'})")
+    args = pin_args(rec, scope)
     state = state_of(args)
     if not state:
         raise JudgeRefused(f"EMPTY deliverable state for {args['out']}: no file under OUT and no "
@@ -134,11 +179,29 @@ def changed_paths(old: dict, new: dict) -> list:
     return [p for p in sorted(set(old) | set(new)) if old.get(p) != new.get(p)]
 
 
+def unpinned(run: Run, dec: dict) -> list:
+    """Files in a scoped verifier's private dir whose owner left no decisive verdict: no pin
+    covers them (REVIEW L5-R2 item 5a, attack 3)."""
+    out = []
+    for vf in run.rec.get("own_dirs") or []:
+        d = run.out / own_dir(vf)
+        if vf in dec or not d.is_dir():
+            continue
+        files = [os.path.relpath(f, run.out) for f in out_files(d)]
+        if files:
+            out.append(Finding("judged", f"UNPINNED: {', '.join(files[:5])} lie in "
+                                         f"{own_dir(vf)}/, the private dir of {vf}, but no "
+                                         f"{vf} verdict covers them"))
+    return out
+
+
 def check(run: Run) -> list:
     out, cache = [], {}
     passing = words(run)["pass"]
     from konstant.gate.rules.common import verdict_word
-    for vf, f in decisive(run).items():
+    dec = decisive(run)
+    out += unpinned(run, dec)
+    for vf, f in dec.items():
         if verdict_word(f) not in passing:
             continue
         owner = f"verifier:{vf}"
@@ -155,6 +218,14 @@ def check(run: Run) -> list:
                                          "args were recorded for that pin - re-run the judge "
                                          "command, never hand-roll a hash", owner=owner))
             continue
+        want = vf if vf in (run.rec.get("own_dirs") or []) else ""
+        if args.get("scope"):          # the scope is the verdict's NAME, never the args' say
+            if args["scope"] != want:
+                out.append(Finding("judged", f"PIN-SCOPE-DIFFERS: {f.name} pins the scope of "
+                                             f"{args['scope']!r}, not its own ({want or 'none'})",
+                                   owner=owner))
+                continue
+            args = {**args, "own_dirs": own_dirs_of(run.rec)}
         if args.get("git_base") != run.rec.get("git_base") or args.get("project") != \
                 run.rec.get("project") or args.get("out") != run.rec.get("out"):
             out.append(Finding("judged", f"PIN-BASE-DIFFERS: {f.name} was judged with base "

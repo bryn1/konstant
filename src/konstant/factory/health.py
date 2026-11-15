@@ -74,3 +74,33 @@ def heartbeat(f, state: str) -> None:
         "steps": [s.info() for s in f.running], "ready": f.ready,
         "progress_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(f.progress_at)),
         "tick_s": f.tick_s, "goals": f.states})
+
+
+def unreachable(exc) -> bool:
+    """A board that cannot be reached at all (no HTTP answer), not a refusal."""
+    return isinstance(exc, ClientError) and not getattr(exc, "status", 0)
+
+
+def board_down(f, exc, sleep=time.sleep) -> None:
+    """The board does not answer (REVIEW L5-R2 K-13): wait one tick and try again; once it has
+    been down for [factory] down_after_s, tell the owner ONCE per outage through the channels
+    that need no board (notify.factory_down: stderr, notify.log, [notify] mirror)."""
+    now = time.time()
+    if not getattr(f, "down_since", 0):
+        f.down_since, f.down_told = now, False
+        f.log(f"konstant factory: the board does not answer ({getattr(exc, 'message', exc)}); "
+              "waiting for it")
+    after = int(f.cfg.data["factory"]["down_after_s"])
+    if not f.down_told and now - f.down_since >= after:
+        notify.factory_down(f.cfg, int((now - f.down_since) // 60),
+                            str(getattr(exc, "message", exc)))
+        f.down_told = True
+    heartbeat(f, "waiting-for-board")
+    sleep(f.tick_s)
+
+
+def board_back(f) -> None:
+    if getattr(f, "down_since", 0):
+        f.log(f"konstant factory: the board answers again after "
+              f"{int(time.time() - f.down_since)}s")
+        f.down_since, f.down_told = 0, False

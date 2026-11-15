@@ -202,12 +202,13 @@ git -C projects/greeter log --oneline main
 [factory]
 goal_roles = ["owner", "orchestrator"]   # the orchestrator may PROPOSE a goal; your yes files it
 [notify]
-kind = "chat"                            # escalations come back into the session the goal came from
+kind = "chat"                            # escalations come back into every konstant dsh session
 ```
 
 Start `bin/konstant dsh web` and type the goal's text ("make greeter greet by name, with a CLI and
-a README"). The orchestrator answers with a one-line proposal; reply `yes` to file it (any other
-reply withdraws it). Run the factory as above (or keep `factory start` running): what needs you
+a README"). The orchestrator answers with a one-line proposal; reply `yes` (or `ja`, `go`) to
+file it (any other reply, `ok` included, withdraws it; "just answer" keeps a request in the
+chat). Run the factory as above (or keep `factory start` running): what needs you
 appears at the start of your next message in that chat, and finished goals are summed up in one
 line.
 

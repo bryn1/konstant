@@ -70,9 +70,9 @@ def events(goal: str | None = None) -> list:
 
 
 def inbox(goal: str | None = None) -> list:
-    rows = [json.loads(x) for x in
-            lines_of(WS / "var" / "factory" / "chat" / "inbox" / f"{SESSION}.jsonl")]
-    return [e for e in rows if goal is None or e.get("goal") == goal]
+    """The ONE owner inbox every chat session reads (L5-F2b, REVIEW L5-R2 K-05/K-08)."""
+    rows = [json.loads(x) for x in lines_of(WS / "var" / "factory" / "chat" / "owner.jsonl")]
+    return [e for e in rows if (goal is None or e.get("goal") == goal) and e.get("kind") != "test"]
 
 
 def goal_jobs(goal: str) -> list:
@@ -125,11 +125,12 @@ def factory_stopped() -> None:
        "no live factory pid")
 
 
-def escalations_told(goal: str, kind: str, n: int = 1) -> list:
+def escalations_told(goal: str, kind: str, n: int = 1, also=()) -> list:
+    """`also`: kinds that may be told besides (every rollback is an escalation: L5-F2b K-17)."""
     rows = [e for e in inbox(goal) if e["event"] == kind]
     ok(len(rows) == n, f"chat inbox: {n} {kind} for goal {goal}",
        [e["reason"] for e in inbox(goal)])
-    other = [e["event"] for e in inbox(goal) if e["event"] != kind]
+    other = [e["event"] for e in inbox(goal) if e["event"] != kind and e["event"] not in also]
     ok(other == [], f"chat inbox: nothing else for goal {goal}", other)
     return rows
 
@@ -444,10 +445,12 @@ def p4(kw) -> None:
         ok(git(t, "rev-parse", "main^{tree}") == git(t, "rev-parse", f"{pre}^{{tree}}"),
            "the target tree equals the pre-ship tree after the last rollback")
     ok((t / "README.md").is_file(), "the README the producer deleted is back in the target")
-    rows = escalations_told(goal, "BLOCKED")
+    rows = escalations_told(goal, "BLOCKED", also=("ROLLED_BACK",))
     ok("max_rollbacks" in rows[0]["reason"], "the BLOCKED names max_rollbacks", rows[0]["reason"])
     evs = [e["event"] for e in events(goal)]
     ok(evs.count("ROLLED_BACK") == 2, "events: two ROLLED_BACK", evs)
+    told = [e for e in inbox(goal) if e["event"] == "ROLLED_BACK"]
+    ok(len(told) == 2, "both rollbacks were told to the owner (escalations: L5-F2b K-17)", told)
     factory_stopped()
 
 
@@ -513,7 +516,7 @@ def chat_all(kw) -> None:
     ok(told, f"{len(told)} escalation(s) told during the run")
     posted = inbox()
     ok(sorted(e["id"] for e in posted) == sorted(e["id"] for e in told),
-       "every told escalation is in the session's chat inbox, once")
+       "every told escalation is in the owner inbox, once")
     shown = []
     for log in kw["logs"].split(","):
         for r in map(json.loads, lines_of(Path(log))):

@@ -9,7 +9,7 @@ The owner's verbs - `factory ack ID`, `factory resume`, `factory resume-shipping
 `ship JOB --approve-decision`, `goal pause|resume|cancel GOAL` - run from the chat only as a
 PROPOSAL: the command records it (var/factory/chat/owner/<session>.json, konstant's own wording
 built from validated ids) and prints it; konstant carries it out with the owner token when, and
-only when, the owner's NEXT message in that session is a plain yes, which `chat turn` (run by the
+only when, the owner's NEXT message in that session is a explicit yes (chat.YES_WORDS), which `chat turn` (run by the
 plugin on the owner's genuine message, never by the model) reads exactly like the goal yes. Any
 other reply drops it. One proposal per session; a goal proposal and an owner action open at the
 same time are both dropped on a bare yes (it would be unclear which one the yes means).
@@ -32,7 +32,8 @@ _REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 def path(home, session: str) -> Path:
-    return Path(home) / "var" / "factory" / "chat" / "owner" / f"{session}.json"
+    from konstant.factory.notify import session_id      # the one scheme, at write and read
+    return Path(home) / "var" / "factory" / "chat" / "owner" / f"{session_id(session)}.json"
 
 
 def describe(verb: str, ref: str, commit: str = "") -> str:

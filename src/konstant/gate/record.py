@@ -56,6 +56,7 @@ def catalog_fields(cat, ttype: str, gate_cfg: dict) -> dict:
     re-derives exactly these instead of trusting a record (REVIEW F-06, F-11)."""
     return {
         "phases": [dict(p, n=i) for i, p in enumerate(cat.phases(ttype), 1)],
+        "own_dirs": cat.scoped(ttype),
         "read_only": cat.read_only(ttype),
         "done_rows": ({"negative": True, "surfaces": cat.surfaces()}
                       if cat.done_rows(ttype) else {}),

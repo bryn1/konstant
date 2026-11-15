@@ -437,11 +437,14 @@ never guessed. To grant more, acknowledge the escalation (`factory ack ID`) and 
 reopen the job: an acknowledged escalation opens a fresh window for the limit that raised it.
 
 **You are told only what needs you**: `BLOCKED`, `DECISION`, `BUDGET_STOP`, `LEAK`,
-`ROLLBACK_FAILED`, `HALTED`, each once per goal, job and kind until you acknowledge it. Outcomes
-(`SHIPPED`, `ROLLED_BACK`, `GOAL_DONE`) are on the status view and in `var/factory/events.jsonl`,
-never pushed. `[notify] kind` says where: `stdout`, `file` (`var/factory/notify.log`), `webhook`
-(a POST of the event and its one-line redacted reason, nothing else) or `chat` (into the
-orchestrator session the goal came from, shown at your next message there; [DSH.md](DSH.md)). A
+`ROLLED_BACK` (every rollback), `ROLLBACK_FAILED`, `HALTED`, each once per goal, job and kind until
+you acknowledge it. Outcomes (`SHIPPED`, `GOAL_DONE`) are on the status view and in
+`var/factory/events.jsonl`, never pushed. `[notify] kind` says where: `stdout`, `file`
+(`var/factory/notify.log`), `webhook` (a POST of the event and its one-line redacted reason,
+nothing else) or `chat` (one owner inbox that every `konstant dsh` session shows at your next
+message there, a new session included; [DSH.md](DSH.md)). `[notify] mirror` ("file" or
+"webhook") is a second channel every escalation goes to as well, and the one that tells you
+"factory down" when the board has been unreachable for `[factory] down_after_s`. A
 notifier that cannot deliver **halts the factory**: the event waits in `var/factory/spool/`, and
 `bin/konstant --as owner factory resume` delivers it and lets the factory run again. A dark
 factory you cannot hear from does not keep working.

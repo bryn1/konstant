@@ -294,3 +294,69 @@ def changes(repo, pre: str, commit: str) -> list:
         res.append((st[0], parts[i + 1].decode("utf-8", "surrogateescape"), oo, no, nm))
         i += 2
     return res
+
+
+class RevertConflict(ShipRepoError):
+    """The ship's change cannot be reverted alone: a later commit on the target changed the same
+    paths (REVIEW L5-R2 K-14). An owner decision; konstant does not guess a merge."""
+
+
+def entries(repo, rev: str, paths: list) -> dict:
+    """{path: (mode, oid)} of `paths` in `rev` (plumbing ls-tree, literal pathspecs)."""
+    out_: dict = {}
+    for i in range(0, len(paths), 200):
+        chunk = paths[i:i + 200]
+        if not chunk:
+            continue
+        r = run(repo, "ls-tree", "-r", "-z", "--full-tree", rev, "--", *chunk,
+                env={"GIT_LITERAL_PATHSPECS": "1"})
+        if r.returncode != 0:
+            raise ShipRepoError(f"cannot list {rev[:12]}")
+        for item in r.stdout.split(b"\0"):
+            if not item:
+                continue
+            meta, _tab, path = item.partition(b"\t")
+            mode, _kind, oid = meta.decode().split()
+            out_[path.decode("utf-8", "surrogateescape")] = (mode, oid)
+    return out_
+
+
+def revert_tree(repo, pre: str, head: str, tip: str) -> str:
+    """The tree of `tip` with ONLY the ship commit's change (pre..head) taken back: every path the
+    ship changed returns to its `pre` entry, every other path keeps the tip's (a commit merged
+    on the target after the ship stays). RevertConflict when the tip no longer holds what the
+    ship wrote at one of those paths. Index plumbing only (read-tree, update-index --index-info,
+    write-tree, a private index file): no checkout, filter, hook or merge driver."""
+    paths = [c[1] for c in changes(repo, pre, head)]
+    wrote, back, have = (entries(repo, head, paths), entries(repo, pre, paths),
+                         entries(repo, tip, paths))
+    clash = [p for p in paths if have.get(p) != wrote.get(p)]
+    if clash:
+        raise RevertConflict(f"a later commit on the target changed {len(clash)} path(s) the ship "
+                             f"changed ({', '.join(clash[:5])}): the rollback cannot take the "
+                             "ship's change back alone")
+    zero = "0" * len(tip)
+    lines = "".join(f"{back[p][0]} {back[p][1]}\t{p}\n" if p in back else f"0 {zero}\t{p}\n"
+                    for p in paths)
+    fd, idx = tempfile.mkstemp(prefix="konstant-revert-", suffix=".index")
+    os.close(fd)
+    os.unlink(idx)
+    try:
+        env = {"GIT_INDEX_FILE": idx}
+        out(repo, "read-tree", tip, env=env)
+        r = run(repo, "update-index", "--index-info", data=lines.encode("utf-8",
+                                                                        "surrogateescape"),
+                env=env)
+        if r.returncode != 0:
+            raise ShipRepoError("cannot build the rollback tree: "
+                                + r.stderr.decode("utf-8", "replace").strip()[-200:])
+        return out(repo, "write-tree", env=env)
+    finally:
+        if os.path.exists(idx):
+            os.unlink(idx)
+
+
+def reverted(repo, pre: str, head: str, now: str) -> bool:
+    """After a rollback: every path the ship changed is back at its `pre` entry on `now`."""
+    paths = [c[1] for c in changes(repo, pre, head)]
+    return entries(repo, now, paths) == entries(repo, pre, paths)

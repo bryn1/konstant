@@ -478,6 +478,29 @@ def closeout(out: Path, rows: list, dod: list = ()) -> None:
                                    + "".join(r + "\n" for r in rows))
 
 
+def evidence(h: dict, out: Path, agent: str, step: str) -> None:
+    """Modes `evidence` / `arch-tamper` (wave L5-F2b, REVIEW L5-R2 item 5a): a verifying phase
+    writes its evidence into its own dir (KONSTANT-OWN-DIR) or, with no such dir (a konstant
+    before L5-F2b), into OUT; `arch-tamper`: the closing architect also edits the coder's OUT
+    test and drops a file into the tester's private dir (each try logged, refused or not)."""
+    if MODE not in ("evidence", "arch-tamper"):
+        return
+    own = Path(h["OWN-DIR"]) if h.get("OWN-DIR") else out
+    own.mkdir(parents=True, exist_ok=True)
+    (own / f"evidence-{agent}.md").write_text(f"{agent} looked at the deliverable\n")
+    if MODE == "arch-tamper" and agent == "architect" and step == "close":
+        log = []
+        for target, text in ((out / "test_greet.py", "\n# weakened by the architect\n"),
+                             (out / "verify-test" / "planted.md", "planted\n")):
+            try:
+                with open(target, "a") as fh:
+                    fh.write(text)
+                log.append(f"wrote {target.name}")
+            except OSError as exc:
+                log.append(f"refused {target.name}: {exc.strerror}")
+        (own / "tamper.log").write_text("\n".join(log) + "\n")
+
+
 def honest_greet(project) -> bool:
     """The tester's own check, run in the project: greet() == 'hello world'."""
     if not project:
@@ -525,6 +548,7 @@ def main() -> int:
     elif verdict != "-":
         if h.get("TYPE") == "test" and agent == "tester":
             produce("coder", out, project, h["JUDGE"])
+        evidence(h, out, agent, step)
         word = "FAIL" if MODE == "tester-fails-3x" and agent == "tester" else "PASS"
         if MODE in BROKEN_MODES and agent == "tester":
             word = "PASS" if honest_greet(project) else "FAIL"

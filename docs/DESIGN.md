@@ -160,10 +160,11 @@ konstant-0.1.0/
                              # during the phase, drafts/ + home/) of the scenario writer (§7.3)
   var/factory/goals/<id>.toml  events.jsonl  notify.log  chat/<session>.json
                              # goal copies, factory events, chat cursors (machinery; §7.3)
-  var/factory/chat/inbox/<session>.jsonl  spool/  steps/  heartbeat.json  factory.pid  STOP
-  var/factory/systemd/konstant-factory-<id>.service
-                             # escalations posted into a chat session, undelivered events, the
-                             # loop's step logs, heartbeat, pid, kill switch, the generated unit
+  var/factory/chat/owner.jsonl  spool/  steps/  heartbeat.json  factory.pid  STOP
+  var/factory/systemd/konstant-{board,factory}-<id>.service
+                             # the ONE owner inbox every chat session reads (L5-F2b K-05/K-08),
+                             # undelivered events, the loop's step logs, heartbeat, pid, kill
+                             # switch, the generated units
                              # (§7.6); var/locks/factory.lock: one factory per workspace
   var/factory/ship/<slug>.git  # konstant's own ship repository per project (§7.5): what ships
   memory/                    # the memory VAULT (§7.4): <identity>/*.md, <identity>/facts/*.md,
@@ -490,7 +491,7 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 |---|---|---|
 | verdicts | `rules/verdicts.py` | fresh verdict files end with exactly one `# VERDICT: <word>` line; at most one `# JUDGED:` line |
 | phases | `rules/phases.py` | every verifying phase has a fresh verdict file named for it; a cycle writes a new suffixed file (`-c2`); the newest decides; after 3 cycles a non-pass verdict counts as BLOCKED |
-| judged | `rules/judged.py` | a decisive PASS verdict's `# JUDGED: <sha>` equals the content hash of OUT (minus verdicts/DONE/CYCLES/.tmp) + the git diff of the project tree vs the run base (a project that is not a git tree: every project file outside OUT), recomputed by replaying the args recorded with the pin; mismatch = edited after judging (the changed paths are named); unrecorded args (`PIN-ARGS-UNRECORDED`) / base mismatch (`PIN-BASE-DIFFERS`) = UNMET by name; the judge refuses an EMPTY state (exit 2) |
+| judged | `rules/judged.py` | a decisive PASS verdict's `# JUDGED: <sha>` equals the content hash of OUT (minus verdicts/DONE/CYCLES/.tmp) + the git diff of the project tree vs the run base (a project that is not a git tree: every project file outside OUT), recomputed by replaying the args recorded with the pin; mismatch = edited after judging (the changed paths are named); unrecorded args (`PIN-ARGS-UNRECORDED`) / base mismatch (`PIN-BASE-DIFFERS`) = UNMET by name; the judge refuses an EMPTY state (exit 2). **Scoped pins** (L5-F2b; REVIEW L5-R2 item 5a): each verifying phase that is not its type's producer (`catalog.scoped`, the record's `own_dirs`) owns `OUT/verify-<stem>/`, which the jail binds read-only to every other phase; for a scoped verifier also every file already in OUT outside the private dirs; `task judge --for <verdict>` pins the phase's inputs (OUT outside the private dirs, the project drift) + its own dir only, so another verifier's later evidence no longer stales it; the check derives the scope from the verdict's NAME, never from the args (`PIN-SCOPE-DIFFERS`); a private dir holding files with no decisive verdict of its owner is `UNPINNED`; a pin without `--for` still covers everything |
 | done | `rules/done.py` | DONE.md rows `ID | claim | STATUS | evidence`, STATUS in PASS FAIL BLOCKED N/A UNVERIFIED; the header is only a line whose first four cells are exactly those names (F-09); FAIL/UNVERIFIED/placeholder evidence/N/A without reason = UNMET; ≥1 PASS row; with a job, one `DoD-<n>` row per row of the job's DoD (`board.dod.dod_rows`), PASS or BLOCKED, never N/A (F-21); `DECLINED | <claim> | job <id>` excuses an EXCUSABLE condition only when the claim quotes it (≥2 contiguous shared words, claim ≥3 words) AND job `<id>` carries an owner-role note/approval `DECLINED: <the same claim>` read from a reachable board (F-01: a quoted "owner statement" and "any existing job" were text the close-out agent could author); offline or unreachable = unresolved (fail closed); never excuses the rules verdicts, phases, judged, tests, verified, authorship, holdouts, backlog, research, licence; `DECLINED`/`DISPUTE`/`COPIED` rows are not matrix rows; a row whose claim is about a sealed store (the research store, the holdout store, the memory vault/index: `SEALED_CLAIM`) is ignored with a warning whatever its status, never the PASS row, never BLOCKED (no phase can read those stores; the rules research, holdouts and verified check them; `DoD-<n>` rows are never ignored; L5-6b) |
 | tests | `rules/tests.py` | the test command passes: `[gate] test_cmd` read from the WORKSPACE config, never the record (F-06); `auto` = `pytest` over `test_*.py` under OUT and over the project when it holds Python test files outside OUT (F-18); every run of agent code goes through `konstant.jail` (bubblewrap: read-only root, writes to OUT/project/private tmp, secrets + credential dirs masked, no network) when it works |
 | last mile | `rules/lastmile.py` | in a git tree: no untracked file created during the run outside OUT/.audits/.tmp; no marker words (`TODO`, `FIXME`, `XXX`) added to source since start; changed test files pass |
@@ -505,6 +506,17 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 | verified | `rules/verified.py` | the run's job, once closed, has a `konstant verify` verdict newer than the run start; FAIL = UNMET, BLOCKED = BLOCKED; a board that cannot be read = UNMET (fail closed); `task check --offline` skips the rule with a warning (the evidence the runner closes with uses it, so the verifier's re-run does not wait on its own verdict) |
 | authorship | `rules/authorship.py` | runner mode: EVERY verdict file (superseded cycles too) must have been created by a run of the verifying phase it names (phase manifests, §6.5) and touched by no other phase run, and its content must equal the sha256 the last phase that touched it recorded (F-05: a change outside every phase window); otherwise UNMET `AUTHORSHIP:` (also for a verdict file no phase run created). No re-run can undo it: the loop stops (owner `none`). Inside a parallel group (one shared snapshot) a verdict file is credited by NAME to the member it names. Interactive mode: an unattributed WARNING |
 | cleanup | `rules/cleanup.py` | DONE.md carries `CLEANUP: <what was moved/removed and where>` or `CLEANUP: NONE-NEEDED`; `[gate] cleanup = warn` (default) or `fail` |
+
+Scoped pins, where they differ from the review's sketch (REVIEW L5-R2 item 5a; recorded here as
+the deviation): the verdict file itself stays at OUT's top level (the authorship rule already
+proves who wrote it, and every adapter and the dsh plugin name it there), and the PROJECT stays
+writable for a verifying phase (a verifier may plant and restore a fault, the closing architect
+may fix a document): a project change is in every pin, so it stales every verdict it touches,
+which is the integrity rule, not a speed problem. What is narrowed is only another verifier's
+private dir; what the jail adds is that nobody but its owner can write that dir, and that a
+scoped verifier cannot change the OUT files it judges. Without konstant's jail (a level-4 phase
+on an adapter that does not confine) the narrowing is still safe, because every private dir is
+pinned by its own verdict, but nothing stops the write: the pin catches it afterwards.
 
 Every finding carries an owner (`producer`, `orchestrator`, `verifier:<file>`, `none`) that the
 loop resumes. Rule order is fixed because the repeat-stop compares the FIRST reason: verdicts,
@@ -715,7 +727,8 @@ closed with.
   `CANARY` (`khc-` + 20 hex, written by `holdout add` when absent).
 - **Seal** (`holdout/store.py`, `konstant holdout add JOB --file F [--file F ...]`, owner): lint
   (keys, safe RUN, no test runner, non-trivial, **held out**: no expectation literal or quoted RUN
-  argument of 4+ characters in the brief or DoD, hint), the set rule over sealed + new (at least
+  argument of 4+ characters in the brief, the DoD or the goal text (L5-F2b K-11), hint), the set
+  rule over sealed + new (at least
   `[holdout] min_per_job`, at least one `proof`, unique canaries), then the **negative control**:
   every new scenario runs on the project's current HEAD the way the verifier will run it
   (`VACUOUS: H<n> passes before the work`, `REGRESSION FAILS`, `UNRUNNABLE`). Then the board
@@ -810,7 +823,9 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
   the owner role only, active at once; `--from-chat --session ID`, a role of `[factory]
   goal_roles` (public default `["owner"]`; this owner's config adds `orchestrator`), recorded
   `proposed` and filed only by `confirm` from the same session, which `chat turn` sends when the
-  owner's NEXT message is a plain yes (anything else: `withdraw`). Only role tokens file goals. The
+  owner's NEXT message is an explicit yes (`chat.YES_WORDS`: yes, y, ja, j, go, confirm,
+  confirmed, yes please, yes file it, ja tack; never ok/sure/do it, L5-F2b K-09; anything else:
+  `withdraw`). Only role tokens file goals. The
   board copies the filed bytes to `var/factory/goals/<id>.toml` (0400; machinery) and records
   their sha256 (`spec_sha256`, immutable); `goal list|show|pause|resume|cancel` (pause: owner or
   `factory`; resume, cancel: owner).
@@ -955,10 +970,16 @@ identity (refused inside a task run and in the orchestrator chat). No model take
   **regression set** (every sealed holdout of this job and of every job of the project whose ship
   stands, commitments checked) in the jail with no network on a materialisation of the tip bound
   at the target's path. apply and command run the probes. A failed or unrunnable check rolls back.
-- **Rollback**: github and branch add `commit-tree <pre>^{tree} -p <tip>` ("konstant: roll back
-  ship N"), merged through its own pull request `konstant/rollback-<n>` (github) or CAS-moved
-  (branch), then the tip's tree must equal `<pre>^{tree}`; apply swaps `.prev` back; command runs
-  `rollback_cmd`. State `rolled_back`, outcome `ROLLED_BACK`; the job stays `verified`; the board
+- **Rollback** (L5-F2b K-14): github and branch add a commit on the target's CURRENT tip (github:
+  fetched again) whose tree is that tip with ONLY the ship commit's change taken back
+  (`shiprepo.revert_tree`: every path of `pre..<head>` back to its `pre` entry, built with a
+  private index: `read-tree`, `update-index --index-info`, `write-tree`), "konstant: roll back ship
+  N", merged through its own pull request `konstant/rollback-<n>` (github) or CAS-moved (branch);
+  then every path the ship changed must be at its `pre` entry on the new tip (`reverted`). A tip
+  that changed one of those paths since the ship cannot be reverted alone: `RollbackConflict`,
+  the target left as it is, `rollback_failed` (all shipping halted) and a `DECISION` escalation.
+  apply swaps `.prev` back; command runs `rollback_cmd`. State `rolled_back`, escalation
+  `ROLLED_BACK` (L5-F2b K-17; was an outcome); the job stays `verified`; the board
   files the **follow-up job** (`POST /api/ships/{id}/follow-up`, factory identity): the original
   brief + one DoD row + the first failed post-ship probe as a `PROBE:` row, queued,
   `holdout_required`, the original commitments copied (the factory copies the store files; same
@@ -1026,18 +1047,26 @@ dark factory: code only, no model decides. `factory start` runs the same loop in
   `suppressed` and not delivered until the owner acknowledges the open one (`factory ack ID`,
   owner). Kinds `stdout` (stderr), `file` (`notify.log`), `webhook` (POST of `{event, goal, job,
   display_id, reason, at, board_url}` and nothing else, https or http to a listed loopback host,
-  `[notify] retries`), `chat` (appended to `var/factory/chat/inbox/<session>.jsonl` of the session
-  the goal came from, the `_workspace` inbox for a file goal; `chat turn` shows it at the owner's
-  next message there). A delivery that fails is spooled (`var/factory/spool/<id>.json`) and the
+  `[notify] retries`), `chat` (appended to the ONE owner inbox `var/factory/chat/owner.jsonl`,
+  whatever the goal's session; `chat turn` in EVERY session shows what lies past that session's
+  cursor, a byte offset into the append-only inbox, and a session with no cursor shows the
+  escalations still open; an owner turn showing it is its delivery, `POST
+  /api/factory/escalations/{id}/shown`; one session-id scheme, `notify.session_id`, at write and
+  read: L5-F2b K-05/K-08/K-16). `[notify] mirror` (file | webhook, `mirror_url`) gets every
+  escalation too; its failure is told locally, never halts. A delivery that fails is spooled (`var/factory/spool/<id>.json`) and the
   loop halts on a non-empty spool; the halt itself goes to stderr and `notify.log` whatever the
   kind. `factory resume` (owner) redelivers the spool and lifts the halt. `notify test` sends one
-  TEST event.
+  TEST event (kind `test` in `events.jsonl`) through the real channel and the mirror; `doctor`'s
+  `notifier` row runs the chat writer and reader end to end in a scratch copy. A board that does
+  not answer: `factory run` (forever) waits a tick and retries, and after `[factory]
+  down_after_s` sends "factory down" once (`notify.factory_down`: stderr, `notify.log`, the
+  mirror, a primary channel that needs no board); `--until-idle`/`--once` still exit 2.
 - **Interrupted ships** (`factory/reconcile.py`), while no ship holds the ship lock: a `shipping`
   row whose target is still at its `pre` -> `failed` (the job ships again); whose target is at the
   shipped commit (github: a merge whose tree is it) -> the local half finished (the local target
   moved, the worktree rewritten), `shipped`, then the post-ship checks as after a ship; a `shipped`
   row without checks whose target is at its tip -> the checks; at a commit on the tip with the
-  pre-ship tree -> `rolled_back` + the follow-up; anything else, or an apply/command target it
+  ship's paths back at their `pre` entries -> `rolled_back` + the follow-up; anything else, or an apply/command target it
   cannot read -> the row ended (`failed` / `rollback_failed`), ALL shipping halted, HALTED.
 - **Health** (`factory/health.py`): `var/factory/heartbeat.json` every tick (pid, tick, state,
   running steps, ready actions, progress time, the goals' states); older than three ticks the
@@ -1659,6 +1688,9 @@ verify_after_close = true
 hygiene = { target = 250, hard = 400, tests = 600, grown = 600 }
 jail = true                    # run agent-written tests, verifier re-runs, dsh phases and every phase of a holdout job in bubblewrap
 file_job = false               # a gated dsh session files + claims a job for a typed task naming none
+# the wall clock of ONE phase, per phase agent or task type, `default` for the rest (unset:
+# [harness] timeout_s); merged over the built-in values; there is no goal-wide time limit (Q5)
+phase_timeout_s = { tester = 7200, reviewer = 7200 }
 
 [holdout]                      # level-5 holdouts (§7.1); each default is one key
 min_per_job = 2                # sealed scenarios a holdout job needs (at least one proof)
@@ -1676,14 +1708,18 @@ defaults = { max_attempts = 3, wall_clock = "0", max_task_runs = 0, max_jobs = 0
              ship_branch = "main", holdout_author = "agent" }   # what a goal file does not name
 tick_s = 10                    # seconds between the loop's ticks (1-3600)
 stall_after_s = 3600           # no progress this long while work is ready -> BLOCKED (stall)
+down_after_s = 600             # the board unreachable this long -> "factory down" via the mirror
+max_follow_ups = 3             # rollbacks in one follow-up chain before BLOCKED (1-10; K-17)
 
 [notify]                       # where escalations go (§7.6); a failed delivery halts the factory
-kind = "stdout"                # stdout | file | webhook | chat (the session the goal came from)
+kind = "stdout"                # stdout | file | webhook | chat (one owner inbox, every session)
 url = ""                       # webhook: https, or http to a loopback host in url_hosts
 url_hosts = []                 # loopback hosts a plain-http webhook may name
 retries = 2                    # more tries before the event is spooled and the factory halts
 retry_s = 1
 timeout_s = 10
+mirror = ""                    # "" | file | webhook: a second channel for every escalation
+mirror_url = ""                # the mirror webhook ("" = url); same URL rules
 
 [ship]                         # auto-ship (§7.5); target/branch: [factory] defaults (never a goal's)
 decision_types = ["infra"]     # jobs of these types never ship unattended (Q4)

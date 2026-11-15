@@ -96,6 +96,9 @@ DEFAULTS: dict = {
         # a gated dsh session (the konstant-gate plugin) files and claims a board job for a typed
         # task that names none ([job:N]); the task text is the brief, so it needs a DoD section
         "file_job": False,
+        # the wall-clock limit of one phase, per phase agent or task type, `default` for the
+        # rest (unset: [harness] timeout_s). No limit on the goal itself (owner decision Q5)
+        "phase_timeout_s": {"tester": 7200, "reviewer": 7200},
     },
     # triage (konstant/triage/, CONCEPTS "Triage"): research "required" | "off" (doctor WARNs)
     "triage": {"fanout_min": 3, "prior_limit": 5, "research": "required"},
@@ -131,13 +134,21 @@ DEFAULTS: dict = {
         # progress while work is ready before it escalates a stall (6.4)
         "tick_s": 10,
         "stall_after_s": 3600,
+        # the board unreachable this long: a "factory down" goes out through [notify] mirror
+        # (REVIEW L5-R2 K-13); the factory keeps retrying
+        "down_after_s": 600,
+        # a job rolled back this many times in one follow-up chain gets no further follow-up:
+        # BLOCKED (REVIEW L5-R2 K-17; max_rollbacks = 0 is never "endless")
+        "max_follow_ups": 3,
     },
     # where the factory's escalations go (docs/LEVEL5.md 6.3; factory/notify.py): stdout, file
     # (var/factory/notify.log), webhook (POST to `url`: https, or http to a loopback host listed
-    # in url_hosts) or chat (the orchestrator session the goal came from shows them at the
-    # owner's next turn, 4.0). A delivery that fails after `retries` halts the factory
+    # in url_hosts) or chat (the ONE owner inbox: every `konstant dsh` session shows it at the
+    # owner's next turn, 4.0). A delivery that fails after `retries` halts the factory. `mirror`
+    # ("" | "file" | "webhook", to `mirror_url`) is a second channel every escalation also goes
+    # to (and the only one a "factory down" can use while the board is unreachable)
     "notify": {"kind": "stdout", "url": "", "url_hosts": [], "retries": 2, "retry_s": 1,
-               "timeout_s": 10},
+               "timeout_s": 10, "mirror": "", "mirror_url": ""},
     # auto-ship (docs/LEVEL5.md 5; factory/ship.py). decision_types: owner decisions at ship time
     # (5.4; owner decision Q4): jobs of these types never ship unattended. The target and branch
     # come from the goal (or [factory] defaults ship_target / ship_branch); the rest fills what a
@@ -178,7 +189,7 @@ DEFAULTS: dict = {
 
 # Tables whose keys are free-form (user data), not a schema.
 _FREE_TABLES = {("harness", "env"), ("harness", "types"), ("factory", "defaults"),
-                ("confinement",)}
+                ("confinement",), ("gate", "phase_timeout_s")}
 HARNESS_NAMES = ("claude", "codex", "gemini", "dsh", "command")
 TYPE_OVERRIDE_KEYS = ("name", "model", "command")
 
@@ -241,7 +252,8 @@ def _merge(base: dict, over: dict, where: tuple = ()) -> dict:
         if isinstance(default, dict):
             if not isinstance(val, dict):
                 raise ConfigError(f"{CONFIG_NAME}: '{name}' must be a table")
-            out[key] = dict(val) if here in _FREE_TABLES else _merge(default, val, here)
+            out[key] = ({**default, **val} if here == ("gate", "phase_timeout_s") else dict(val)) \
+                if here in _FREE_TABLES else _merge(default, val, here)
             continue
         ok = (isinstance(val, bool) if isinstance(default, bool)
               else isinstance(val, int) and not isinstance(val, bool) if isinstance(default, int)
@@ -273,6 +285,9 @@ def _validate(data: dict, path) -> None:
         raise ConfigError(f"{path}: [board] port = {b['port']}: must be 1-65535")
     check_host(b["host"], b["allow_remote"], f"{path}: [board]")
     check_harness(data["harness"], path)
+    for k, v in data["gate"]["phase_timeout_s"].items():
+        if isinstance(v, bool) or not isinstance(v, int) or not 60 <= v <= 7 * 86400:
+            raise ConfigError(f"{path}: [gate.phase_timeout_s] {k} = {v!r}: seconds, 60-604800")
     check_holdout(data["holdout"], path)
     check_factory(data, path)
     check_memory(data["memory"], path)
@@ -309,11 +324,20 @@ def check_factory(data: dict, path) -> None:
         why = check_url(n["url"], n["url_hosts"])
         if why:
             raise ConfigError(f"{path}: [notify] {why}")
+    from konstant.factory.notify import MIRROR_KINDS, check_url
+    if n["mirror"] not in MIRROR_KINDS:
+        raise ConfigError(f"{path}: [notify] mirror = {n['mirror']!r}: \"\", \"file\" or "
+                          "\"webhook\"")
+    if n["mirror"] == "webhook":
+        why = check_url(n["mirror_url"] or n["url"], n["url_hosts"])
+        if why:
+            raise ConfigError(f"{path}: [notify] mirror_url: {why}")
     for key, lo, hi in (("retries", 0, 10), ("retry_s", 0, 300), ("timeout_s", 1, 300)):
         if not lo <= n[key] <= hi:
             raise ConfigError(f"{path}: [notify] {key} = {n[key]}: must be {lo}-{hi}")
     f = data["factory"]
-    for key, lo, hi in (("tick_s", 1, 3600), ("stall_after_s", 1, 30 * 86400)):
+    for key, lo, hi in (("tick_s", 1, 3600), ("stall_after_s", 1, 30 * 86400),
+                        ("down_after_s", 10, 7 * 86400), ("max_follow_ups", 1, 10)):
         if not lo <= f[key] <= hi:
             raise ConfigError(f"{path}: [factory] {key} = {f[key]}: must be {lo}-{hi}")
     check_ship(data["ship"], path)

@@ -13,6 +13,8 @@ not count. Never emit a pass to be agreeable: a gate that cannot fail is not a g
 - **Pin the verdict.** As your last step run the judge command you were given and put the printed
   `# JUDGED: <sha>` line directly above the verdict line. Never compute that line another way;
   nothing in OUT may change after you judged.
+- **Your evidence goes into your own directory** when the phase names one (`OUT/verify-<stem>/`):
+  notes, logs, any test you add. The rest of OUT is what you judge; leave it as you found it.
 - **File hygiene is a DoD item you check**: a source file over 400 lines without a reason line, a
   copy-pasted unit that should have been extracted, or an abstraction with one caller is a finding.
 - When your brief asks for findings only (a findings file, no verdict file), the brief wins.

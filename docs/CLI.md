@@ -668,7 +668,7 @@ options:
 
 ```
 usage: konstant task judge [-h] [--as ROLE] [--json] [--config PATH] [--run RUN] [--out OUT]
-                           [--project PROJECT] [--base BASE]
+                           [--project PROJECT] [--base BASE] [--for VERDICT]
 
 options:
   -h, --help         show this help message and exit
@@ -680,6 +680,8 @@ options:
   --out OUT          OUT dir (without a run record)
   --project PROJECT  project dir (with --out)
   --base BASE        git base commit (with --out)
+  --for VERDICT      the verdict file of the verifying phase asking: pin its inputs and its own
+                     OUT/verify-<stem>/ dir, not the other verifiers' (DESIGN 6.4)
 ```
 
 ## `konstant verify`
@@ -1042,7 +1044,7 @@ positional arguments:
     status         the loop, halt, shipping, goals, escalations
     resume-shipping
                    (owner) lift the halt a failed rollback set
-    install-unit   write (never enable) a systemd --user unit
+    install-unit   write (never enable) systemd --user units for the board and the factory
     ack            (owner) acknowledge an escalation
     escalations    the escalations, with their ids
 
@@ -1194,7 +1196,7 @@ usage: konstant notify [-h] VERB ...
 
 positional arguments:
   VERB
-    test      deliver one TEST event
+    test      deliver one real TEST event (chat: the next turn of every session shows it)
 
 options:
   -h, --help  show this help message and exit

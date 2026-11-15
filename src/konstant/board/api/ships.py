@@ -276,6 +276,18 @@ def record(sid: int, body: StateIn, request: Request, actor: Actor = Depends(wri
         return ship_row(conn, sid)
 
 
+def chain_depth(conn, job_id: int) -> int:
+    """How many follow-ups deep `job_id` is: 0 for a job no rollback filed (REVIEW L5-R2 K-17)."""
+    depth, seen = 0, set()
+    while job_id not in seen:
+        seen.add(job_id)
+        row = conn.execute("SELECT job_id FROM ships WHERE follow_up_id=?", (job_id,)).fetchone()
+        if row is None:
+            break
+        depth, job_id = depth + 1, row["job_id"]
+    return depth
+
+
 def follow_up_brief(job, s: dict, probe: str) -> str:
     failed = ", ".join((s.get("post") or {}).get("failed") or []) or "a post-ship check"
     text = (job["brief"].rstrip() + f"\n- after ship {s['id']} the post-ship check(s) that "
@@ -296,6 +308,12 @@ def follow_up(sid: int, body: FollowIn, request: Request, actor: Actor = Depends
                                 + (f" with follow-up job {s['follow_up_id']}"
                                    if s["follow_up_id"] else "")
                                 + ": a follow-up is filed once, after a rollback")
+        cap = int(request.app.state.cfg.data["factory"]["max_follow_ups"])
+        depth = chain_depth(conn, s["job_id"]) + 1
+        if depth > cap:
+            raise HTTPException(409, f"ship {sid}: a follow-up job would be {depth} deep in its "
+                                     f"rollback chain; [factory] max_follow_ups = {cap}: BLOCKED "
+                                     "for the owner instead (REVIEW L5-R2 K-17)")
         probe = body.probe.strip()
         if probe and probe not in ((s.get("post") or {}).get("failed_probes") or []):
             raise HTTPException(422, "the follow-up's PROBE must be a post-ship probe that failed")

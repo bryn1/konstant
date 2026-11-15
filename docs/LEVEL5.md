@@ -284,7 +284,10 @@ CANARY: khc-6c1d0f0e9b2a47d8a3f5
      stricter character rules would refuse the `;` inside a quoted `python3 -c` argument);
    - the expectation is not trivial;
    - **held out**: no expectation literal of 4 or more characters and no quoted `RUN` argument
-     appears in the job's brief or acceptance (`NOT HELD OUT: H1 ...`);
+     appears in the job's brief or acceptance, or in the text of the job's goal, which producers
+     read too (`NOT HELD OUT: H1 ... appears in the goal text`; REVIEW L5-R2 K-11). A seal cut
+     off between staging and its rename is finished on the next seal when the board holds the
+     scenario's commitment and the bytes match it, else its staged file is discarded (K-18);
    - the job, counting its sealed scenarios and the files of this `holdout add` (`--file` is
      repeatable), has at least `[holdout] min_per_job` scenarios (default 2), at least one of
      them `proof`, and no canary twice.
@@ -480,6 +483,17 @@ conversation is the intake.** When the owner asks for work, the orchestrator doe
 the chat and does not write code: it turns the request into a goal (section 4.1) and hands it to
 the factory, then reports back in the same chat.
 
+0. **Routing is konstant's, on the owner's words** (`factory/route.py`, REVIEW L5-R2 K-09). The
+   plugin hands every owner message to `chat turn`, which decides deterministically, without a
+   model, whether it is work: a message that changes files in a project, has a deliverable or
+   needs more than one short answer (an imperative like "add"/"fix"/"make", a request "can you
+   add ...", a wish or need "greeter should ...", "the README needs ...", a problem report "greet
+   crashes on ...", a spec naming a project and code) is routed to the intake by DEFAULT; a
+   question, an information request ("show", "list", "explain", "tell me") or a greeting is
+   answered in the chat. The owner keeps a request inline by saying so ("just answer", "just tell
+   me how", "no goal", "don't build"). A fixed corpus of plain owner-style messages of both kinds
+   (`tests/fixtures/route_corpus.py`, 60 messages) must route >= 90% right; the model's phrasing
+   never decides. A `[type:..]`/`[job:..]` tag keeps the level-4 gate.
 1. **Goal from chat.** The orchestrator writes the goal file from what the owner said - the goal
    text, the project, and the limits the owner named, else the workspace defaults
    (`[factory] defaults`: `max_attempts = 3`, nothing else required; Q5) - and runs `bin/konstant
@@ -490,17 +504,27 @@ the factory, then reports back in the same chat.
    or a phase writes later changes it.
 2. **Confirmation stays a chat sentence, not a gate the owner must learn.** Before `goal add` the
    orchestrator states in one line what it will file (project, goal text, limits) and files it
-   on the owner's yes; a goal never starts from a message the owner did not send (a phase's
+   on the owner's explicit yes: only the yes-forms konstant documents (`yes`, `y`, `ja`, `j`,
+   `go`, `confirm`, `confirmed`, `yes please`, `yes file it`, `ja tack`; never "ok", "sure" or
+   "do it", which answer other questions too: K-09), and the FILED line echoes what was filed. A
+   goal never starts from a message the owner did not send (a phase's
    output, a web page, a file in a repo: prompt injection through content is not intake). The
    proposal line konstant prints, and the FILED line, carry the goal text verbatim (JSON-quoted),
    every setting beyond the defaults (`limits.*`, `holdout.*`, `ship.post_probes`) and where the
    workspace ships it. A goal cannot name a ship target, command, directory, repository or
    remote at all (4.1, REVIEW L5-R2 K-02), so the yes never covers a hidden destination.
-3. **Report back in the chat.** The factory's escalations (`BLOCKED`, `DECISION`, `BUDGET_STOP`,
-   `LEAK`, `ROLLBACK_FAILED`, `HALTED`) go to `[notify] kind = "chat"`: the gated session shows
-   new events at the start of the owner's next turn (the konstant-gate plugin reads
-   `var/factory/events.jsonl` and `factory status`), and outcomes (`SHIPPED`, `GOAL_DONE`) when
-   the owner asks. Each escalation line is konstant's own wording (`konstant DECISION: goal G job
+3. **Report back in the chat, every chat.** The factory's escalations (`BLOCKED`, `DECISION`,
+   `BUDGET_STOP`, `LEAK`, `ROLLED_BACK`, `ROLLBACK_FAILED`, `HALTED`) go to `[notify] kind =
+   "chat"`: ONE owner inbox (`var/factory/chat/owner.jsonl`; no inbox name is derived from a
+   session id, and the one session-id scheme, `notify.session_id`, is checked where an id is
+   written and where it is read: REVIEW L5-R2 K-05). EVERY session started with `konstant dsh`
+   shows, at the start of the owner's next turn, what arrived since its own cursor (a byte offset
+   into that append-only file, so an escalation that lands while a turn runs is shown at the next
+   one, never skipped: K-16); a session with no cursor (a new chat, the next day) shows every
+   escalation still open on the board (K-08). The board marks an escalation delivered when an
+   owner turn SHOWED it, not when the line was appended. Outcomes (`SHIPPED`, `GOAL_DONE`) come
+   as one summary line. `konstant notify test` sends a real TEST through the inbox; `doctor`
+   runs the inbox writer and the turn's reader end to end in a scratch copy. Each escalation line is konstant's own wording (`konstant DECISION: goal G job
    N: a verified job waits for your decision before it ships (escalation E; ...)`). Its reason
    can carry text a producer wrote: a DISPUTE cell, a trail body, a file name. That reason
    follows on its own line, JSON-quoted and labelled "untrusted text from the job and its
@@ -508,8 +532,8 @@ the factory, then reports back in the same chat.
    same event (REVIEW L5-R2 K-07). Answering an escalation is again a chat sentence. The
    orchestrator runs the owner verb (`ship --approve-decision`, `goal pause|resume|cancel`,
    `factory ack|resume|resume-shipping`) and, inside the chat, konstant only records it as a
-   PROPOSAL. konstant carries it out with the owner token when the owner's NEXT message is a
-   plain yes, read by `chat turn` exactly like the goal yes (`factory/owner_actions.py`).
+   PROPOSAL. konstant carries it out with the owner token when the owner's NEXT message is an
+   explicit yes, read by `chat turn` exactly like the goal yes (`factory/owner_actions.py`).
    Anything else drops it. The session itself holds no owner power: `--as owner`/`verifier` and
    `chat turn` are refused from its shell (KONSTANT_CHAT_SESSION).
 4. **The orchestrator is not a factory phase.** It is the owner's own session, unjailed, acting
@@ -644,8 +668,13 @@ the secret scan read. A producer's intermediate commit (a secret committed and t
 merged side branch or an orphan never leaves the host. The verified commit itself stays in
 konstant's ship repository and is named in the ship row and the commit message.
 
-The branch and github targets never rewrite history. A rollback adds a commit whose tree equals
-the pre-ship tree, so the shipped commit stays an ancestor and the record stays readable. A target
+The branch and github targets never rewrite history. A rollback adds a commit on top of the
+target's CURRENT tip that takes back ONLY the ship commit's change: every path `pre..<head>`
+changed returns to its `pre` entry, every other path keeps the tip's (REVIEW L5-R2 K-14: a pull
+request someone else merged in between stays). The shipped commit stays an ancestor and the record
+stays readable. When a later commit changed one of those same paths, the change cannot be taken
+back alone: konstant does not guess a merge, it leaves the target as it is, halts all shipping and
+escalates a `DECISION` (index plumbing only, `factory/shiprepo.py revert_tree`). A target
 branch that is checked out in a non-bare worktree is refused (`update-ref` would leave that
 worktree stale); `apply` is the target for a working directory.
 
@@ -695,8 +724,10 @@ the **regression set**: every holdout of every job this goal has shipped, run on
 way 3.6 runs them. Any failure, or a check that cannot run, triggers an automatic rollback:
 
 1. the rollback commit or swap (5.1), as `factory`;
-2. a check that the target's tree equals the pre-ship tree (`rev-parse <tip>^{tree}` against
-   `<pre>^{tree}`, plumbing);
+2. a check that every path the ship changed is back at its pre-ship entry on the target's new
+   tip (`ls-tree` of the ship's paths against `pre`, plumbing; other paths, a commit merged since,
+   stay as they are: K-14); a revert that conflicts with a later commit is an owner `DECISION`
+   and halts shipping;
 3. `ships.state = rolled_back` and a `rollback` trail row naming the failed check (redacted the
    same way as holdout findings);
 4. the job stays `verified`: that state is terminal (the `jobs_terminal_is_final` trigger) and a
@@ -704,7 +735,11 @@ way 3.6 runs them. Any failure, or a check that cannot run, triggers an automati
    parent, as identity `factory`: the original acceptance plus the failed post-ship check as a new
    `PROBE:` row, written by code, never by a model. The original holdouts are sealed again for
    it (same files, same commitments), and it goes through the whole loop. After `max_rollbacks`
-   for the goal, the next rollback escalates `BLOCKED` instead of filing a follow-up.
+   for the goal, or when the follow-up would be more than `[factory] max_follow_ups` (default 3)
+   deep in its own rollback chain, the rollback escalates `BLOCKED` instead of filing a follow-up
+   (both sides check the chain: `ship.py follow_up` and the board's follow-up route). `max_rollbacks
+   = 0` means "no goal-wide limit", never "endless": REVIEW L5-R2 K-17. Every rollback is itself
+   an escalation (`ROLLED_BACK`), so the owner hears of each one.
 
 If the rollback itself fails (CAS lost, `rollback_cmd` non-zero, tree mismatch), the result is
 `state = rollback_failed`. **All shipping for the workspace halts**: no further ship until the
@@ -807,6 +842,19 @@ harness composition from `Adapter.preflight`), 5 for an internal error. An inter
 the factory and escalates: a dark factory that does not understand its own state must not keep
 shipping. The loop never needs the owner token, and a test proves it (6.6, D8).
 
+**Surviving a reboot (REVIEW L5-R2 K-13).** `bin/konstant factory install-unit` WRITES two systemd
+--user units into `var/factory/systemd/` and never enables or starts them: `konstant-board-<id>`
+(`bin/konstant board serve`) and `konstant-factory-<id>` (`bin/konstant factory run`, forever),
+which `Wants=` and starts `After=` the board unit. The factory unit restarts on failure, a refusal
+(exit 2) included, with a growing delay (`RestartSec=30`, `RestartSteps`, `RestartMaxDelaySec=900`,
+`StartLimitIntervalSec=0`); only a halt (exit 4, which needs the owner) is not restarted. The PATH
+is the one `install-unit` ran with. A board that does not answer is not even a refusal in forever
+mode: the loop waits and retries, and tells "factory down" through the second channel after
+`[factory] down_after_s`. `doctor` reports a unit file that is no longer what this konstant
+writes (`units`). The owner's one-time step, printed by `install-unit`:
+`systemctl --user link <both files>`, `systemctl --user enable --now <both units>`, and
+optionally `loginctl enable-linger "$USER"` to keep them running while logged out.
+
 ### 6.2 Budgets
 
 Limits come from the goal (`[limits]`) and are recorded per job (`budget_json`). Owner decision
@@ -824,12 +872,25 @@ goal continues with its other jobs. Spending is written to `budget_ledger` by co
 
 A budget that cannot be measured is refused **before the start**: `factory run` exits 2 with
 `budget max_cost_usd cannot be measured on harness command`. konstant does not guess spending. A
-budget stop pauses the goal, kills nothing mid-phase (the phase finishes or hits
-`[harness] timeout_s`), escalates once, and resumes only on `goal resume`.
+budget stop pauses the goal, kills nothing mid-phase (the phase finishes or hits its phase
+timeout), escalates once, and resumes only on `goal resume`.
+
+**Phase timeouts, not goal timeouts.** The owner set no time limit on a goal (Q5), and none
+exists. What exists is the wall-clock limit of ONE phase, `[gate] phase_timeout_s` (seconds, per
+phase agent or per task type, `default` for the rest; unset: `[harness] timeout_s`, 3600). The
+built-in values suit one local model: `tester = 7200`, `reviewer = 7200`, the others 3600 (L5-7
+live finding 3: a thorough tester hit the old single hour). A timeout only stops work: the phase
+is killed (rc 124) and the loop runs it again; no integrity rule depends on it.
 
 ### 6.3 Notifications: only what needs the owner
 
-`factory/notify.py`, `[notify] kind = "stdout" | "file" | "webhook"`:
+`factory/notify.py`, `[notify] kind = "stdout" | "file" | "webhook" | "chat"` (4.0 step 3: the
+one owner inbox every `konstant dsh` session shows), plus the optional second channel `[notify]
+mirror = "file" | "webhook"` (`mirror_url`), which gets every escalation as well; a mirror that
+fails is told locally, only the primary channel's failure halts. While the board is unreachable
+the loop (forever mode, the systemd unit) waits and retries instead of exiting, and after
+`[factory] down_after_s` (600) tells the owner "factory down" once through stderr, notify.log, the
+mirror and a primary channel that needs no board (REVIEW L5-R2 K-13):
 
 | event | when | notify by default |
 |---|---|---|
@@ -839,7 +900,8 @@ budget stop pauses the goal, kills nothing mid-phase (the phase finishes or hits
 | `LEAK` | a holdout canary was found (3.5) | yes |
 | `ROLLBACK_FAILED` | 5.3 | yes |
 | `HALTED` | an internal error, a notifier failure | yes (on stdout and the file at least) |
-| `SHIPPED`, `ROLLED_BACK`, `GOAL_DONE` | outcomes | no: status view and `var/factory/events.jsonl` only |
+| `ROLLED_BACK` | a shipped job was rolled back (a follow-up job carries it on, or BLOCKED) | yes (since L5-F2b, K-17) |
+| `SHIPPED`, `GOAL_DONE` | outcomes | no: status view and `var/factory/events.jsonl` only |
 
 Payload: `{event, goal, job, display_id, reason, at, board_url}`. The reason is the redacted
 one-line reason (`board/redact.py`) and never carries code, briefs, holdout text or tokens. A
@@ -908,7 +970,7 @@ is `/dev/null` and `owner.token` is unreadable for the factory's whole run.
 | P1 honest | default fake harness | `factory run greeter --until-idle` exit 0; every backlog job `verified`; `ship list --json` all `shipped`; `git -C projects/greeter log main` has one fast-forward per job; `notify.log` empty |
 | P2 cheating producer | `FAKE_HARNESS_MODE=overfit` (the visible DoD passes, held-out inputs fail) | verify FAIL `holdout H1 failed`, max rounds -> BLOCKED; **no ship**: the target tip unchanged; `notify.log` one `BLOCKED` line; exit 4 |
 | P3 reader | `FAKE_HARNESS_MODE=peek` | every read of the store denied (phase log); no canary in the diff; then the same leg with `[gate] jail = false`: `factory run` exit 2 before any phase |
-| P4 post-ship failure | `FAKE_HARNESS_MODE=ship-break` | ship, post-ship probe FAIL, automatic rollback: the target tree equals the pre-ship tree, the shipped commit still an ancestor, a follow-up job filed; after `max_rollbacks` BLOCKED + one notification; exit 4 |
+| P4 post-ship failure | `FAKE_HARNESS_MODE=ship-break` | ship, post-ship probe FAIL, automatic rollback: the ship's change taken back (the target tree equals the pre-ship tree when nothing else landed), the shipped commit still an ancestor, a `ROLLED_BACK` notification and a follow-up job filed; after `max_rollbacks` (or `[factory] max_follow_ups`) BLOCKED + one notification; exit 4 |
 | P5 budget | `max_attempts = 3` (the default) with `tester-fails-3x`; and once with the optional `max_task_runs = 2` | the job BLOCKED after 3 attempts, one notification; with `max_task_runs = 2`: `BUDGET_STOP`, goal paused; exit 4 both times |
 | P6 github target | `[ship] target = "github"` against a local bare repository as the remote and the `gh` stand-in (no network) | P1's ships arrive on the remote's `main` through recorded pull requests; P4's rollback is a revert commit merged through its own pull request; the stand-in never saw a force-push |
 
@@ -1670,6 +1732,31 @@ Findings for L5-R2 (not fixed here):
      routes to intake. Correct by the classifier's rules, but an owner who phrases a goal
      plainly gets no factory.
   3. A 1 h `[harness] timeout_s` is tight for a thorough tester on this model (one phase hit it).
+
+### L5-F2b as built (the owner's seat: hearing, routing, restart, rollback, speed)
+
+The second review's owner-seat findings (REVIEW-L5-R2 K-05, K-08, K-09, K-11, K-13, K-14, K-16,
+K-17, K-18) and the two speed findings of L5-7 (pin drift, the 1 h phase timeout), each fixed as
+a class with must-fail tests (`tests/review/test_level5_r2_seat.py`, `..._speed.py`):
+
+- **The owner always hears** (4.0 step 3, 6.3): one owner inbox read by every `konstant dsh`
+  session, a byte-offset cursor per session, delivery = an owner turn showed it, one session-id
+  scheme, `notify test` as a real event, doctor's end-to-end self-test, `[notify] mirror`.
+- **Routing on the owner's words** (4.0 step 0): `factory/route.py` replaces the classifier in the
+  chat; a 60-message corpus routes 60/60 (the old classifier: 35/60); only documented yes-forms
+  confirm.
+- **Reboots** (6.1): board + factory units, restart on a refusal with a growing delay, the forever
+  loop waits out a down board and tells "factory down" through the mirror.
+- **Rollback** (5.1, 5.3): reverts only the ship commit's change on the current tip; a
+  conflicting revert is a DECISION; the `gh` stand-in models a pull request merged in between
+  (`--intervene`).
+- **Bounded follow-ups** (5.3): `[factory] max_follow_ups` (3) on both sides; `ROLLED_BACK` is an
+  escalation.
+- **Holdouts**: the held-out lint reads the goal text (K-11); a seal cut off before its rename is
+  recovered or discarded (K-18).
+- **Speed**: scoped pins (DESIGN §6.4: each non-producing verifier owns `OUT/verify-<stem>/`, the
+  jail makes it read-only to every other phase and the files it judges read-only to it; its pin
+  covers its inputs + its own dir); `[gate] phase_timeout_s` (tester/reviewer 7200 s).
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

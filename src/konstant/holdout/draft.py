@@ -49,8 +49,8 @@ R6  Not trivial: EXPECT_OUT is not empty; EXPECT_RE is searched in five test str
     `.+`, `\\S+`, `[0-9.]+` or an empty alternative: put literal text of the real answer in it.
 R7  Held out: the expectation (EXPECT_OUT as a whole; for EXPECT_RE every stretch of 4 or more
     plain characters between regex symbols) and every quoted RUN argument of 4 or more characters
-    must NOT appear anywhere in the job's brief or DoD. Use other names, numbers and words than
-    the brief's own examples. Prefer EXPECT_OUT with an input of your own.
+    must NOT appear anywhere in the goal text, the job's brief or its DoD. Use other names,
+    numbers and words than their own examples. Prefer EXPECT_OUT with an input of your own.
 R8  HINT is at most 200 characters and shares NO word (3 or more letters or digits, compared
     case-insensitively; small words like the, and, with, for are free) with RUN or with the
     expectation. Say what behaviour failed in other words: it is the only text a failure shows.
@@ -111,11 +111,12 @@ def skeleton(kind: str, regex: bool = False) -> str:
             "HINT: <FILL: what failed, in words that are not in RUN or the expectation>\n")
 
 
-def write_context(drafts: Path, job: dict, need: int) -> Path:
+def write_context(drafts: Path, job: dict, need: int, goal: str = "") -> Path:
     p = Path(drafts) / CONTEXT
     p.write_text(json.dumps({"job": job.get("display_id") or str(job.get("id")),
                              "brief": job.get("brief") or "",
-                             "acceptance": job.get("acceptance") or "", "need": need}))
+                             "acceptance": job.get("acceptance") or "", "need": need,
+                             "goal": goal}))
     os.chmod(p, 0o600)
     return p
 
@@ -173,6 +174,7 @@ def check(files: list, ctx: dict | None) -> dict:
     detail (each draft is named by its file, as the writer named it)."""
     brief = (ctx or {}).get("brief") or ""
     acceptance = (ctx or {}).get("acceptance") or ""
+    goal = (ctx or {}).get("goal") or ""
     need = int((ctx or {}).get("need") or 0)
     rows, parsed = [], []
     for f in files:
@@ -188,7 +190,7 @@ def check(files: list, ctx: dict | None) -> dict:
             continue
         parsed.append(sc)
         rows.append({"file": name, "kind": sc.kind,
-                     "reasons": lint.lint(sc, brief, acceptance, detail=True)})
+                     "reasons": lint.lint(sc, brief, acceptance, detail=True, goal=goal)})
     sets = lint.lint_set(parsed, max(need, 1), str(ctx.get("job") or "?")) if ctx else \
         [r for r in lint.lint_set(parsed, 1, "?") if r.startswith("DUPLICATE CANARY")]
     if not files:

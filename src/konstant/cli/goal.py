@@ -49,7 +49,8 @@ def cmd_add(ctx) -> int:
         res = ctx.client(a.as_role or ctx.role).post(
             "/api/goals", {"spec": text, "source": "chat", "session": session})
         ctx.out(res, f"PROPOSED: goal {res['slug']}, {res['summary']} - filed when the owner "
-                     "answers yes in this chat; any other reply withdraws it")
+                     "answers yes (or ja, or go) in this chat; any other reply, \"ok\" and "
+                     "\"sure\" included, withdraws it")
         return EXIT_OK
     res = ctx.client(a.as_role or "owner").post("/api/goals", {"spec": text, "source": "file"})
     ctx.out(res, f"goal {res['slug']} added (sha256 {res['spec_sha256']}): {res['summary']}; "

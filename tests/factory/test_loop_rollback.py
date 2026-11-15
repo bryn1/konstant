@@ -30,7 +30,8 @@ def test_rolled_back_job_follow_up_ships_and_the_goal_ends_done_green(tmp_path):
         assert [(x["job_id"], x["state"]) for x in ships] == [(2, "rolled_back"),
                                                                (4, "shipped"), (3, "shipped")]
         assert ships[0]["follow_up_id"] == 4
-        assert notify_lines(s) == []
+        # every rollback is told (L5-F2b, REVIEW L5-R2 K-17; this asserted silence before)
+        assert [ln.split(" ", 1)[0] for ln in notify_lines(s)] == ["ROLLED_BACK"]
         assert [e["event"] for e in events(s) if e["event"] == "ROLLED_BACK"] == ["ROLLED_BACK"]
         assert s.w.json("goal", "show", "greeter")["status"] == "done"
     finally:
@@ -57,9 +58,10 @@ def test_follow_up_that_still_breaks_is_caught_by_its_own_dod_red(tmp_path):
         verdicts = [v["verdict"] for v in fu["verifications"]]
         assert fu["status"] == "blocked" and len(fu["runs"]) == 3, (fu["status"], fu["runs"])
         assert len(verdicts) >= 2 and set(verdicts) == {"FAIL"}, verdicts
-        lines = notify_lines(s)
+        lines = [ln for ln in notify_lines(s) if not ln.startswith("ROLLED_BACK ")]
         assert len(lines) == 1 and lines[0].startswith(f"BLOCKED greeter job "
                                                        f"{fu['display_id']}"), lines
+        assert sum(ln.startswith("ROLLED_BACK ") for ln in notify_lines(s)) == 1  # K-17
         assert [j["status"] for j in jobs(s)] == ["verified", "queued", "blocked"]
         assert s.w.json("goal", "show", "greeter")["status"] == "active"
     finally:

@@ -12,6 +12,13 @@ and `gh pr merge N --merge --match-head-commit SHA --repo R` (refuses a head tha
 merge commit GitHub's merge button makes: the head's tree, parents base + head). `--refuse
 rollback-merge` (wrapper option) refuses merges of `konstant/rollback-*` heads, `--refuse merge`
 every merge. Every call is one log line.
+
+`--intervene FILE` (wave L5-F2b, REVIEW L5-R2 K-14) models what real GitHub does when someone
+else's pull request lands between konstant's precheck and its merge: on the next merge of a
+`konstant/ship-*` head, FILE (JSON {"path", "text"}) is first committed onto the base branch by
+"someone else" (one shot: FILE is removed), and a merge whose base moved is then made the way
+GitHub makes it - a three-way merge of the trees (read-tree -m), refused only on a conflict -
+instead of the default "not mergeable".
 """
 from __future__ import annotations
 
@@ -38,11 +45,13 @@ exit 0
 """
 
 
-def install(bindir: Path, remote: Path, log: Path, refuse: str = "") -> Path:
+def install(bindir: Path, remote: Path, log: Path, refuse: str = "",
+            intervene: Path | None = None) -> Path:
     bindir.mkdir(parents=True, exist_ok=True)
     gh = bindir / "gh"
+    iv = f"--intervene {intervene} " if intervene else ""
     gh.write_text(f"#!/bin/sh\nexec {sys.executable} {Path(__file__).resolve()} --remote "
-                  f"{remote} --log {log} --refuse '{refuse}' \"$@\"\n")
+                  f"{remote} --log {log} {iv}--refuse '{refuse}' \"$@\"\n")
     gh.chmod(0o755)
     hooks = remote / "hooks"
     hooks.mkdir(exist_ok=True)
@@ -66,8 +75,49 @@ def opt(args: list, name: str) -> str:
     return args[args.index(name) + 1] if name in args else ""
 
 
+def _index_env(path: str) -> dict:
+    return {**os.environ, **IDENT, "GIT_INDEX_FILE": path}
+
+
+def intervene(remote, base: str, spec: Path) -> str:
+    """Someone else's change lands on `base` first (one shot)."""
+    want = json.loads(spec.read_text())
+    spec.unlink()
+    tip = git(remote, "rev-parse", "--verify", f"refs/heads/{base}")
+    idx = str(spec) + ".index"
+    env = _index_env(idx)
+    run = lambda *a, **kw: subprocess.run(["git", "-C", str(remote), *a], env=env,  # noqa: E731
+                                          capture_output=True, text=True, check=True, **kw)
+    run("read-tree", tip)
+    blob = run("hash-object", "-w", "--stdin", input=want["text"]).stdout.strip()
+    run("update-index", "--add", "--cacheinfo", f"100644,{blob},{want['path']}")
+    tree = run("write-tree").stdout.strip()
+    os.unlink(idx)
+    other = git(remote, "commit-tree", tree, "-p", tip, "-m", "someone else's pull request")
+    git(remote, "update-ref", f"refs/heads/{base}", other, tip)
+    return other
+
+
+def merge3(remote, base_tip: str, head: str) -> str:
+    """GitHub's merge of a head whose base moved: a three-way tree merge, "" on a conflict."""
+    mb = git(remote, "merge-base", base_tip, head)
+    idx = os.path.join(str(remote), "fake-gh-merge.index")
+    env = _index_env(idx)
+    try:
+        r = subprocess.run(["git", "-C", str(remote), "read-tree", "-m", "-i", "--aggressive",
+                            mb, base_tip, head], env=env, capture_output=True, text=True)
+        w = subprocess.run(["git", "-C", str(remote), "write-tree"], env=env,
+                           capture_output=True, text=True)
+        return w.stdout.strip() if r.returncode == 0 and w.returncode == 0 else ""
+    finally:
+        if os.path.exists(idx):
+            os.unlink(idx)
+
+
 def main(argv: list) -> int:
     remote, log, refuse = opt(argv, "--remote"), opt(argv, "--log"), opt(argv, "--refuse")
+    spec = Path(opt(argv, "--intervene")) if "--intervene" in argv[:argv.index("--refuse")] \
+        else None
     args = argv[argv.index("--refuse") + 2:]
     state_path = Path(log + ".state")
     state = json.loads(state_path.read_text()) if state_path.is_file() else {"prs": []}
@@ -98,14 +148,18 @@ def main(argv: list) -> int:
             print("fake gh: merge refused" + (" (head moved)" if match != head_now else ""),
                   file=sys.stderr)
             return 1
+        if spec is not None and spec.is_file() and pr["head"].startswith("konstant/ship-"):
+            record(call="intervene", commit=intervene(remote, pr["base"], spec))
         base_tip = git(remote, "rev-parse", "--verify", f"refs/heads/{pr['base']}")
         ff = subprocess.run(["git", "-C", remote, "merge-base", "--is-ancestor", base_tip,
                              head_now], env={**os.environ, **IDENT}).returncode == 0
-        if not ff:
+        tree = f"{head_now}^{{tree}}" if ff else (merge3(remote, base_tip, head_now)
+                                                  if spec is not None else "")
+        if not tree:
             record(call="pr merge", pr=n, refused=True, sha=match, reason="not mergeable")
             print("fake gh: not mergeable", file=sys.stderr)
             return 1
-        merge = git(remote, "commit-tree", f"{head_now}^{{tree}}", "-p", base_tip, "-p",
+        merge = git(remote, "commit-tree", tree, "-p", base_tip, "-p",
                     head_now, "-m", f"Merge pull request #{n} from {pr['head']}")
         git(remote, "update-ref", f"refs/heads/{pr['base']}", merge, base_tip)
         pr["state"] = "merged"

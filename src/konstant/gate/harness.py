@@ -174,7 +174,8 @@ class Harness:
     def run(self, prompt: str, *, agent: str, cwd: Path, run_dir: Path, label: str,
             out: Path | None = None, identity: str = "worker", home_base: Path | None = None,
             tokens: tuple | None = None, hide: tuple = (),
-            extra_env: dict | None = None, memory: bool | None = None) -> PhaseResult:
+            extra_env: dict | None = None, memory: bool | None = None,
+            timeout_s: int | None = None, out_ro: tuple = ()) -> PhaseResult:
         if identity not in PHASE_IDENTITIES:
             raise HarnessError(f"a phase acts as one of {', '.join(PHASE_IDENTITIES)}, not "
                                f"{identity!r}")
@@ -187,7 +188,7 @@ class Harness:
         values = {"prompt": prompt, "prompt_file": pfile, "agent": agent, "cwd": cwd,
                   "run_dir": run_dir, "workspace": self.workspace, "out": out,
                   "identity": identity, "home_base": home_base, "tokens": tokens, "hide": hide,
-                  "memory": memory}
+                  "memory": memory, "out_ro": tuple(out_ro or ())}
         argv = self.argv(values)
         drv, ph = self.driver(), self.phase(values)
         extra = {}
@@ -207,12 +208,13 @@ class Harness:
                                    "(REVIEW L5-R2 K-06; `konstant doctor`)")
             argv = drv.confine(argv, ph)
             extra.update(extra_env or {})
-            return self._start(argv, extra, prompt, cwd, run_dir, label, identity)
+            return self._start(argv, extra, prompt, cwd, run_dir, label, identity,
+                               timeout_s or self.timeout_s)
         finally:
             drv.cleanup(ph)                   # per-phase homes (dsh, factory): nothing persists
 
     def _start(self, argv: list, extra: dict, prompt: str, cwd: Path, run_dir: Path,
-               label: str, identity: str = "worker") -> PhaseResult:
+               label: str, identity: str = "worker", timeout_s: int = 0) -> PhaseResult:
         logs = Path(run_dir) / "phases"
         logs.mkdir(parents=True, exist_ok=True)
         log = logs / f"{label}.log"
@@ -244,7 +246,8 @@ class Harness:
             with _LOCK:
                 _ACTIVE.add(proc)
             try:
-                proc.communicate(prompt.encode() if self.stdin else None, timeout=self.timeout_s)
+                proc.communicate(prompt.encode() if self.stdin else None,
+                                 timeout=timeout_s or self.timeout_s)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 try:
@@ -298,6 +301,23 @@ class HarnessSet:
                                    factory, conf)
         self.by_type = {t: from_choice(harnesses.resolve(hcfg, t), hcfg, workspace, allow, jail,
                                        factory, conf) for t in (hcfg.get("types") or {})}
+
+    def phase_timeout(self, agent: str, task_type: str = "") -> int:
+        """The wall-clock limit of one phase (seconds): `[gate] phase_timeout_s` names it per
+        phase agent (tester, reviewer, ...) or per task type, `default` for the rest, else the
+        harness's `[harness] timeout_s`. Built-in: 7200 for the tester and the reviewer (a
+        thorough verifying phase on one local model; L5-7 finding 3), 3600 for the others.
+        A timeout only stops work: no integrity rule depends on it."""
+        from konstant import config
+        try:
+            table = config.load(self.default.workspace).data["gate"]["phase_timeout_s"]
+        except config.ConfigError:
+            table = {}
+        h = self.for_agent(agent)
+        for key in (agent, task_type, "default"):
+            if key and isinstance(table.get(key), int):
+                return int(table[key])
+        return int(h.timeout_s)
 
     def for_agent(self, agent: str) -> Harness:
         t = self.cat.type_of_agent(agent) if self.cat is not None else None

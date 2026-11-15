@@ -99,6 +99,12 @@ class Catalog:
     def verifying(self, type_name: str) -> list:
         return [p for p in self.phases(type_name) if p["verdict"]]
 
+    def scoped(self, type_name: str) -> list:
+        """Verdict files of the verifying phases that are not the type's producer: each owns a
+        private OUT/verify-<stem>/ and pins only its inputs + that dir (gate/rules/judged.py)."""
+        return [p["verdict"] for p in self.verifying(type_name)
+                if not self.is_producer(type_name, p)]
+
     def read_only(self, type_name: str) -> bool:
         return bool(self.types[type_name].get("read_only", False))
 

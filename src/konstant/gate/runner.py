@@ -121,6 +121,40 @@ class PhaseRunner:
         from konstant.board.dod import dod_rows
         return dod_rows(self.rec.get("acceptance") or "") if self.rec.get("job") else []
 
+    def scoped(self, phase: dict, closeout: bool = False) -> bool:
+        return not closeout and phase.get("verdict") in (self.rec.get("own_dirs") or [])
+
+    def judge_cmd(self, phase: dict, closeout: bool = False) -> str:
+        r = self.rec
+        return r["judge_cmd"] + (f" --for {phase['verdict']}" if self.scoped(phase, closeout)
+                                 else "")
+
+    def private_dirs(self) -> dict:
+        """{verdict file: OUT/verify-<stem>} of this run's scoped verifiers (created here, so
+        the jail can bind them)."""
+        from konstant.gate.rules.judged import own_dir
+        out = {}
+        for v in self.rec.get("own_dirs") or []:
+            d = self.out / own_dir(v)
+            d.mkdir(parents=True, exist_ok=True)
+            out[v] = d
+        return out
+
+    def out_ro(self, phase: dict, closeout: bool) -> list:
+        """What the jail binds read-only inside OUT for this phase (REVIEW L5-R2 item 5a): every
+        private dir but the phase's own; for a scoped verifier also every file already in OUT
+        outside the private dirs (its inputs: it writes its evidence into its own dir)."""
+        from konstant.gate.rules.common import out_files
+        dirs = self.private_dirs()
+        mine = dirs.get(phase.get("verdict")) if self.scoped(phase, closeout) else None
+        ro = [d for d in dirs.values() if d != mine]
+        if mine is not None:
+            names = {d.name for d in dirs.values()}
+            shared = [f for f in out_files(self.out)
+                      if os.path.relpath(f, self.out).split(os.sep, 1)[0] not in names]
+            ro += shared[:1000]
+        return ro
+
     def prompt(self, phase: dict, verdict_file, feedback: str, closeout: bool) -> str:
         r = self.rec
         head = [f"# konstant phase {phase.get('n', '-')}: {phase['agent']}"
@@ -128,8 +162,12 @@ class PhaseRunner:
                 f"KONSTANT-AGENT: {phase['agent']}", f"KONSTANT-STEP: {phase.get('step') or '-'}",
                 f"KONSTANT-TYPE: {r['type']}", f"KONSTANT-OUT: {r['out']}",
                 f"KONSTANT-PROJECT: {r.get('project') or '-'}",
-                f"KONSTANT-VERDICT: {verdict_file or '-'}", f"KONSTANT-JUDGE: {r['judge_cmd']}",
+                f"KONSTANT-VERDICT: {verdict_file or '-'}",
+                f"KONSTANT-JUDGE: {self.judge_cmd(phase, closeout)}",
                 f"KONSTANT-CYCLE: {self.runs.get(phase.get('n'), 0) + 1}"]
+        if self.scoped(phase, closeout):
+            from konstant.gate.rules.judged import own_dir
+            head.append(f"KONSTANT-OWN-DIR: {Path(r['out']) / own_dir(phase['verdict'])}")
         if r.get("job"):
             head.append(f"KONSTANT-JOB: {r['job']}")
         if "holdouts" in r:
@@ -165,12 +203,23 @@ class PhaseRunner:
                          "never N/A."]
         elif verdict_file:
             body += [f"Write your verdict to OUT/{verdict_file}: findings, then as your LAST step "
-                     f"run `{r['judge_cmd']}` and put its printed `# JUDGED:` line directly above "
-                     f"the final line `# VERDICT: {all_words(r)}`. Never "
+                     f"run `{self.judge_cmd(phase)}` and put its printed `# JUDGED:` line "
+                     f"directly above the final line `# VERDICT: {all_words(r)}`. Never "
                      "write or edit any other verdict file."]
+            if self.scoped(phase):
+                from konstant.gate.rules.judged import own_dir
+                body += [f"Your own directory is OUT/{own_dir(phase['verdict'])}/: put your "
+                         "evidence, notes, logs and any test file you add there and ONLY there. "
+                         "The rest of OUT and the other verify-* directories are what you judge: "
+                         "read-only to you (konstant's jail enforces it). A change there, or in "
+                         "the project, after another verifier judged it makes that verdict "
+                         "stale and costs a re-run."]
         else:
             body += ["Produce your part of the deliverable and commit it. Never write a verdict "
                      "file (any *verdict*.md): verdicts belong to the verifying phases."]
+        if not verdict_file and self.rec.get("own_dirs"):
+            body += ["The OUT/verify-*/ directories belong to the verifying phases: never write "
+                     "there (read-only to you in konstant's jail)."]
         if feedback:
             body += ["", "## Feedback to act on", feedback]
         return "\n".join(head + body) + "\n"
@@ -195,9 +244,14 @@ class PhaseRunner:
         def one(job):
             ph, _t, label, _c, prompt = job
             self.log(f"konstant task: phase {label} ...")
+            kw = {}
+            if hasattr(self.harness, "phase_timeout"):     # [gate] phase_timeout_s (L5-F2b)
+                kw["timeout_s"] = self.harness.phase_timeout(ph["agent"], self.rec.get("type", ""))
+                if self.rec.get("own_dirs"):
+                    kw["out_ro"] = tuple(self.out_ro(ph, closeout))
             return self.harness.run(prompt, agent=ph["agent"], cwd=self.cwd,
                                     run_dir=self.run_dir, label=label, out=self.out,
-                                    identity=self.identity(ph, closeout))
+                                    identity=self.identity(ph, closeout), **kw)
 
         if len(jobs) == 1:
             results = [one(jobs[0])]

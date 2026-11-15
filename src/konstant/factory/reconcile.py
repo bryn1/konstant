@@ -121,7 +121,7 @@ def one(cfg, client, s: dict) -> dict:
         repo = plan["repo"]
         try:
             back = shiprepo.is_ancestor(repo, tip, now) and \
-                shiprepo.tree_of(repo, now) == shiprepo.tree_of(repo, plan["pre"])
+                shiprepo.reverted(repo, plan["pre"], plan["tgt"].head, now)   # K-14
         except shiprepo.ShipRepoError:
             back = False
         if not back:

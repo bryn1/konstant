@@ -33,6 +33,26 @@ review and its fixes before a release).
   (default 3). No lint rule changed; a skeleton placeholder is a new refusal.
 
 
+### Changed (wave L5-F2b: the second review's owner-seat findings K-05, K-08, K-09, K-11, K-13, K-14, K-16..K-18, and speed)
+- **Every chat hears the factory**: one owner inbox that every `konstant dsh` session shows at its
+  next turn (a new session shows what is still open); delivered when a turn showed it; a byte
+  cursor, so nothing that lands mid-turn is skipped; `notify test` is a real event; doctor checks
+  the route end to end; `[notify] mirror` (file or webhook) is a second channel (K-05, K-08, K-16).
+- **Routing on the owner's words** (`factory/route.py`): work requests are proposed as goals by
+  default, "just answer" keeps them inline; only documented yes-forms (yes, ja, go, ...) file a
+  goal, never "ok" or "sure" (K-09).
+- **Reboots**: `factory install-unit` writes a board unit and a factory unit that wants it; the
+  factory restarts on a refusal with a growing delay and waits out a down board, telling
+  "factory down" through the mirror; doctor reports stale units (K-13).
+- **Rollback reverts only the ship commit's change** on the current tip; a conflicting revert is
+  an owner decision (K-14). **Follow-up chains are capped** (`[factory] max_follow_ups`, 3) and
+  every rollback is an escalation (K-17).
+- **Holdouts**: the held-out lint reads the goal text (K-11); a seal cut off before its rename is
+  recovered or discarded (K-18).
+- **Speed**: scoped pins (each non-producing verifier owns `OUT/verify-<stem>/`; another
+  verifier's evidence no longer stales its verdict; the jail keeps the dir its owner's) and
+  `[gate] phase_timeout_s` (tester and reviewer 7200 s, others 3600 s).
+
 ### Security (wave L5-F2a: the second review's integrity findings K-01..K-04, K-06, K-07, K-10, K-12, K-15)
 - **Pinned harness programs**: `agents sync` records each harness CLI and `[ship] gh` /
   `ship_cmd` / `rollback_cmd` with the sha256 of their program files; konstant's own unjailed runs

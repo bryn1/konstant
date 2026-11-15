@@ -8,11 +8,14 @@ fast-forward of `pre`.
 
   github   push the commit to `konstant/ship-<n>` of [ship] remote, `gh pr create` into the
            branch, `gh pr merge --merge --match-head-commit <commit>` (GitHub refuses a head that
-           moved), fetch the branch back: its new tip is the shipped state. Rollback: a commit
-           whose tree is the pre-ship tree on top of that tip, pushed as `konstant/rollback-<n>`
-           and merged through its own pull request; never a force-push, never a branch delete.
+           moved), fetch the branch back: its new tip is the shipped state. Rollback: a revert of
+           ONLY the ship commit's change (pre..head) on top of the remote's current tip (a
+           commit merged meanwhile stays; REVIEW L5-R2 K-14), pushed as `konstant/rollback-<n>`
+           and merged through its own pull request; never a force-push, never a branch delete. A
+           change that cannot be reverted alone (a later commit touched the same paths) halts
+           shipping as an owner DECISION.
   branch   copy the objects into the target and `update-ref refs/heads/<branch> <commit> <pre>`
-           (compare-and-swap). Rollback: the same revert commit, CAS again.
+           (compare-and-swap). Rollback: the same revert commit on the current tip, CAS again.
   apply    materialise the commit into [ship] apply_dir, keeping the previous tree beside it as
            `<apply_dir>.prev`. Rollback: swap it back.
   command  the owner's ship_cmd / rollback_cmd ({commit} = `head`, {branch}, {job}), argv split, no
@@ -43,7 +46,12 @@ class TargetRefused(Exception):
 
 
 class RollbackFailed(Exception):
-    """The rollback did not leave the target at the pre-ship tree: shipping halts."""
+    """The rollback did not take the ship's change back on the target: shipping halts."""
+
+
+class RollbackConflict(RollbackFailed):
+    """The ship's change cannot be reverted alone (a later commit on the target changed the same
+    paths, REVIEW L5-R2 K-14): shipping halts and the owner decides (DECISION)."""
 
 
 GH_ENV = ("HOME", "LANG", "LC_ALL", "GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR",
@@ -85,9 +93,16 @@ class Base:
         return self.target
 
 
-def revert_commit(repo: Path, pre: str, tip: str, n: int) -> str:
-    return shiprepo.commit_tree(repo, shiprepo.tree_of(repo, pre), [tip],
-                                f"konstant: roll back ship {n}")
+def revert_commit(repo: Path, pre: str, head: str, tip: str, n: int) -> str:
+    """A commit on top of the target's CURRENT tip that takes back only the ship commit's change
+    (pre..head), never "restore the pre-ship tree": a commit merged after the ship stays (REVIEW
+    L5-R2 K-14). RollbackConflict when that change cannot be taken back alone."""
+    try:
+        tree = shiprepo.revert_tree(repo, pre, head, tip)
+    except shiprepo.RevertConflict as exc:
+        raise RollbackConflict(str(exc)) from None
+    return shiprepo.commit_tree(repo, tree, [tip], f"konstant: roll back ship {n}\n\nTakes "
+                                f"back the change of {head} (onto {pre}) only.")
 
 
 # --- branch ----------------------------------------------------------------------------------
@@ -108,13 +123,14 @@ class BranchTarget(Base):
 
     def rollback(self, n: int, tip: str) -> str:
         try:
-            rb = revert_commit(self.repo, self.pre, tip, n)
+            rb = revert_commit(self.repo, self.pre, self.head, tip, n)
             move_local(self.repo, self.target, self.ref, tip, rb)
             now = local_tip(self.target, self.ref)
         except (ShipRepoError, OSError) as exc:
             raise RollbackFailed(str(exc)) from None
-        if shiprepo.tree_of(self.target, now) != shiprepo.tree_of(self.repo, self.pre):
-            raise RollbackFailed(f"{self.ref} tree is not the pre-ship tree after the rollback")
+        if not shiprepo.reverted(self.target, self.pre, self.head, now):
+            raise RollbackFailed(f"{self.ref} does not hold the pre-ship state of the ship's "
+                                 "paths after the rollback")
         return now
 
 
@@ -228,15 +244,18 @@ class GithubTarget(Base):
 
     def rollback(self, n: int, tip: str) -> str:
         try:
-            rb = revert_commit(self.repo, self.pre, tip, n)
+            tip = self.fetch()           # the remote's tip NOW (a PR merged since stays)
+            rb = revert_commit(self.repo, self.pre, self.head, tip, n)
             self.push(rb, f"konstant/rollback-{n}")
             self.pull_request(rb, f"konstant/rollback-{n}", f"konstant: roll back ship {n}")
             now = self.fetch()
+        except RollbackFailed:
+            raise
         except (ShipRepoError, OSError) as exc:
             raise RollbackFailed(str(exc)) from None
-        if shiprepo.tree_of(self.repo, now) != shiprepo.tree_of(self.repo, self.pre):
-            raise RollbackFailed(f"the remote {self.branch} tree is not the pre-ship tree after "
-                                 "the rollback")
+        if not shiprepo.reverted(self.repo, self.pre, self.head, now):
+            raise RollbackFailed(f"the remote {self.branch} does not hold the pre-ship state of "
+                                 "the ship's paths after the rollback")
         try:
             have = local_tip(self.target, self.ref)
             move_local(self.repo, self.target, self.ref, have, now)

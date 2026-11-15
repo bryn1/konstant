@@ -216,9 +216,10 @@ def _trivial_canary(expect: str):
     return next((c for c in TRIVIAL_CANARIES if rx.search(c) is not None), None)
 
 
-def lint(sc: Scenario, brief: str, acceptance: str, detail: bool = False) -> list:
+def lint(sc: Scenario, brief: str, acceptance: str, detail: bool = False, goal: str = "") -> list:
     """Refusal lines for one parsed scenario (empty: it passes the lint). `detail`: the same
-    rules and verdicts, each line naming what tripped it (only for the scenario writer itself)."""
+    rules and verdicts, each line naming what tripped it (only for the scenario writer itself).
+    `goal`: the goal text, which producers read too (REVIEW L5-R2 K-11)."""
     out = []
 
     def add(line: str, why: str = "") -> None:
@@ -244,12 +245,16 @@ def lint(sc: Scenario, brief: str, acceptance: str, detail: bool = False) -> lis
                         ("a quoted RUN argument", run_literals(sc))):
         in_dod = [x for x in found if x in (acceptance or "")]
         in_brief = [x for x in found if x in (brief or "")]
+        in_goal = [x for x in found if x in (goal or "")]
         if in_dod:
             add(f"NOT HELD OUT: {sc.hid} {what} appears in the DoD",
                 "found there: " + ", ".join(_show(x) for x in in_dod))
         elif in_brief:
             add(f"NOT HELD OUT: {sc.hid} {what} appears in the brief",
                 "found there: " + ", ".join(_show(x) for x in in_brief))
+        elif in_goal:
+            add(f"NOT HELD OUT: {sc.hid} {what} appears in the goal text",
+                "found there: " + ", ".join(_show(x) for x in in_goal))
     if len(sc.hint) > 200:
         add(f"HINT: {sc.hid} the hint is over 200 characters", f"it has {len(sc.hint)}")
     shared = _words(sc.hint) & (_words(sc.run) | _words(sc.expectation()))

@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import sys
 from pathlib import Path
 
 from konstant.holdout import lint
@@ -82,7 +83,8 @@ def drafts_dir(cfg, job_id) -> Path:
     return job_dir(cfg, job_id) / "drafts"
 
 
-def prepare(cfg, job: dict, sealed: list, sources: list, drafts: Path | None = None) -> list:
+def prepare(cfg, job: dict, sealed: list, sources: list, drafts: Path | None = None,
+            goal: str = "") -> list:
     """Parse + lint the new files against the job's brief and the sealed set. -> [(source,
     Scenario)]; SealRefused with every reason. `drafts`: the scenario writer's drafts dir, the
     only place inside the workspace a source may come from (it is in the masked store)."""
@@ -119,13 +121,48 @@ def prepare(cfg, job: dict, sealed: list, sources: list, drafts: Path | None = N
         except lint.ScenarioError as exc:
             reasons.append(str(exc))
             continue
-        reasons += lint.lint(sc, job.get("brief") or "", job.get("acceptance") or "")
+        reasons += lint.lint(sc, job.get("brief") or "", job.get("acceptance") or "", goal=goal)
         new.append((src, sc))
     reasons += lint.lint_set(old + [sc for _s, sc in new],
                              cfg.data["holdout"]["min_per_job"], str(job["id"]))
     if reasons:
         raise SealRefused(reasons, hids=hids)
     return new
+
+
+def goal_text(client, job: dict) -> str:
+    """The text of the job's goal: producers read it (viewer token, var/factory/goals/), so a
+    scenario that copies it is not held out (REVIEW L5-R2 K-11). "" for a job of no goal."""
+    gid = job.get("goal_id") or job.get("goal")
+    if not gid:
+        return ""
+    try:
+        return client.get(f"/api/goals/{gid}")["spec"]["goal"]["text"]
+    except Exception:  # noqa: BLE001 - a goal the board cannot show: the title stands in
+        return job.get("title") or ""
+
+
+def recover_staged(d: Path, sealed: list) -> list:
+    """A seal cut off between staging and the rename left `.H<n>.staged` (REVIEW L5-R2 K-18):
+    when the board holds that scenario's commitment and the bytes match it, the rename is
+    finished (recovered); otherwise the file is removed (discarded). -> one line per file."""
+    out = []
+    for tmp in sorted(d.glob(".H*.staged")):
+        hid = tmp.name[1:-len(".staged")]
+        final = d / f"{hid}.scenario"
+        row = next((r for r in sealed if r["hid"] == hid and r["state"] == "sealed"), None)
+        try:
+            data = tmp.read_bytes()
+        except OSError:
+            data = None
+        if row is not None and data is not None and not final.exists() and \
+                sha256(data) == row["sha256"]:
+            os.replace(tmp, final)
+            out.append(f"recovered {hid} (its commitment was on the board)")
+        else:
+            tmp.unlink(missing_ok=True)
+            out.append(f"discarded a staged {hid} (no matching commitment)")
+    return out
 
 
 def project_of(cfg, client, job: dict) -> Path:
@@ -151,7 +188,22 @@ def seal(cfg, client, ref: str, sources: list, drafts: Path | None = None) -> li
     if leak:
         raise SealRefused([leak + ": nothing is sealed into a store phases can read"], 2)
     sealed = rows(client, job["id"])["holdouts"]
-    new = prepare(cfg, job, sealed, [Path(s) for s in sources], drafts)
+    import fcntl
+    locks = Path(cfg.home) / "var" / "locks"
+    locks.mkdir(parents=True, exist_ok=True)
+    lock = open(locks / f"seal-{int(job['id'])}.lock", "a")   # one seal per job at a time
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        if job_dir(cfg, job["id"]).is_dir():          # a seal cut off earlier (K-18)
+            for line in recover_staged(job_dir(cfg, job["id"]), sealed):
+                print(f"konstant holdout: {line}", file=sys.stderr)
+        return _seal(cfg, client, job, sealed, sources, drafts)
+    finally:
+        lock.close()
+
+
+def _seal(cfg, client, job: dict, sealed: list, sources: list, drafts) -> list:
+    new = prepare(cfg, job, sealed, [Path(s) for s in sources], drafts, goal_text(client, job))
     project = project_of(cfg, client, job)
     try:   # the base: the target commit the job clone starts from (LEVEL5 3.2 step 2, 2.4)
         base = runner.resolve(project, job.get("workdir_base") or "HEAD")

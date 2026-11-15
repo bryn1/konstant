@@ -157,22 +157,36 @@ dark factory ([LEVEL5.md](LEVEL5.md) section 4.0). The plugin runs `bin/konstant
 --session <id> -` on every message you type (never on a delegated child or a konstant nudge), and
 konstant (Python, no model) decides:
 
-- **A work request** (a typed task without `[type:..]` or `[job:..]`) is not done in the chat.
-  The message reaches the session with a `KONSTANT INTAKE` block in front of it: the orchestrator
-  says in ONE line what it will file (project, goal, limits; else the defaults: `max_attempts =
-  3`) and proposes it with `bin/konstant goal add - --from-chat --session <id>` (a goal file on
-  stdin). The proposal is `proposed`, not filed.
-- **Your next message** decides it: a plain yes (`yes`, `ok`, `ja`, `go`, `confirm`, `file it`,
-  ...) files the goal (source `chat`, its copy in `var/factory/goals/`); anything else withdraws it.
-  Only your own message in that same session does this: text in a phase log, a web page or a file
-  is never a message you sent, and `goal add`/`chat turn` refuse inside a task run.
-- **Reports come back here**: the factory's escalations (`BLOCKED`, `DECISION`, `BUDGET_STOP`,
-  `LEAK`, `ROLLBACK_FAILED`, `HALTED`) are posted into the session the goal came from
-  (`var/factory/chat/inbox/<session>.jsonl`; a goal filed from a file goes to every session) and
-  shown at the start of your next turn as `konstant chat:` lines, once each, and each kind only
-  once until you acknowledge it (`bin/konstant --as owner factory ack ID`); outcomes (`FILED`,
-  `SHIPPED`, `GOAL_DONE`, ...) as one summary line, details with `bin/konstant goal show <goal>`
-  or `factory status`.
+- **A work request** is not done in the chat. konstant routes your message itself
+  (`factory/route.py`, deterministic, on your words only): anything that changes files in a
+  project, has a deliverable or needs more than one short answer ("greeter should greet people by
+  name", "the README needs a usage section", "can you add a --shout flag", "greet crashes on an
+  empty name") reaches the session with a `KONSTANT INTAKE` block in front of it. Questions,
+  "show/list/explain/tell me" and greetings stay a chat answer. To keep a request inline, say so:
+  "just answer", "just tell me how", "no goal", "don't build". The orchestrator then says in ONE
+  line what it will file (project, goal, limits; else the defaults: `max_attempts = 3`) and
+  proposes it with `bin/konstant goal add - --from-chat --session <id>` (a goal file on stdin). The
+  proposal is `proposed`, not filed.
+- **Your next message** decides it: only an explicit yes konstant documents files the goal
+  (`yes`, `y`, `ja`, `j`, `go`, `confirm`, `confirmed`, `yes please`, `yes file it`, `ja tack`);
+  `ok`, `sure`, `do it` and everything else withdraw it, so an "ok" to some other question never
+  files anything. The FILED line repeats what was filed (the goal text verbatim, every setting,
+  where it ships). Only your own message in that same session does this: text in a phase log, a
+  web page or a file is never a message you sent, and `goal add`/`chat turn` refuse inside a task
+  run.
+- **Reports come back to every chat**: the factory's escalations (`BLOCKED`, `DECISION`,
+  `BUDGET_STOP`, `LEAK`, `ROLLED_BACK`, `ROLLBACK_FAILED`, `HALTED`) go into ONE owner inbox
+  (`var/factory/chat/owner.jsonl`). EVERY session you start with `bin/konstant dsh` shows what
+  arrived since its last turn at the start of your next turn as `konstant chat:` lines, the session
+  the goal came from included; a new session (tomorrow's chat) shows every escalation you have not
+  acknowledged yet. An escalation counts as delivered when a turn of yours showed it, not when the
+  file was written. Each kind is told once per goal and job until you acknowledge it
+  (`bin/konstant --as owner factory ack ID`, or ask the orchestrator: your yes confirms it).
+  Outcomes (`FILED`, `SHIPPED`, `GOAL_DONE`) come as one summary line, details with `bin/konstant
+  goal show <goal>` or `factory status`. Set `[notify] mirror = "file"` or `"webhook"` (with
+  `mirror_url`) to get every escalation on a second channel too, and the "factory down" notice
+  when the board is unreachable. `bin/konstant notify test` sends a real TEST into the inbox (the
+  next turn of every session shows it); `doctor` checks the inbox route end to end.
 - A message tagged `[type:..]` or `[job:..]` keeps the level-4 gate above.
 - The session's own bash gets `KONSTANT_CHAT_SESSION=<id>` (so `goal add --from-chat` needs no
   `--session`), and konstant refuses the factory's own steps from it: `konstant intake`,
@@ -182,8 +196,8 @@ konstant (Python, no model) decides:
 After the yes the factory loop takes the goal in (`bin/konstant factory start`, outside the
 chat; or `bin/konstant intake <goal>` by hand): planner and DoD-reviewer phases, deterministic
 filing, approval and the scenario writer, then the jobs, the verifier and the ships; what needs you
-comes back into the chat as above. If the inbox cannot be written the factory halts rather than
-work unheard. A failing `chat turn` never blocks the session: a notice says so and the gate runs
+comes back into the chat as above. If the owner inbox cannot be written the factory halts
+rather than work unheard. A failing `chat turn` never blocks the session: a notice says so and the gate runs
 as before.
 
 ## The plugin

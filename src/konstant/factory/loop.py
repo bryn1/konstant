@@ -360,8 +360,15 @@ class Factory:
                 self.drain(NOTIFIER_FAILED)
                 health.heartbeat(self, "halted")
                 return EXIT_ESCALATED
-            self.reap()
-            did = self.tick()
+            try:
+                self.reap()
+                did = self.tick()
+            except ClientError as exc:
+                if self.mode != "forever" or not health.unreachable(exc):
+                    raise
+                health.board_down(self, exc)      # K-13: a down board is waited out
+                continue
+            health.board_back(self)
             if notify.spooled(self.home):
                 continue
             health.check_stall(self, health.fingerprint(self))

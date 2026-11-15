@@ -116,8 +116,8 @@ def prompt(profile: str, job: dict, goal_text: str, target: Path, drafts: Path, 
             f"`<name>.scenario` in {drafts} (your working directory; nothing else is writable). "
             f"The target is {target}: read it to see what exists now (it is read-only). A proof "
             "must FAIL on it as it is now and pass once the job is done; a regression must pass "
-            "now and after. Use inputs and expected outputs that the brief above does not "
-            "contain. You are a leaf: never spawn agents or sub-sessions.", "",
+            "now and after. Use inputs and expected outputs that neither the goal nor the brief "
+            "above contains. You are a leaf: never spawn agents or sub-sessions.", "",
             "## The rules (konstant checks each one; a draft that breaks one is refused)",
             draft.RULES.replace("{need}", str(need)), "",
             "## Worked examples (another project, `tempconv`: copy the SHAPE, never the content)",
@@ -161,12 +161,12 @@ def author(cfg, cat, job: dict, goal_text: str, target: Path, client, need: int,
     profile = Generator(cat, Path(cfg.home)).agent_prompt(ROLE)      # one snapshot (F-08)
     attempts = int(cfg.data["holdout"]["author_attempts"])
     ctx = {"job": job.get("display_id"), "brief": job.get("brief") or "",
-           "acceptance": job.get("acceptance") or "", "need": need}
+           "acceptance": job.get("acceptance") or "", "need": need, "goal": goal_text}
     cli = konstant_cmd(cfg)
     feedback, reasons = "", []
     for attempt in range(1, attempts + 1):
         drafts = _fresh(jd / "drafts")
-        draft.write_context(drafts, job, need)
+        draft.write_context(drafts, job, need, goal_text)
         home = _fresh(jd / "home")
         run_dir = jd / "runs" / f"{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}-a{attempt}"
         run_dir.mkdir(parents=True, mode=0o700)

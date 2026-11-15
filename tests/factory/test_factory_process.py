@@ -187,7 +187,7 @@ def test_install_unit_writes_but_never_enables(tmp_path):
         unit = next(path.glob("konstant-factory-*.service")).read_text()
         home = os.path.realpath(s.w.home)
         for line in (f"ExecStart={home}/bin/konstant factory run", "KillMode=mixed",
-                     "Restart=on-failure", "RestartPreventExitStatus=2 4",
+                     "Restart=on-failure", "RestartPreventExitStatus=4",  # L5-F2b K-13: exit 2 restarts
                      f"WorkingDirectory={home}"):
             assert line in unit
         assert res["unit"] == unit

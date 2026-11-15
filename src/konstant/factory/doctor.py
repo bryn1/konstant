@@ -81,12 +81,20 @@ def loop_rows(cfg) -> list:
     n = cfg.data["notify"]
     where = {"stdout": "the factory process's stderr", "file": "var/factory/notify.log",
              "webhook": f"POST to {n['url'] or '?'}",
-             "chat": "the orchestrator session the goal came from"}.get(n["kind"], n["kind"])
+             "chat": "the one owner inbox, shown at the next turn of EVERY `konstant dsh` "
+                     "session (delivered when a turn shows it)"}.get(n["kind"], n["kind"])
     why = notify.check_url(n["url"], n["url_hosts"]) if n["kind"] == "webhook" else None
+    if not why and n["kind"] == "chat":
+        why = notify.selftest(cfg)          # the writer and the reader, end to end (K-05)
+    mirror = (f"; mirrored to {n['mirror']}" + (f" {n['mirror_url']}" if n["mirror_url"] else "")
+              if n["mirror"] else "; no second channel ([notify] mirror): a factory down while "
+              "the board is unreachable is told on stderr and in notify.log only")
     note = ("FAIL", "notifier", why) if why else (
-        "PASS", "notifier", f"escalations go to {where} ({n['retries']} retr(y/ies)); one per "
-        "(goal, job, event) until `factory ack`; a failed delivery halts the factory")
-    return [row, note]
+        "PASS", "notifier", f"escalations go to {where} ({n['retries']} retr(y/ies)){mirror}; "
+        "one per (goal, job, event) until `factory ack`; a failed delivery halts the factory; "
+        "`konstant notify test` sends a real TEST")
+    from konstant.factory import unit
+    return [row, note, unit.doctor_row(cfg)]
 
 
 def intake_rows(cfg) -> list:
@@ -122,8 +130,9 @@ def intake_row(cfg) -> tuple:
     orch = "orchestrator" in cfg.data["factory"]["goal_roles"]
     if chat and orch:
         return ("PASS", "chat intake", "[notify] kind = chat and goal_roles include the "
-                "orchestrator: a typed request in `konstant dsh` becomes a goal proposal, filed "
-                "on the owner's next-message yes; escalations come back in that chat")
+                "orchestrator: a work request in `konstant dsh` (konstant's routing on the owner's "
+                "words) becomes a goal proposal, filed on the owner's explicit yes; escalations "
+                "come back in every chat")
     if chat:
         return ("WARN", "chat intake", "[notify] kind = chat but [factory] goal_roles lacks "
                 "orchestrator: the session shows the intake block, yet its `goal add "

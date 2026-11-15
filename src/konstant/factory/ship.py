@@ -251,8 +251,14 @@ def after_move(cfg, client, plan: dict, sid: int, tip: str, res: dict) -> tuple:
     except Exception as exc:  # noqa: BLE001 - RollbackFailed or anything else: the same halt
         client.post(f"/api/ships/{sid}", {"state": "rollback_failed", "post": post,
                                           "reason": f"post-ship: {why}; rollback: {exc}"})
-        escalate(cfg, client, plan, "ROLLBACK_FAILED", f"ship {sid}: rollback failed ({exc}); "
-                 "ALL shipping is halted until `konstant --as owner factory resume-shipping`")
+        if isinstance(exc, targets.RollbackConflict):      # K-14: the owner decides
+            escalate(cfg, client, plan, "DECISION", f"ship {sid}: the post-ship checks failed "
+                     f"and the rollback conflicts with a later commit ({exc}); konstant left the "
+                     "target as it is: revert the ship yourself or decide, then `konstant --as "
+                     "owner factory resume-shipping` (ALL shipping is halted)")
+        else:
+            escalate(cfg, client, plan, "ROLLBACK_FAILED", f"ship {sid}: rollback failed ({exc}); "
+                     "ALL shipping is halted until `konstant --as owner factory resume-shipping`")
         res.update(state="rollback_failed", reason=str(exc))
         return EXIT_HALTED, res
     client.post(f"/api/ships/{sid}", {"state": "rolled_back", "rollback": rb, "post": post,
@@ -264,13 +270,33 @@ def after_move(cfg, client, plan: dict, sid: int, tip: str, res: dict) -> tuple:
     return EXIT_ROLLED_BACK, res
 
 
+def chain_depth(ships: list, job_id) -> int:
+    """How many follow-ups deep a job is (0: filed by intake); the board's rule, code side."""
+    depth, seen = 0, set()
+    by_follow = {s.get("follow_up_id"): s for s in ships if s.get("follow_up_id")}
+    while job_id in by_follow and job_id not in seen:
+        seen.add(job_id)
+        depth, job_id = depth + 1, by_follow[job_id]["job_id"]
+    return depth
+
+
 def follow_up(cfg, client, plan: dict, sid: int, post: dict):
-    """5.3 step 4: a follow-up job by code, or BLOCKED after the goal's max_rollbacks."""
+    """5.3 step 4: a follow-up job by code, or BLOCKED after the goal's max_rollbacks or when
+    the follow-up chain is [factory] max_follow_ups deep (REVIEW L5-R2 K-17: max_rollbacks = 0
+    is not endless)."""
     goal, job = plan.get("goal"), plan["job"]
+    ships = client.get("/api/ships")["ships"]
+    cap_chain = int(cfg.data["factory"]["max_follow_ups"])
+    depth = chain_depth(ships, job["id"]) + 1
+    if depth > cap_chain:
+        escalate(cfg, client, plan, "BLOCKED", f"job {job['display_id']}: rolled back again; a "
+                 f"follow-up would be {depth} deep in its rollback chain ([factory] "
+                 f"max_follow_ups = {cap_chain}): no follow-up job is filed")
+        return None
     if goal is not None:
         cap = goal["spec"]["limits"].get("max_rollbacks") or 0
-        n = sum(1 for s in client.get("/api/ships")["ships"]
-                if s.get("goal_id") == goal["id"] and s["state"] == "rolled_back")
+        n = sum(1 for s in ships if s.get("goal_id") == goal["id"]
+                and s["state"] == "rolled_back")
         if cap and n > cap:
             escalate(cfg, client, plan, "BLOCKED", f"goal {goal['slug']}: {n} rollbacks, "
                      f"max_rollbacks = {cap}: no follow-up job is filed")

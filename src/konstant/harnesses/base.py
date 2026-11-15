@@ -517,6 +517,9 @@ def jail_layout(ph: Phase, rw=(), ro_binds=(), tmpdir: bool = True, keep=()) -> 
     # writable root reaches them, in every profile
     ro_dirs = ro_dirs + [Path(d) for d in tools.own_dirs()] + [Path(p) for p in
                                                                 pins.ro_paths(ws)]
+    # inside OUT: the other verifying phases' private dirs (and, for a verifier, the files it
+    # judges) read-only, so only a private dir's owner writes it (gate/rules/judged.py)
+    ro_dirs += [Path(p) for p in ph.values.get("out_ro") or ()]
     return dict(rw=roots, hide=hide, home=ws, expose=[secrets / t for t in phase_tokens(ph)],
                 tmpfs=("/tmp",) if phase_private_tmp(ph) else (), cwd=ph.cwd, net=True,
                 ro_binds=[*ro_binds, *prompt_binds(ph)], root_rw=conf.host_write,

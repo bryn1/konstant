@@ -258,7 +258,7 @@ def cmd_judge(ctx) -> int:
         print("konstant: task judge needs --run RUN or --out OUT", file=sys.stderr)
         return EXIT_USAGE
     try:
-        sha = judged.judge(rec)
+        sha = judged.judge(rec, getattr(a, "for_verdict", "") or "")
     except judged.JudgeRefused as exc:
         print(f"konstant task judge: REFUSED - {exc}", file=sys.stderr)
         return EXIT_USAGE
@@ -362,3 +362,6 @@ def register(sub, leaf) -> None:
     p.add_argument("--out", help="OUT dir (without a run record)")
     p.add_argument("--project", help="project dir (with --out)")
     p.add_argument("--base", help="git base commit (with --out)")
+    p.add_argument("--for", dest="for_verdict", default="", metavar="VERDICT", help="the "
+                   "verdict file of the verifying phase asking: pin its inputs and its own "
+                   "OUT/verify-<stem>/ dir, not the other verifiers' (DESIGN 6.4)")

@@ -19,7 +19,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -28,9 +27,9 @@ from pydantic import BaseModel, Field
 from konstant.board import db, tree
 from konstant.board.api.deps import Actor, reader, writer
 from konstant.board.redact import redact
+from konstant.factory.notify import SESSION  # the one session-id scheme (REVIEW L5-R2 K-05)
 
 router = APIRouter()
-SESSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 FACTORY = "factory"
 INTAKE_FROM = {"planning": ("none", "refused", "planning"), "filing": ("planning",),
                "filed": ("filing",), "refused": ("planning", "filing")}

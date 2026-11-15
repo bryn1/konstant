@@ -16,9 +16,11 @@ factory resume        (owner) clear the kill switch; a halted factory (a notifie
 factory status        the loop (running|draining|stale|stopped), halt, shipping, goals, open
                       escalations, the last events
 factory ack ID        (owner) acknowledge an escalation: the next one of its kind is told again
-factory install-unit  write a systemd --user unit for the loop into var/factory/systemd/ and
-                      print it; konstant never enables or starts it (that is the owner's step)
-notify test           deliver one TEST event through [notify] (or --kind/--url)
+factory install-unit  write systemd --user units for the board and the loop into
+                      var/factory/systemd/ and print them; konstant never enables or starts them
+                      (the owner's one-time `systemctl --user enable --now`)
+notify test           one real TEST event through [notify] (or --kind/--url) and the mirror;
+                      under chat the next turn of every `konstant dsh` session shows it
 All of it is refused inside a task run and in the orchestrator chat, except status; in the chat
 `ack`, `resume` and `resume-shipping` are PROPOSED instead and done only on the owner's next yes
 (factory/owner_actions.py, REVIEW L5-R2 K-07).
@@ -102,11 +104,21 @@ def cmd_run(ctx) -> int:
         from konstant.factory.notify import factory_dir
         factory_dir(cfg.home)
         proc.pid_file(cfg.home).write_text(f"{os.getpid()}\n")
-        try:
-            f.preflight()
-        except (loop.Refused, ClientError) as exc:
-            print(f"konstant factory: refused: {getattr(exc, 'message', exc)}", file=sys.stderr)
-            return EXIT_USAGE
+        from konstant.factory import health
+        while True:
+            try:
+                f.preflight()
+                health.board_back(f)
+                break
+            except ClientError as exc:      # K-13: forever (the unit) waits out a down board
+                if mode != "forever" or not health.unreachable(exc) or f.stopping or \
+                        proc.stop_file(cfg.home).exists():
+                    print(f"konstant factory: refused: {exc.message}", file=sys.stderr)
+                    return EXIT_USAGE
+                health.board_down(f, exc)
+            except loop.Refused as exc:
+                print(f"konstant factory: refused: {exc}", file=sys.stderr)
+                return EXIT_USAGE
         print(f"konstant factory: running (pid {os.getpid()}, tick {f.tick_s}s, cap {f.cap} "
               f"model step(s), mode {mode})", file=sys.stderr, flush=True)
         rc = f.run()
@@ -321,17 +333,13 @@ def cmd_install_unit(ctx) -> int:
 
 def cmd_notify_test(ctx) -> int:
     from konstant.factory import notify
-    cfg = ctx.cfg
-    rec = {"id": 0, "event": "TEST", "kind": "escalation", "goal": None, "job": None,
-           "display_id": None, "reason": "konstant notify test: the notifier reaches you",
-           "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "board_url": cfg.base_url}
-    kind = ctx.args.kind or cfg.data["notify"]["kind"]
     try:
-        where = notify.deliver(cfg, rec, kind=kind, url=ctx.args.url or "")
+        res = notify.test(ctx.cfg, ctx.args.kind or "", ctx.args.url or "")
     except notify.NotifyError as exc:
         print(f"konstant notify: FAILED: {exc}", file=sys.stderr)
         return EXIT_FAIL
-    ctx.out({"delivered": where, "kind": kind}, f"konstant notify: delivered to {where}")
+    ctx.out(res, f"konstant notify: delivered to {res['delivered']}"
+            + (f"; {res['mirror']}" if res["mirror"] else ""))
     return EXIT_OK
 
 
@@ -361,7 +369,8 @@ def register(sub, leaf) -> None:
             ("status", cmd_status, "the loop, halt, shipping, goals, escalations"),
             ("resume-shipping", cmd_resume_shipping, "(owner) lift the halt a failed rollback "
              "set"),
-            ("install-unit", cmd_install_unit, "write (never enable) a systemd --user unit")):
+            ("install-unit", cmd_install_unit, "write (never enable) systemd --user units for the "
+             "board and the factory")):
         p = fs.add_parser(verb, parents=[leaf], help=help_)
         p.set_defaults(func=func)
     p = fs.add_parser("ack", parents=[leaf], help="(owner) acknowledge an escalation")
@@ -373,7 +382,8 @@ def register(sub, leaf) -> None:
     n = sub.add_parser("notify", help="level 5: the factory's notifier")
     ns = n.add_subparsers(dest="notify_cmd", metavar="VERB")
     ns.required = True
-    p = ns.add_parser("test", parents=[leaf], help="deliver one TEST event")
+    p = ns.add_parser("test", parents=[leaf], help="deliver one real TEST event (chat: the "
+                     "next turn of every session shows it)")
     p.add_argument("--kind", choices=("stdout", "file", "webhook", "chat"))
     p.add_argument("--url", help="the webhook URL (default [notify] url)")
     p.set_defaults(func=cmd_notify_test)
