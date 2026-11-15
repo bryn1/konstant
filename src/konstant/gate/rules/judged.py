@@ -113,6 +113,10 @@ def project_state(args: dict, since=None) -> dict:
     top = git_top(project)
     if top:
         return _git_drift(top, args.get("git_base"), out)
+    if args.get("git_base"):          # the run's base is a commit: the project IS a git tree
+        raise JudgeRefused(f"git cannot read {project} here (the run has base "
+                           f"{str(args['git_base'])[:12]}): a pin over the whole tree would never "
+                           "match the check's")
     return _tree(Path(project), out, since)
 
 

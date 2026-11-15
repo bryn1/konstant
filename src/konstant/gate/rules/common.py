@@ -131,6 +131,11 @@ GIT_ISOLATION = ("-c", "safe.directory=*", "-c", "core.fsmonitor=false", "-c",
 def git_env(base: dict | None = None) -> dict:
     from konstant import tools
     env = tools.env(base)                         # PATH = konstant's trusted dirs (REVIEW H-01)
+    for k in [k for k in env if k.startswith(("GIT_CONFIG_", "GIT_DIR", "GIT_WORK_TREE",
+                                              "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                                              "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                                              "GIT_CEILING_DIRECTORIES"))]:
+        env.pop(k)                    # konstant's view of a project never takes the caller's
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GIT_CONFIG_NOSYSTEM="1",
                GIT_CONFIG_GLOBAL=os.devnull, GIT_ATTR_NOSYSTEM="1", GIT_PAGER="cat",
                GIT_NO_REPLACE_OBJECTS="1")

@@ -111,7 +111,11 @@ passes the docker socket (root on the host). Outside factory mode the owner may 
 - **No push credentials in a factory phase, in any profile (K-10).** A factory phase never gets
   `GH_TOKEN`/`GITHUB_TOKEN` (and the other token variables of `machinery.SHIP_CREDENTIAL_ENV`),
   `~/.config/gh`, `~/.git-credentials`, `~/.config/git/credentials`, `~/.netrc`, `~/.ssh` or the
-  ssh agent (`machinery.SHIP_CREDENTIALS`), and git's credential helpers are reset for it. Under
+  ssh agent (`machinery.SHIP_CREDENTIALS`), and git's credential helpers are reset for it
+  (one `GIT_CONFIG_PARAMETERS` entry `credential.helper=`, since L5-F2b: the earlier
+  `GIT_CONFIG_COUNT`/`KEY_0`/`VALUE_0` triple was half-dropped by a filter on the way into a dsh
+  phase's shell, which broke every git call in the phase; konstant's own git view never takes an
+  inherited `GIT_CONFIG_*`, and the judge refuses to pin a git project it cannot read). Under
   `open` a factory phase keeps the rest of the host. Otherwise a producer could push or merge to
   the real remote itself and skip verify, the holdouts and the secret scan. The owner can opt in
   with `[confinement] factory_host_credentials = true`. `doctor` then FAILs: "verified/shipped no

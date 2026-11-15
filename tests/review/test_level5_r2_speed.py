@@ -305,3 +305,51 @@ def test_K18_a_seal_cut_off_is_recovered_or_discarded(hws):  # noqa: F811
     assert "recovered H2" in r.stderr and "discarded a staged H3" in r.stderr, r.stderr
     assert sorted(p.name for p in store.iterdir()) == ["H1.scenario", "H2.scenario",
                                                        "H3.scenario"]
+
+
+# --- live finding of L5-F2b: git in a factory phase ------------------------------------------
+
+def _repo(tmp_path):
+    repo = tmp_path / "p"
+    repo.mkdir()
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull}
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True, env=env)
+    (repo / "a.txt").write_text("a\n")
+    for args in (("add", "a.txt"), ("-c", "user.name=t", "-c", "user.email=t@example.com",
+                                    "commit", "-qm", "a")):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, env=env)
+    return repo
+
+
+def test_live_git_still_works_in_a_factory_phase_whose_harness_drops_key_names(tmp_path):
+    """The live run's tester saw `missing config key GIT_CONFIG_KEY_0` on every git call: the
+    credential reset of K-10 was a GIT_CONFIG_COUNT/KEY_0/VALUE_0 triple and a filter on the way
+    into the phase's shell dropped the *KEY* name. The reset must survive such a filter whole."""
+    from konstant import confinement
+    repo = _repo(tmp_path)
+    conf = confinement.parse({"profile": "closed"}, tmp_path).for_phase("worker", True)
+    env = conf.withheld_env({**os.environ, "GIT_CONFIG_GLOBAL": os.devnull})
+    shell = {k: v for k, v in env.items() if "KEY" not in k and "TOKEN" not in k}
+    r = subprocess.run(["git", "-C", str(repo), "rev-parse", "--show-toplevel"],
+                       capture_output=True, text=True, env=shell)
+    assert r.returncode == 0, r.stderr
+    h = subprocess.run(["git", "-C", str(repo), "config", "--get-all", "credential.helper"],
+                       capture_output=True, text=True, env=shell)
+    assert h.stdout.strip() == "", h.stdout                 # the reset is still in force
+
+
+def test_live_konstants_own_git_view_ignores_an_inherited_git_config(tmp_path, monkeypatch):
+    from konstant.gate.rules import common
+    repo = _repo(tmp_path)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")             # a half-filtered triple
+    assert common.git_top(repo) == str(repo)
+
+
+def test_live_the_judge_refuses_a_git_project_it_cannot_read(tmp_path):
+    from konstant.gate.rules import judged
+    proj = tmp_path / "p"
+    (proj / "out").mkdir(parents=True)
+    (proj / "x.py").write_text("x = 1\n")
+    rec = {"out": str(proj / "out"), "project": str(proj), "git_base": "a" * 40}
+    with pytest.raises(judged.JudgeRefused, match="git cannot read"):
+        judged.judge(rec)

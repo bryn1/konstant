@@ -262,8 +262,15 @@ class Confinement:
         if not held:
             return env
         out = {k: v for k, v in env.items() if k not in held}
-        out.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="credential.helper",
-                   GIT_CONFIG_VALUE_0="", GIT_TERMINAL_PROMPT="0")
+        # ONE variable, GIT_CONFIG_PARAMETERS (as verify/procenv.py): the GIT_CONFIG_COUNT/
+        # KEY_0/VALUE_0 triple was half-dropped by a harness's secret-name filter (KEY), which
+        # broke every git call in the phase (live run L5-F2b)
+        prev = out.get("GIT_CONFIG_PARAMETERS", "").strip()
+        out["GIT_CONFIG_PARAMETERS"] = (prev + " " if prev else "") + "'credential.helper='"
+        for k in [k for k in out if k == "GIT_CONFIG_COUNT" or k.startswith(("GIT_CONFIG_KEY_",
+                                                                             "GIT_CONFIG_VALUE_"))]:
+            out.pop(k)
+        out["GIT_TERMINAL_PROMPT"] = "0"
         return out
 
     def env_drop(self) -> list:
