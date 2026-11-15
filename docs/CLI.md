@@ -880,7 +880,7 @@ options:
   --config PATH      konstant.toml to use
   --from-chat        a proposal from the orchestrator chat: filed when the owner's next message in
                      --session is a yes
-  --session SESSION  the chat session id (default $KONSTANT_CHAT_SESSION)
+  --session SESSION  the chat session id (default: the chat session the konstant-gate plugin marks)
 ```
 
 ## `konstant goal list`
@@ -1480,14 +1480,17 @@ options:
 ## `konstant doctor`
 
 ```
-usage: konstant doctor [-h] [--as ROLE] [--json] [--config PATH]
+usage: konstant doctor [-h] [--as ROLE] [--json] [--config PATH] [--live-preflight] [--keep]
 
 options:
-  -h, --help     show this help message and exit
-  --as ROLE      act with this role's token, or a factory identity's (planner, dod-reviewer,
-                 scenario, factory) (default [client] default_role)
-  --json         print JSON
-  --config PATH  konstant.toml to use
+  -h, --help        show this help message and exit
+  --as ROLE         act with this role's token, or a factory identity's (planner, dod-reviewer,
+                    scenario, factory) (default [client] default_role)
+  --json            print JSON
+  --config PATH     konstant.toml to use
+  --live-preflight  instead: ONE real jailed dsh phase on a scripted endpoint (no model), reported
+                    from inside its shell
+  --keep            with --live-preflight: keep its run dir
 ```
 
 ## `konstant version`

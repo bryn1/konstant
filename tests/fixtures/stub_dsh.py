@@ -21,8 +21,28 @@ dsh 0.2.1's own rules (apps/cli/src/dump-config.ts, packages/boot/app-boot/src/p
      output: the host-agents tests, [confinement] host_agents),
      recording each outcome as a JSON line in $STUB_DSH_LOG (when set) with the env it saw;
   3. with STUB_DSH_THEN=fake, hands stdin to tests/fixtures/fake_harness.py (its modes act as the
-     phase's tool calls); else prints `dsh started`.
-Only the standard library; it never contacts a network or a model.
+     phase's tool calls); with STUB_DSH_THEN=endpoint, runs a model loop against the provider
+     the --patch file names (`baseURL`, the model in KONSTANT_MODEL): `POST
+     <baseURL>/chat/completions` with stdin as the user message and one `bash` tool, streamed
+     (server-sent events, as dsh's openai-completions provider asks), each tool call run as a
+     command and its output sent back, until a reply has no tool call (the live pre-flight's
+     scripted endpoint, konstant/harnesses/scripted.py, drives it in CI); else prints
+     `dsh started`.
+
+What a model's command sees is what dsh 0.2.2's bash tool gives it (wave L5-L, measured by
+`konstant doctor --live-preflight` from inside a real phase): the harness's environment MINUS
+every name matching /KEY|PASSWORD|SECRET|TOKEN/i and every DSH_* name (dsh-subprocess
+SENSITIVE_ENV_PATTERN, scrubbedParentEnv), plus NO_COLOR=1, TERM=dumb, PAGER=cat, GIT_PAGER=cat
+(bash-local ENV_OVERRIDES) and dsh's own DSH_HOME, DSH_SHELL=1, DSH_SESSION_ID, DSH_PROFILE,
+DSH_PROFILE_DIR (shell-env); stdin is /dev/null, cwd the session's (the process cwd). The
+STUB_DSH_THEN=fake modes and every `run:` action run in exactly that environment (tool_env), so
+a variable konstant sets for a phase that dsh would drop is dropped here too (the L5-F2b live
+finding: a GIT_CONFIG_KEY_0 lost on the way, every git call in the phase broken, CI green).
+Not mirrored, on purpose: dsh's sandbox gives every command a fresh, empty /tmp, which would hide
+the test workspaces (they live under /tmp, where a real dsh cannot work at all: doctor WARNs);
+the pre-flight reports it live (`tmp-persists`).
+Only the standard library; it never contacts a network or a model, except the 127.0.0.1
+endpoint of STUB_DSH_THEN=endpoint.
 """
 from __future__ import annotations
 
@@ -30,12 +50,32 @@ import json
 import os
 import re
 import runpy
+import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SHIPPED = ["@deepseek-ai/dsh-base"]
+SENSITIVE = re.compile(r"KEY|PASSWORD|SECRET|TOKEN", re.I)        # dsh-subprocess
+OVERRIDES = {"NO_COLOR": "1", "TERM": "dumb", "PAGER": "cat", "GIT_PAGER": "cat"}  # bash-local
+SESSION = "session-" + str(uuid.uuid4())
+
+
+def tool_env(profile: str = "headless") -> dict:
+    """The environment of a command the model runs through dsh's bash tool (see the docstring)."""
+    env = {k: v for k, v in os.environ.items()
+           if not SENSITIVE.search(k) and not k.upper().startswith("DSH_")}
+    env.update(OVERRIDES)
+    env.update({"DSH_HOME": str(home()), "DSH_SHELL": "1", "DSH_SESSION_ID": SESSION,
+                "DSH_PROFILE": profile, "DSH_PROFILE_DIR": str(home() / "profiles" / profile)})
+    return env
+
+
+def shell(command: str, profile: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=120,
+                          env=tool_env(profile), cwd=os.getcwd(), stdin=subprocess.DEVNULL)
 
 
 def entries(path: Path) -> list:
@@ -150,7 +190,8 @@ def run(profile: str, patches: list, rest: list) -> int:
                 exec(m.group(1), {"__name__": "payload"})       # the planted plugin runs
     open_profile(profile)
     log({"argv": sys.argv[1:], "DSH_HOME": os.environ.get("DSH_HOME"), "cwd": os.getcwd(),
-         "loaded": loaded})
+         "loaded": loaded, "env_names": sorted(os.environ),     # what konstant gave dsh
+         "tool_env_names": sorted(tool_env(profile))})          # what a model's command gets
     for act in filter(None, os.environ.get("STUB_DSH_ACTIONS", "").split(";")):
         verb, _, target = act.partition(":")
         target = os.path.expandvars(target)
@@ -159,9 +200,7 @@ def run(profile: str, patches: list, rest: list) -> int:
                 time.sleep(float(target))
                 continue
             if verb == "run":
-                import subprocess
-                r = subprocess.run(target, shell=True, capture_output=True, text=True,
-                                   timeout=60)
+                r = shell(target, profile)
                 log({"act": act, "rc": r.returncode, "out": r.stdout, "err": r.stderr})
                 continue
             Path(target).parent.mkdir(parents=True, exist_ok=True)
@@ -174,13 +213,74 @@ def run(profile: str, patches: list, rest: list) -> int:
         except OSError as exc:
             log({"act": act, "result": type(exc).__name__})
     if os.environ.get("STUB_DSH_THEN") == "fake":
+        env = tool_env(profile)                  # the fake's actions are the model's commands
+        os.environ.clear()
+        os.environ.update(env)
         sys.argv = [str(HERE / "fake_harness.py")]
         runpy.run_path(str(HERE / "fake_harness.py"), run_name="__main__")
         return 0
+    if os.environ.get("STUB_DSH_THEN") == "endpoint":
+        return model_loop(profile, patches)
     if "-" in rest:
         sys.stdin.read()
     print("dsh started")
     return 0
+
+
+def _provider(patches: list) -> str:
+    for f in patches:
+        try:
+            m = re.search(r'^\s*baseURL:\s*"([^"]+)"', Path(f).read_text(), re.M)
+        except OSError:
+            continue
+        if m:
+            return m.group(1).rstrip("/")
+    raise SystemExit("dsh: no provider baseURL in the --patch files")
+
+
+def _complete(url: str, body: dict) -> dict:
+    """One streamed chat completion, folded into {"content", "tool_calls"}."""
+    import urllib.request
+    req = urllib.request.Request(url + "/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    content, calls = "", {}
+    with urllib.request.urlopen(req, timeout=60) as r:
+        for raw in r.read().decode().splitlines():
+            if not raw.startswith("data: ") or raw == "data: [DONE]":
+                continue
+            for ch in json.loads(raw[6:]).get("choices") or []:
+                d = ch.get("delta") or {}
+                content += d.get("content") or ""
+                for tc in d.get("tool_calls") or []:
+                    c = calls.setdefault(tc.get("index", 0), {"id": "", "name": "", "args": ""})
+                    c["id"] = tc.get("id") or c["id"]
+                    c["name"] = (tc.get("function") or {}).get("name") or c["name"]
+                    c["args"] += (tc.get("function") or {}).get("arguments") or ""
+    return {"content": content, "tool_calls": [calls[k] for k in sorted(calls)]}
+
+
+def model_loop(profile: str, patches: list) -> int:
+    url, model = _provider(patches), os.environ.get("KONSTANT_MODEL", "default")
+    tools = [{"type": "function", "function": {"name": "bash", "parameters": {
+        "type": "object", "properties": {"command": {"type": "string"},
+                                         "description": {"type": "string"}}}}}]
+    msgs = [{"role": "user", "content": sys.stdin.read()}]
+    for _ in range(20):
+        r = _complete(url, {"model": model, "stream": True, "messages": msgs, "tools": tools})
+        if not r["tool_calls"]:
+            print(r["content"])
+            return 0
+        msgs.append({"role": "assistant", "content": r["content"] or None, "tool_calls": [
+            {"id": c["id"], "type": "function", "function": {"name": c["name"],
+                                                             "arguments": c["args"]}}
+            for c in r["tool_calls"]]})
+        for c in r["tool_calls"]:
+            cmd = json.loads(c["args"] or "{}").get("command", "")
+            p = shell(cmd, profile)
+            log({"act": "tool:bash", "rc": p.returncode})
+            msgs.append({"role": "tool", "tool_call_id": c["id"],
+                         "content": p.stdout + p.stderr + f"\n[exit code: {p.returncode}]"})
+    return 1
 
 
 def main() -> int:

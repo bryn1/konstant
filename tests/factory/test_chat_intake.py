@@ -138,11 +138,14 @@ def test_B11_an_escalation_of_the_chat_goal_appears_in_the_next_turn(cws):
     assert turn(cws, "and now?")["lines"] == []                # shown once per session
 
 
-def test_the_chat_session_never_runs_the_factory_steps_red(cws):
+@pytest.mark.parametrize("marker", ["KONSTANT_CHAT_SESSION", "DSH_KONSTANT_CHAT_SESSION"])
+def test_the_chat_session_never_runs_the_factory_steps_red(cws, marker):
     """4.0 step 4: the orchestrator proposes; it never runs intake, the scenario writer or a
-    factory identity (the plugin marks the session's own bash KONSTANT_CHAT_SESSION). Found in
-    the L5-3 live smoke: the session ran `konstant intake` itself after the owner's yes."""
-    env = cws.env(KONSTANT_CHAT_SESSION=S)
+    factory identity (the plugin marks the session's own bash). Found in the L5-3 live smoke:
+    the session ran `konstant intake` itself after the owner's yes. Wave L5-L: a real dsh hands
+    a plugin's per-call variables to bash under DSH_* names only, so the live marker is
+    DSH_KONSTANT_CHAT_SESSION (KONSTANT_CHAT_SESSION never arrived); both count."""
+    env = cws.env(**{marker: S})
     res = cws.run("goal", "add", "-", "--from-chat", env=env, stdin=SPEC)   # session from env
     assert res.returncode == 0 and res.stdout.startswith("PROPOSED"), res.stderr
     assert cws.json("goal", "show", "greeter")["session"] == S
@@ -151,7 +154,8 @@ def test_the_chat_session_never_runs_the_factory_steps_red(cws):
                          (["holdout", "author", "1"], "the factory's step"),
                          (["--as", "planner", "job", "list"], "not available in the orchestrator"),
                          (["--as", "factory", "goal", "pause", "greeter"],
-                          "not available in the orchestrator")):
+                          "not available in the orchestrator"),
+                         (["--as", "owner", "job", "list"], "not available in the orchestrator")):
         r = cws.run(*argv, env=env)
         assert r.returncode == 1 and needle in r.stderr, (argv, r.stderr)
     assert cws.json("goal", "show", "greeter")["intake"] == "none"

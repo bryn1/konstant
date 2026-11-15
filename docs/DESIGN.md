@@ -109,6 +109,7 @@ konstant-0.1.0/
     holdout/  lint.py  store.py  leak.py     # scenario format + lint, seal/check, leak scan (§7.1)
               author.py                      # the scenario writer's phase (§7.3)
     factory/  clone.py  doctor.py            # job clones, factory doctor rows (§7.2)
+              preflight.py                   # `doctor --live-preflight`: one real dsh phase (§9)
               goal.py backlog.py intake.py   # goal files, the filing rules, `konstant intake` (§7.3)
               notify.py chat.py              # factory events, the orchestrator chat as intake
               ship.py shiprules.py shiprepo.py   # `konstant ship`: the guard, konstant's own
@@ -118,6 +119,7 @@ konstant-0.1.0/
               budget.py reconcile.py unit.py     # stall, process files; budgets; interrupted
                                                  # ships; the systemd --user unit (§7.6)
     harnesses/ base.py claude.py codex.py gemini.py dsh.py command.py   # adapters (§9)
+               scripted.py                   # a scripted OpenAI-compatible endpoint, no model (§9)
                dsh_session.py dsh_gate/{index.ts,build.mjs,konstant-gate.mjs} # dsh session plugin (§6.6)
     jail.py                                  # bubblewrap jail for agent-written code
     machinery.py                             # ONE list: paths no phase writes + credential homes (§9)
@@ -627,7 +629,9 @@ compose) is foreign. Phases cannot write the session home: `var/harness/` is kon
   task gate --json --harness dsh --cwd <session cwd> --session <id> [--file-job] -`; a typed task's
   text is replaced in place by block + text (+ `[job:N]` when bound); a failing gate passes the
   text UNGATED with a notice. Inside a runner phase (`KONSTANT_IN_TASK=1`) the plugin installs
-  nothing. A child's bash gets `KONSTANT_ROLE=worker KONSTANT_IN_TASK=1` (dsh's `shellEnv`).
+  nothing. A child's bash gets `DSH_KONSTANT_ROLE=worker DSH_KONSTANT_IN_TASK=1` (dsh's `shellEnv`,
+  whose registry takes `DSH_*` keys only and drops a contribution with any other key: until wave
+  L5-L the plugin's `KONSTANT_*` keys never reached a bash call; `client.marked` reads both).
 - `agent/turn-stopping`: `konstant task check --offline <run>`; UNMET steers a nudge into the same
   turn up to `max_resumes`, stopping when the normalised first reason repeats; BLOCKED and check
   errors end with a notice; MET with a job runs `konstant task close <run>`; a verify FAIL is
@@ -835,7 +839,8 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
   cursor (`var/factory/chat/<session>.json`) and one summary line of new outcomes; a typed request
   without a `[type:]`/`[job:]` tag gets the INTAKE block (one-line confirmation, `goal add -
   --from-chat`) instead of the gate. Refused inside a task run. The plugin marks the session's own
-  bash `KONSTANT_CHAT_SESSION=<id>` (the default `--session` of `goal add --from-chat`); there
+  bash `DSH_KONSTANT_CHAT_SESSION=<id>` (konstant reads it and `KONSTANT_CHAT_SESSION` alike; the
+  default `--session` of `goal add --from-chat`); there
   konstant refuses `intake`, `holdout author` and the four factory identities (4.0 step 4: the
   orchestrator never runs the factory's steps). docs/DSH.md.
 - **`konstant intake GOAL`** (`factory/intake.py`): refused without the jail (exit 2), for a goal
@@ -1330,6 +1335,38 @@ copy, and the same rules passed with `--settings` still applied, which confirms 
 suite and the fresh-install test prove the runner with the deterministic fake harness (`tests/fixtures/fake_harness.py`) and need
 no model; `doctor` checks that the settings file is in sync before a run.
 
+**The live pre-flight** (`konstant doctor --live-preflight`, `factory/preflight.py`; wave L5-L).
+The L5-F2b live run lost every attempt to a variable that never reached a dsh phase's shell (dsh's
+bash tool drops every name matching `/KEY|PASSWORD|SECRET|TOKEN/i`), while the offline suite and
+CI stayed green. So before a live goal one REAL jailed dsh phase runs through the real path
+(`PhaseRunner.run_group` -> `Harness.run` -> the dsh adapter -> `konstant.jail` -> dsh's own
+sandbox -> its bash tool) as the scoped tester of a throwaway factory job: a target under
+`projects/.konstant-preflight-<tag>` with one commit, its job clone `<target>@1` made by
+`factory/clone.py`, a run record from `gate/record.py`, an earlier phase's file in shared OUT and a
+canary in the sealed store. The "model" is `harnesses/scripted.py`, an OpenAI-compatible endpoint
+on 127.0.0.1 with no model (streamed `chat/completions`, `GET /models`): it answers with two `bash`
+tool calls and then a final text, so no model is called. The phase's patch is the workspace's
+generator (`dsh.patch`) with only the provider pointed at that endpoint (`<run>/preflight.patch.yml`);
+the composition check (`Harness.check`, the pinned, jailed `--dump-config`) runs on the workspace's
+own patch. The phase's shell prints one `PROBE <name> ok|fail|info` line per check: no half
+`GIT_CONFIG_COUNT/KEY` triple, cwd = the clone, `git rev-parse HEAD` = the base and `git status`
+work, `.git/config` and the target read-only, its identity's and the viewer token readable and every
+other token masked, the sealed store and its canary invisible, `OUT/verify-<stem>/` writable, the
+other verifiers' dirs and the judged shared OUT file read-only, `/tmp` (info: dsh gives every
+command a fresh one), the judge command `--for` its verdict file. konstant then re-checks the pin
+from outside with the DoD check's own rule (`gate/rules/judged.check`): fresh, with `git/` keys and
+no `proj/` keys. Every row is a doctor row; any FAIL exits 1. Everything it made is removed
+(`--keep` keeps the run dir). `tests/e2e/factory_live.sh` runs it before the model's first turn
+and stops on a FAIL. Measured live on dsh 0.2.2 (docs/LEVEL5.md "L5-L as built"): the environment
+a model's command gets is the harness's minus the credential-shaped and `DSH_*` names, plus
+`NO_COLOR=1 TERM=dumb PAGER=cat GIT_PAGER=cat` and dsh's own `DSH_HOME DSH_SHELL DSH_SESSION_ID
+DSH_PROFILE DSH_PROFILE_DIR`; stdin is `/dev/null`; every command gets a fresh, empty `/tmp`; and
+a plugin's per-command variables arrive only under `DSH_*` names (the konstant-gate plugin's
+markers are `DSH_KONSTANT_ROLE`, `DSH_KONSTANT_IN_TASK`, `DSH_KONSTANT_CHAT_SESSION`, §6.6). The
+stub dsh (`tests/fixtures/stub_dsh.py`) mirrors all of it but the per-command `/tmp` (test
+workspaces live under `/tmp`, where a real dsh cannot work), and its `STUB_DSH_THEN=endpoint` mode
+is a model loop against the scripted endpoint, so the pre-flight itself runs in CI.
+
 ### 9.1 Confinement profiles (`konstant/confinement.py`; wave L5-2b)
 
 `[confinement] profile` = `closed` (default: the reach this section describes) or `open` (a phase
@@ -1807,6 +1844,12 @@ board at start (a typo must not silently disarm a gate).
   codex is installed), per-harness `agents sync --check`, doctor detection and reach rows, a
   planted foreign dsh layer, and the runner with per-type adapters (fake `dsh`/`codex` binaries)
   keeping the worker role and the F-05 reaper guarantee.
+- **Live pre-flight + a faithful stub dsh (wave L5-L):** `tests/harness/test_live_preflight.py`
+  (`doctor --live-preflight` through the real runner, adapter and jail with the stub dsh's
+  endpoint mode, all green; the L5-F2a GIT_CONFIG triple planted back into konstant -> the
+  in-phase git rows FAIL; the stub's tool environment = dsh's). The stub's model commands
+  (`STUB_DSH_THEN=fake` and `run:`) get dsh's bash-tool environment, so the factory suites through
+  the stub reproduce the L5-F2b live failure on its base (UNMET after 3 resumes on a stale pin).
 - **dsh session:** `tests/harness/dsh_gate/plugin.test.mjs` (node:test on the vendored
   bundle: gate, loop outcomes, repeat-stop, cap, verifier hand-off, leaves, child env, UNBOUND),
   `tests/harness/test_dsh_gate.py` (bundle present and built from the current source, rebuilt

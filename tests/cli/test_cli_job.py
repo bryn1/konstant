@@ -101,8 +101,11 @@ def test_not_found_and_usage_exit_2(ws):
                   ws.write("b.md", BRIEF)).returncode == 2
 
 
-def test_in_task_runs_cannot_act_as_verifier_or_owner(ws):
-    env = ws.env(KONSTANT_IN_TASK="1")
+@pytest.mark.parametrize("marker", ["KONSTANT_IN_TASK", "DSH_KONSTANT_IN_TASK"])
+def test_in_task_runs_cannot_act_as_verifier_or_owner(ws, marker):
+    """DSH_KONSTANT_IN_TASK: the konstant-gate plugin's marker on a delegated child's bash in a
+    real dsh (wave L5-L)."""
+    env = ws.env(**{marker: "1"})
     for role in ("verifier", "owner"):
         res = ws.run("--as", role, "job", "list", env=env)
         assert res.returncode == 1 and "KONSTANT_IN_TASK" in res.stderr

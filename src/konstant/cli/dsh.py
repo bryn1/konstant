@@ -124,7 +124,7 @@ def cmd_dsh(ctx) -> int:
     if extra.get("KONSTANT_SHIM_DIR"):
         write_shims(ws, os.environ.get("PATH", os.defpath))
     env = {k: v for k, v in os.environ.items()
-           if k not in ("KONSTANT_IN_TASK", "KONSTANT_RUN", "KONSTANT_ROLE")}
+           if k.removeprefix("DSH_") not in ("KONSTANT_IN_TASK", "KONSTANT_RUN", "KONSTANT_ROLE")}
     env.update(extra)
     why = refusal(ctx, ws, extra)
     if why:

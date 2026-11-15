@@ -97,8 +97,9 @@ The session is the **orchestrator**. For each message you send:
    "status") passes unchanged. Empty and `/`-command messages are never gated.
 2. **Phases.** The model starts each phase as a dsh `subagent` whose prompt is
    `.dsh/agents/<agent>.md` + the phase brief. A delegated child is never gated and never gets a
-   loop, and its shell commands run with `KONSTANT_ROLE=worker KONSTANT_IN_TASK=1`, so the
-   konstant CLI refuses it every token but worker and viewer.
+   loop, and its shell commands run with `DSH_KONSTANT_ROLE=worker DSH_KONSTANT_IN_TASK=1`
+   (dsh passes a plugin's per-command variables only under `DSH_*` names), so the konstant CLI
+   refuses it every token but worker and viewer.
 3. **DoD loop.** When the turn ends, the plugin runs `konstant task check --offline <run>`:
    - MET (0): see 4;
    - UNMET (3): a nudge with the reasons is steered into the same turn, up to `[gate]
@@ -188,7 +189,7 @@ konstant (Python, no model) decides:
   when the board is unreachable. `bin/konstant notify test` sends a real TEST into the inbox (the
   next turn of every session shows it); `doctor` checks the inbox route end to end.
 - A message tagged `[type:..]` or `[job:..]` keeps the level-4 gate above.
-- The session's own bash gets `KONSTANT_CHAT_SESSION=<id>` (so `goal add --from-chat` needs no
+- The session's own bash gets `DSH_KONSTANT_CHAT_SESSION=<id>` (so `goal add --from-chat` needs no
   `--session`), and konstant refuses the factory's own steps from it: `konstant intake`,
   `holdout author` and `--as planner|dod-reviewer|scenario|factory`. The orchestrator proposes;
   the factory runs.

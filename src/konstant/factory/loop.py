@@ -230,7 +230,8 @@ class Factory:
             argv = k + ["task", "run", job["title"], "--job", str(a.job), "--type",
                         job["type"]] + over
         env = {k2: v for k2, v in os.environ.items()
-               if k2 not in ("KONSTANT_IN_TASK", "KONSTANT_CHAT_SESSION", "KONSTANT_ROLE")}
+               if k2.removeprefix("DSH_") not in ("KONSTANT_IN_TASK", "KONSTANT_CHAT_SESSION",
+                                                  "KONSTANT_ROLE")}
         env["KONSTANT_HOME"] = str(self.home)
         name = f"{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}-{self.ticks}-{a.kind}-" \
                f"{a.job or a.goal}.log"

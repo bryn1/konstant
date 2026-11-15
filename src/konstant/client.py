@@ -22,14 +22,21 @@ GUARDED_ROLES = ("verifier", "owner")
 IN_TASK_ROLES = ("worker", "viewer")
 
 
+def marked(name: str) -> str:
+    """A marker konstant sets as KONSTANT_<X>, or the konstant-gate plugin as DSH_KONSTANT_<X>
+    (dsh hands a plugin's per-call variables to bash only under DSH_* names: wave L5-L). Every
+    marker only RESTRICTS what the CLI does, so either spelling counts."""
+    return (os.environ.get(name) or os.environ.get("DSH_" + name) or "").strip()
+
+
 def in_task() -> bool:
-    return os.environ.get("KONSTANT_IN_TASK") == "1"
+    return os.environ.get("KONSTANT_IN_TASK") == "1" or os.environ.get("DSH_KONSTANT_IN_TASK") == "1"
 
 
 def in_chat() -> str:
     """The orchestrator chat session this process runs in (the konstant-gate plugin marks the
-    session's own bash with KONSTANT_CHAT_SESSION when the chat is the intake), else ''."""
-    return os.environ.get("KONSTANT_CHAT_SESSION", "").strip()
+    session's own bash with DSH_KONSTANT_CHAT_SESSION when the chat is the intake), else ''."""
+    return marked("KONSTANT_CHAT_SESSION")
 
 
 CHAT_REFUSED_LABELS = ("planner", "dod-reviewer", "scenario", "factory")
@@ -38,7 +45,7 @@ CHAT_REFUSED_LABELS = ("planner", "dod-reviewer", "scenario", "factory")
 def default_role(configured: str) -> str:
     """The role a command acts as when no --as is given: worker inside a task run."""
     if in_task():
-        env = os.environ.get("KONSTANT_ROLE", "worker")
+        env = marked("KONSTANT_ROLE") or "worker"
         return env if env in IN_TASK_ROLES else "worker"
     return configured
 

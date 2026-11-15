@@ -113,6 +113,18 @@ printf '\n[ship]\nremote = "%s"\ngh = "%s"\ngithub_repo = "example-org/greeter"\
 "$K" board stop >/dev/null; "$K" agents sync >/dev/null; "$K" board start >/dev/null || fail "board restart"
 "$K" doctor > "$BASE/doctor.log" 2>&1 || true
 grep -E '^(FAIL|WARN) ' "$BASE/doctor.log" || true
+# the live pre-flight (wave L5-L): ONE real jailed dsh phase on a scripted endpoint (no model call),
+# reported from inside its shell: git in a job clone, the tokens, the sealed store, OUT/verify-*/,
+# the pin. A FAIL here would break every factory phase (the L5-F2b live finding): stop before the model.
+STAGE="pre-flight"
+say "doctor --live-preflight"
+if "$K" doctor --live-preflight > "$BASE/preflight.log" 2>&1; then
+  grep -E '^(PASS|INFO) +(live|in phase: (git-rev-parse|tmp-persists))' "$BASE/preflight.log" | cut -c1-160
+  tail -n 1 "$BASE/preflight.log"
+else
+  grep -E '^FAIL ' "$BASE/preflight.log" | cut -c1-240; fail "the live pre-flight failed (see $BASE/preflight.log)"
+fi
+STAGE="install"
 BASE_COMMIT=$(git -C projects/greeter rev-parse main)
 echo "target greeter main = $BASE_COMMIT; ship target github -> a local bare repository + the gh stand-in"
 
@@ -258,6 +270,33 @@ for d in sorted(store.glob("*/runs/*")) if store.is_dir() else []:
         t0 = min(x.stat().st_mtime for x in (d / "prompts").glob("*.md")) if (d / "prompts").is_dir() else None
         secs = int(logs[0].stat().st_mtime - t0) if t0 else -1
         print(f"  scenario writer job {d.parts[-3]} {d.name}: {secs}s")
+PY
+say "canary leak check: every sealed scenario's CANARY in every producer-readable file of the workspace"
+"$VPY" - "$WS" <<'PY' || true
+import os, re, sys
+from pathlib import Path
+ws = Path(sys.argv[1])
+store, sealed = ws / "var" / "holdout", ("var/holdout", "var/secrets", "var/memory", "var/research", "memory")
+cans = set()
+for f in store.rglob("*") if store.is_dir() else []:
+    if f.is_file():
+        cans |= set(re.findall(rb"khc-[0-9a-f]{20}", f.read_bytes()))
+hits, n = [], 0
+for top in (ws / "var", ws / "projects"):
+    for root, dirs, files in os.walk(top):
+        rel = os.path.relpath(root, ws)
+        dirs[:] = [d for d in dirs if os.path.join(rel, d).replace(os.sep, "/") not in sealed]
+        for fn in files:
+            p = Path(root) / fn
+            try:
+                data = p.read_bytes()[: 8 << 20]
+            except OSError:
+                continue
+            n += 1
+            hits += [f"{c.decode()} in {p.relative_to(ws)}" for c in cans if c in data]
+print(f"canaries {len(cans)}, producer-readable files {n}, hits {len(hits)}")
+for h in hits[:20]:
+    print("  LEAK", h)
 PY
 echo "events:"; sed 's/^/  /' "$WS/var/factory/events.jsonl" 2>/dev/null | cut -c1-240 || true
 [ ! -f "$BASE/endpoint.log" ] || { echo "endpoint log:"; sed 's/^/  /' "$BASE/endpoint.log"; }

@@ -1,4 +1,4 @@
-// konstant-gate source-sha256=d1b33fce0e00b2b95f77f1548324d20851e58584cd478dd71b607f033a1a6bcf esbuild=0.28.2 (built by build.mjs from index.ts; do not edit)
+// konstant-gate source-sha256=5342e1b851e189781eb843e5e2b976baeeb214e3378f7bd90de887ea19d02286 esbuild=0.28.2 (built by build.mjs from index.ts; do not edit)
 // index.ts
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -23,10 +23,10 @@ function isLeaf(agent) {
   return depthOf(agent) >= 1;
 }
 function childEnv(agent) {
-  return agent !== void 0 && depthOf(agent) >= 1 ? { KONSTANT_ROLE: "worker", KONSTANT_IN_TASK: "1" } : {};
+  return agent !== void 0 && depthOf(agent) >= 1 ? { DSH_KONSTANT_ROLE: "worker", DSH_KONSTANT_IN_TASK: "1" } : {};
 }
 function chatEnv(agent) {
-  return agent !== void 0 && depthOf(agent) === 0 ? { KONSTANT_CHAT_SESSION: String(agent.session.header.id) } : {};
+  return agent !== void 0 && depthOf(agent) === 0 ? { DSH_KONSTANT_CHAT_SESSION: String(agent.session.header.id) } : {};
 }
 function normReason(reason, run) {
   const r = run === "" ? reason : reason.split(run).join("<run>");
@@ -49,7 +49,15 @@ function verifyText(job, round, max, reasons) {
 function runKonstant(cfg, args, stdin, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const env = { ...process.env, KONSTANT_HOME: cfg.home };
-    for (const k of ["KONSTANT_IN_TASK", "KONSTANT_RUN", "KONSTANT_ROLE", "KONSTANT_CHAT_SESSION"]) delete env[k];
+    for (const k of [
+      "KONSTANT_IN_TASK",
+      "KONSTANT_RUN",
+      "KONSTANT_ROLE",
+      "KONSTANT_CHAT_SESSION",
+      "DSH_KONSTANT_IN_TASK",
+      "DSH_KONSTANT_ROLE",
+      "DSH_KONSTANT_CHAT_SESSION"
+    ]) delete env[k];
     let child;
     try {
       child = spawn(cfg.konstant, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
@@ -134,9 +142,9 @@ function apply(ctx, config) {
     envCtx.shellEnv.register({
       name: "konstant-gate",
       variables: {
-        KONSTANT_ROLE: { description: "worker in a delegated child: the konstant CLI acts as the worker role." },
-        KONSTANT_IN_TASK: { description: "1 in a delegated child: the konstant CLI refuses every token but worker and viewer." },
-        KONSTANT_CHAT_SESSION: { description: "the orchestrator chat session (chat: true): konstant refuses the factory's own steps and identities from it." }
+        DSH_KONSTANT_ROLE: { description: "worker in a delegated child: the konstant CLI acts as the worker role." },
+        DSH_KONSTANT_IN_TASK: { description: "1 in a delegated child: the konstant CLI refuses every token but worker and viewer." },
+        DSH_KONSTANT_CHAT_SESSION: { description: "the orchestrator chat session (chat: true): konstant refuses the factory's own steps and identities from it." }
       },
       resolve: (execution) => ({ ...childEnv(execution.agent), ...cfg.chat ? chatEnv(execution.agent) : {} })
     });

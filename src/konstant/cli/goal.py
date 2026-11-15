@@ -164,7 +164,7 @@ def register(sub, leaf) -> None:
     p.add_argument("file", help="the goal TOML file, or - for stdin")
     p.add_argument("--from-chat", action="store_true", help="a proposal from the orchestrator "
                    "chat: filed when the owner's next message in --session is a yes")
-    p.add_argument("--session", help="the chat session id (default $KONSTANT_CHAT_SESSION)")
+    p.add_argument("--session", help="the chat session id (default: the chat session the konstant-gate plugin marks)")
     p.set_defaults(func=cmd_add)
     p = gs.add_parser("list", parents=[leaf], help="goals with status, intake state, source")
     p.add_argument("--status", help="filter: proposed,active,paused,done,stopped,withdrawn")

@@ -23,6 +23,21 @@ const BLOCK = '=== TASK GATE (docs) ===\nphases...\n=== END TASK GATE ==='
 const typed = (extra = {}) => ({ code: 0, stdout: JSON.stringify({ type: 'docs', why: 'tag', block: BLOCK, run_dir: '/ws/var/runs/r1', out: '/ws/o', job: null, ...extra }) })
 const small = { code: 0, stdout: JSON.stringify({ type: 'small', why: 'small-shape' }) }
 
+// dsh's ShellEnvRegistry.register (packages/shell/shell-env, 0.2.x) refuses any key that is not
+// DSH_<A-Z0-9_>; a refused contribution never reaches a bash call (wave L5-L: measured live by
+// `konstant doctor --live-preflight` style probes: the KONSTANT_* keys never arrived)
+function dshRegister(r) {
+  for (const key of Object.keys(r.variables)) {
+    if (!key.startsWith('DSH_') || !/^[A-Z][A-Z0-9_]*$/.test(key.slice(4))) {
+      throw new Error(`bash env contributor "${r.name}" declared invalid key "${key}"`)
+    }
+    if (['DSH_HOME', 'DSH_SHELL', 'DSH_SESSION_ID', 'DSH_PROFILE', 'DSH_PROFILE_DIR'].includes(key)) {
+      throw new Error(`bash env contributor "${r.name}" cannot own reserved key "${key}"`)
+    }
+  }
+  return r
+}
+
 function setup(script, config = {}, env = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'konstant-gate-test-'))
   const state = join(dir, 'state.json')
@@ -35,12 +50,14 @@ function setup(script, config = {}, env = {}) {
   for (const [k, v] of Object.entries(env)) { saved[k] = process.env[k]; process.env[k] = v }
   const handlers = {}
   const registered = []
+  const injectErrors = []
   const ctx = { logger: { info() {}, warn() {} }, on(ev, fn) { (handlers[ev] ??= []).push(fn) },
-    inject(deps, fn) { if (deps.includes('shellEnv')) fn({ shellEnv: { register: (r) => registered.push(r) } }) } }
+    // dsh runs an inject callback in its own fiber: a throw there is logged, the plugin goes on
+    inject(deps, fn) { if (deps.includes('shellEnv')) { try { fn({ shellEnv: { register: (r) => registered.push(dshRegister(r)) } }) } catch (e) { injectErrors.push(String(e)) } } } }
   plugin.apply(ctx, { konstant: FAKE, home: HOME, ...config })
   for (const [k] of Object.entries(env)) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k] }
   const calls = () => readFileSync(log, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l))
-  return { ctx, handlers, calls, registered }
+  return { ctx, handlers, calls, registered, injectErrors }
 }
 
 function agent(header = {}) {
@@ -244,11 +261,12 @@ test('normReason strips run paths, timestamps, shas and long numbers', () => {
 
 test('a delegated child\'s bash acts as worker; the session\'s own bash is untouched', async () => {
   const h = setup({})
+  assert.deepEqual(h.injectErrors, [])
   assert.equal(h.registered.length, 1)
   const env = h.registered[0]
   assert.equal(env.name, 'konstant-gate')
-  assert.deepEqual(env.resolve({ agent: agent({ origin: 'subagent' }) }), { KONSTANT_ROLE: 'worker', KONSTANT_IN_TASK: '1' })
-  assert.deepEqual(env.resolve({ agent: agent({ delegationDepth: 2 }) }), { KONSTANT_ROLE: 'worker', KONSTANT_IN_TASK: '1' })
+  assert.deepEqual(env.resolve({ agent: agent({ origin: 'subagent' }) }), { DSH_KONSTANT_ROLE: 'worker', DSH_KONSTANT_IN_TASK: '1' })
+  assert.deepEqual(env.resolve({ agent: agent({ delegationDepth: 2 }) }), { DSH_KONSTANT_ROLE: 'worker', DSH_KONSTANT_IN_TASK: '1' })
   assert.deepEqual(env.resolve({ agent: agent() }), {})
   assert.deepEqual(env.resolve({}), {})
 })
@@ -319,9 +337,9 @@ test('chat: a delegated child never reaches the chat turn', async () => {
   assert.equal(h.calls().length, 0)
 })
 
-test('chat: the session\'s own bash is marked KONSTANT_CHAT_SESSION, a child stays a worker', async () => {
+test('chat: the session\'s own bash is marked DSH_KONSTANT_CHAT_SESSION, a child stays a worker', async () => {
   const h = setup({}, { chat: true })
   const env = h.registered[0]
-  assert.deepEqual(env.resolve({ agent: agent() }), { KONSTANT_CHAT_SESSION: 'session-0001' })
-  assert.deepEqual(env.resolve({ agent: agent({ origin: 'subagent' }) }), { KONSTANT_ROLE: 'worker', KONSTANT_IN_TASK: '1' })
+  assert.deepEqual(env.resolve({ agent: agent() }), { DSH_KONSTANT_CHAT_SESSION: 'session-0001' })
+  assert.deepEqual(env.resolve({ agent: agent({ origin: 'subagent' }) }), { DSH_KONSTANT_ROLE: 'worker', DSH_KONSTANT_IN_TASK: '1' })
 })

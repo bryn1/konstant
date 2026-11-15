@@ -539,12 +539,13 @@ the factory, then reports back in the same chat.
    PROPOSAL. konstant carries it out with the owner token when the owner's NEXT message is an
    explicit yes, read by `chat turn` exactly like the goal yes (`factory/owner_actions.py`).
    Anything else drops it. The session itself holds no owner power: `--as owner`/`verifier` and
-   `chat turn` are refused from its shell (KONSTANT_CHAT_SESSION).
+   `chat turn` are refused from its shell (the chat marker, DSH_KONSTANT_CHAT_SESSION: L5-L).
 4. **The orchestrator is not a factory phase.** It is the owner's own session, unjailed, acting
    as `orchestrator`; it never claims, closes, verifies or ships a factory job (it holds none of
    the identity tokens of 2.2), so a goal it files goes through the whole loop below like any
-   other. Limit (stated): the session runs unjailed as the owner's OS user. The KONSTANT_CHAT_SESSION
-   marker stops every ordinary command path. A model that deliberately strips it and reads
+   other. Limit (stated): the session runs unjailed as the owner's OS user. The chat marker
+   (DSH_KONSTANT_CHAT_SESSION since L5-L; before it the marker never reached a real dsh's bash)
+   stops every ordinary command path. A model that deliberately strips it and reads
    `var/secrets/owner.token` itself is not stopped by konstant, as for the goal yes.
 
 Goal files stay the mechanism underneath (and `goal add FILE` as owner stays a path for anyone

@@ -339,6 +339,13 @@ def check_jail(rep: Report, cfg) -> None:
 
 def cmd_doctor(ctx) -> int:
     rep = Report()
+    if ctx.args.live_preflight:        # wave L5-L: one real jailed dsh phase (factory/preflight.py)
+        from konstant.factory import preflight
+        cfg = check_config(rep, ctx)
+        for row in preflight.run(cfg, keep=ctx.args.keep, log=lambda m: print(
+                m, file=sys.stderr, flush=True)) if cfg is not None else []:
+            rep.add(*row)
+        return _report(ctx, rep)
     check_python(rep)
     check_dependencies(rep)
     cfg = check_config(rep, ctx)
@@ -365,6 +372,10 @@ def cmd_doctor(ctx) -> int:
         from konstant.triage.doctor import rows as triage_rows
         for row in factory_rows(cfg) + intake_rows(cfg) + loop_rows(cfg) + triage_rows(cfg):
             rep.add(*row)
+    return _report(ctx, rep)
+
+
+def _report(ctx, rep: Report) -> int:
     counts = {s: sum(r["status"] == s for r in rep.rows) for s in ("PASS", "WARN", "FAIL", "INFO")}
     summary = (f"doctor: {counts['PASS']} PASS, {counts['WARN']} WARN, {counts['FAIL']} FAIL, "
                f"{counts['INFO']} INFO")
@@ -377,4 +388,7 @@ def cmd_doctor(ctx) -> int:
 def register(sub, leaf) -> None:
     p = sub.add_parser("doctor", parents=[leaf], help="check that this workspace is ready "
                        "(exit 0 when nothing FAILs)")
+    p.add_argument("--live-preflight", action="store_true", help="instead: ONE real jailed "
+                   "dsh phase on a scripted endpoint (no model), reported from inside its shell")
+    p.add_argument("--keep", action="store_true", help="with --live-preflight: keep its run dir")
     p.set_defaults(func=cmd_doctor)

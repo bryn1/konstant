@@ -28,10 +28,13 @@
  *      lines shown at the start of the turn; a typed request without a `[type:]`/`[job:]` tag gets
  *      the INTAKE block (turn it into a goal proposal, `goal add --from-chat`) instead of the gate.
  *      A failing chat turn never blocks the session: a notice says so and the gate runs as before.
- *      The session's own bash gets KONSTANT_CHAT_SESSION=<id>: konstant refuses `intake`, `holdout
- *      author` and every factory identity from it (the orchestrator proposes; the factory runs).
+ *      The session's own bash gets DSH_KONSTANT_CHAT_SESSION=<id>: konstant refuses `intake`,
+ *      `holdout author`, the owner token and every factory identity from it (the orchestrator
+ *      proposes; the factory runs).
  *  (e) A CHILD ACTS AS WORKER (`shellEnv`, the seam the replaced kb-guard plugin used): every bash
- *      call of a delegated child gets KONSTANT_ROLE=worker and KONSTANT_IN_TASK=1, so the konstant
+ *      call of a delegated child gets DSH_KONSTANT_ROLE=worker and DSH_KONSTANT_IN_TASK=1 (dsh's
+ *      registry takes DSH_* keys only and drops a contribution with any other key: until wave
+ *      L5-L the KONSTANT_* keys never reached a bash call; konstant reads both), so the konstant
  *      CLI it runs refuses every token but worker and viewer (a phase never files, claims, closes
  *      or verifies; the session, the orchestrator, does).
  *
@@ -115,14 +118,14 @@ function isLeaf(agent: Agent): boolean {
 
 /** The environment a bash call of `agent` gets from this plugin: a child acts as worker. */
 export function childEnv(agent: Agent | undefined): Record<string, string> {
-  return agent !== undefined && depthOf(agent) >= 1 ? { KONSTANT_ROLE: 'worker', KONSTANT_IN_TASK: '1' } : {}
+  return agent !== undefined && depthOf(agent) >= 1 ? { DSH_KONSTANT_ROLE: 'worker', DSH_KONSTANT_IN_TASK: '1' } : {}
 }
 
 /** The environment of the orchestrator session's OWN bash with the chat intake on: konstant then
  * refuses the factory's steps (`intake`, `holdout author`) and the factory identities from it
  * (docs/LEVEL5.md 4.0 step 4: the orchestrator files a proposal, it never runs the factory). */
 export function chatEnv(agent: Agent | undefined): Record<string, string> {
-  return agent !== undefined && depthOf(agent) === 0 ? { KONSTANT_CHAT_SESSION: String(agent.session.header.id) } : {}
+  return agent !== undefined && depthOf(agent) === 0 ? { DSH_KONSTANT_CHAT_SESSION: String(agent.session.header.id) } : {}
 }
 
 /** A reason with run-specific noise removed, so "the same reason again" is a string comparison. */
@@ -161,7 +164,8 @@ export function verifyText(job: string, round: number, max: number, reasons: str
 export function runKonstant(cfg: Config, args: string[], stdin: string, cwd: string, timeoutMs: number): Promise<Result> {
   return new Promise((resolve) => {
     const env: Record<string, string | undefined> = { ...process.env, KONSTANT_HOME: cfg.home }
-    for (const k of ['KONSTANT_IN_TASK', 'KONSTANT_RUN', 'KONSTANT_ROLE', 'KONSTANT_CHAT_SESSION']) delete env[k]
+    for (const k of ['KONSTANT_IN_TASK', 'KONSTANT_RUN', 'KONSTANT_ROLE', 'KONSTANT_CHAT_SESSION',
+      'DSH_KONSTANT_IN_TASK', 'DSH_KONSTANT_ROLE', 'DSH_KONSTANT_CHAT_SESSION']) delete env[k]
     let child
     try {
       child = spawn(cfg.konstant, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -243,9 +247,9 @@ export function apply(ctx: Context, config: Config): void {
     envCtx.shellEnv.register({
       name: 'konstant-gate',
       variables: {
-        KONSTANT_ROLE: { description: 'worker in a delegated child: the konstant CLI acts as the worker role.' },
-        KONSTANT_IN_TASK: { description: '1 in a delegated child: the konstant CLI refuses every token but worker and viewer.' },
-        KONSTANT_CHAT_SESSION: { description: 'the orchestrator chat session (chat: true): konstant refuses the factory\'s own steps and identities from it.' },
+        DSH_KONSTANT_ROLE: { description: 'worker in a delegated child: the konstant CLI acts as the worker role.' },
+        DSH_KONSTANT_IN_TASK: { description: '1 in a delegated child: the konstant CLI refuses every token but worker and viewer.' },
+        DSH_KONSTANT_CHAT_SESSION: { description: 'the orchestrator chat session (chat: true): konstant refuses the factory\'s own steps and identities from it.' },
       },
       resolve: (execution: { agent?: Agent }) => ({ ...childEnv(execution.agent), ...(cfg.chat ? chatEnv(execution.agent) : {}) }),
     })

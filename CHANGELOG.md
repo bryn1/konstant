@@ -33,6 +33,25 @@ review and its fixes before a release).
   (default 3). No lint rule changed; a skeleton placeholder is a new refusal.
 
 
+### Changed (wave L5-L: the live acceptance of level 5)
+- **`konstant doctor --live-preflight`**: before a live goal, ONE real jailed dsh phase runs
+  through the real runner, adapter and jail, as the scoped tester of a throwaway factory job, on a
+  scripted local endpoint (no model call), and its own shell reports: git works in the job clone,
+  its token is readable and the others are not, the sealed store is masked, the
+  `OUT/verify-<stem>/` layout holds, and the pin made inside matches the DoD check outside.
+  `tests/e2e/factory_live.sh` runs it first and stops on a FAIL; on the L5-F2b code it reproduces
+  that run's live finding (`missing config key GIT_CONFIG_KEY_0`, a stale pin).
+- **The stub dsh is faithful to dsh's bash tool**: a model command gets the harness's environment
+  minus every `KEY`/`PASSWORD`/`SECRET`/`TOKEN`-shaped and `DSH_*` name, plus dsh's own overrides
+  and `DSH_*` facts, stdin `/dev/null` (measured live by the pre-flight); a model-loop mode drives
+  the pre-flight in CI. The factory suites through the stub now fail on the L5-F2b base the way
+  the live run did.
+- **Fixed: the konstant-gate plugin's per-command markers never reached a real dsh's bash** (dsh
+  takes `DSH_*` keys only): they are `DSH_KONSTANT_ROLE`, `DSH_KONSTANT_IN_TASK` and
+  `DSH_KONSTANT_CHAT_SESSION`, and konstant reads both spellings. Before this, a delegated child
+  in the owner's session was not marked worker and the chat's refusals (`intake`, `holdout
+  author`, `--as owner`, the factory identities) did not apply to the session's own bash.
+
 ### Changed (wave L5-F2b: the second review's owner-seat findings K-05, K-08, K-09, K-11, K-13, K-14, K-16..K-18, and speed)
 - **Every chat hears the factory**: one owner inbox that every `konstant dsh` session shows at its
   next turn (a new session shows what is still open); delivered when a turn showed it; a byte
