@@ -36,7 +36,7 @@ from pathlib import Path
 
 from konstant.gate.rules.common import (CACHE_DIRS, META_NAMES, RUN_DIRS, Finding, Run, git,
                                         git_head, git_top, has_run_dir, inside, is_verdict_file,
-                                        out_files, worktree_drift)
+                                        out_files, own_dir, worktree_drift)
 from konstant.gate.rules.verdicts import decisive, judged_line, words
 
 
@@ -56,21 +56,15 @@ def _sha(path) -> str:
     return h.hexdigest()
 
 
-def own_dir(verdict: str) -> str:
-    """The private OUT dir of a scoped verifying phase: TEST-verdict.md -> verify-test."""
-    from konstant.gate.rules.common import verdict_stem
-    return "verify-" + verdict_stem(os.path.basename(verdict)).lower()
-
-
 def out_state(out: Path, exclude=()) -> dict:
     """`exclude`: top-level OUT dir names left out of the state (other verifiers' private dirs)."""
     state = {}
     if not out.is_dir():
         return state
     for f in out_files(out):
-        if f.name.lower() in META_NAMES or is_verdict_file(f):
-            continue
         rel = os.path.relpath(f, out)
+        if f.name.lower() in META_NAMES or is_verdict_file(rel):
+            continue
         if rel.split(os.sep, 1)[0] in exclude:
             continue
         state["out/" + rel] = _sha(f)

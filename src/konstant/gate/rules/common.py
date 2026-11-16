@@ -83,10 +83,43 @@ def out_files(out: Path):
                 yield Path(root) / fn
 
 
-def is_verdict_file(path: Path) -> bool:
-    """A verdict file is named *verdict*.md (case-insensitive). Findings documents are not."""
-    low = path.name.lower()
+def verdict_named(name: str) -> bool:
+    """*verdict*.md (case-insensitive): the NAME of a verdict file. A name alone proves nothing."""
+    low = name.lower()
     return low.endswith(".md") and "verdict" in low
+
+
+def is_verdict_file(path, out=None) -> bool:
+    """A verdict file is a *verdict*.md file DIRECTLY in OUT: OUT's top level is konstant's verdict
+    namespace (every adapter and the dsh plugin write a phase's verdict there, and konstant reads
+    a phase's verdict only from `OUT/<its catalog name, cycle suffixed>`). `path` is relative to
+    OUT, or absolute with `out` given. A file in a subdirectory - a verifier's private
+    OUT/verify-<stem>/ included - is evidence or deliverable whatever its name: never read as a
+    verdict, in every pin that covers its place (L5-L2: a closing architect's
+    `verify-arch/a5-verdict-prejudge.md`, written where its prompt told it to put its evidence,
+    was taken for a forged verdict and ended the attempt). Forging and shadowing stay refused by
+    the authorship rule: every top-level verdict-named file must be created by the phase it
+    names, and a private dir is written only by its owner (gate/rules/authorship.py)."""
+    p = Path(path)
+    if out is not None and p.is_absolute():
+        try:
+            p = p.relative_to(out)
+        except ValueError:
+            return False
+    return len(p.parts) == 1 and verdict_named(p.name)
+
+
+def own_dir(verdict: str) -> str:
+    """The private OUT dir of a scoped verifying phase: TEST-verdict.md -> verify-test."""
+    return "verify-" + verdict_stem(os.path.basename(verdict)).lower()
+
+
+def private_owner(rel: str, own_dirs) -> str | None:
+    """The verdict file whose private dir holds `rel` (a path relative to OUT), else None."""
+    parts = Path(rel).parts
+    if len(parts) < 2:
+        return None
+    return next((v for v in own_dirs or () if own_dir(v) == parts[0]), None)
 
 
 def verdict_stem(name: str) -> str:

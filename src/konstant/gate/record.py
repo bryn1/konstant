@@ -104,7 +104,7 @@ def closeout_scratch(out: Path, run_dir: Path, m: dict, log=print) -> list:
     out, moved = Path(out), []
     for rel in m.get("created") or []:
         src = out / rel
-        if Path(rel).name.lower() in META_NAMES or is_verdict_file(Path(rel)) or \
+        if Path(rel).name.lower() in META_NAMES or is_verdict_file(rel) or \
                 not src.is_file() or src.is_symlink():
             continue
         dst = out / ".tmp" / "closeout" / rel
@@ -117,3 +117,14 @@ def closeout_scratch(out: Path, run_dir: Path, m: dict, log=print) -> list:
         m["moved_to_scratch"] = moved
         (Path(run_dir) / "phases" / f"{m['label']}.json").write_text(json.dumps(m, indent=2))
     return moved
+
+
+def idle_state(rec: dict, out_snapshot: dict):
+    """What a producing phase can change: OUT (the runner's snapshot) and the project's state
+    (gate/rules/judged.py project_state). Equal before and after a phase that exited 0 = it did
+    nothing (L5-L2); None when the project cannot be read (then nothing is retried)."""
+    from konstant.gate.rules import judged
+    try:
+        return out_snapshot, judged.project_state(rec)
+    except (judged.JudgeRefused, OSError):
+        return None

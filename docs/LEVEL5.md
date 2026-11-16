@@ -288,8 +288,9 @@ CANARY: khc-6c1d0f0e9b2a47d8a3f5
      stricter character rules would refuse the `;` inside a quoted `python3 -c` argument);
    - the expectation is not trivial;
    - **held out**: no expectation literal of 4 or more characters and no quoted `RUN` argument
-     appears in the job's brief or acceptance, or in the text of the job's goal, which producers
-     read too (`NOT HELD OUT: H1 ... appears in the goal text`; REVIEW L5-R2 K-11). A seal cut
+     appears in the job's brief or acceptance, or in the text of the job's goal or of the goal's
+     other jobs (title, brief, DoD), which producers read too (`NOT HELD OUT: H1 ... appears in
+     the goal text (the goal or another of its jobs)`; REVIEW L5-R2 K-11, L5-L2). A seal cut
      off between staging and its rename is finished on the next seal when the board holds the
      scenario's commitment and the bytes match it, else its staged file is discarded (K-18);
    - the job, counting its sealed scenarios and the files of this `holdout add` (`--file` is
@@ -1862,6 +1863,52 @@ Findings for the next review (not fixed here):
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
+
+### L5-L2 as built (verdict identity, the review items, live acceptance round 2)
+
+**The open finding (L5-L run 2, attempt 2), resolved by the integrity argument** (DESIGN §6.4
+"Verdict identity"; `tests/review/test_level5_l2_verdicts.py`). The closing architect wrote its
+evidence where its prompt told it to, into its own `verify-arch/`, as `a5-verdict-prejudge.md`.
+Every `*verdict*.md` under OUT was a verdict, so the check refused it as malformed, routed it to
+a verifier "A5" that does not exist and called it a forgery. The rule now:
+- a verifier may write anything, under any name, in its own private dir: that is its evidence,
+  pinned by its own verdict, never read as a verdict, and written by nobody else (the jail; and
+  the manifests: a create, modify or delete there by any other phase run is `AUTHORSHIP`, the
+  run tainted, jail or not);
+- konstant identifies a verdict by place and by the phase run it named it for: only a
+  `*verdict*.md` file directly in OUT is a verdict file, and it must be created by the run whose
+  target (the manifest's `verdict`, cycle suffixed) it is - not, as before, by any run whose
+  verdict has the same stem;
+- what it still stops: a phase forging another phase's verdict (top level: no run had that
+  target, tainted); shadowing it (a verdict-named file in any subdir never counts; a group
+  member creating the tester's next-cycle file is nobody's target, tainted); planting evidence
+  in another verifier's dir (tainted); editing evidence after it was judged (stale pin).
+Red on 237521d, green now: the live shape (UNMET, AUTHORSHIP), the runner on it (every scoped
+verifier names its evidence `a5-verdict-<agent>-prejudge.md`: STOP before, MET in one round now),
+verdict-named evidence edited after its pin (no finding before: it was outside every pin), and
+two attacks 237521d **accepted** (MET): a reviewer's `verify-review/TEST-verdict-c9.md` PASS and
+a reviewer's top-level `TEST-verdict-c2.md` created inside the tester || reviewer group, each
+overriding the tester's FAIL, because the group's one shared snapshot credited the file to the
+tester by its stem. A coder planting a test in the tester's dir before the tester ran (pinned by
+the tester: MET before) is tainted now. Twins that stay refused: a forged top-level verdict by
+a phase outside the group (AUTHORSHIP, as before), a shadow from a shared subdir (refused before
+as AUTHORSHIP, now the tester's FAIL decides), the close-out writing a private dir (stale pin
+before, tainted now). Not closed (stated in DESIGN): inside one parallel group a member writing
+another member's EXACT target before it does.
+
+**The other review items of "L5-L as built"**:
+  1. *A phase that ends rc 0 doing nothing passes as a cycle* (run 1's 11 s planner): it could
+     block a goal (the cycle cap), so it is fixed: a producing phase that exits 0 with OUT and
+     the project unchanged is retried once in its cycle, as a crashed verifier is (red: the
+     empty coder run passed and the run needed a resume).
+  2. *The held-out lint did not read the sibling jobs*: two held-out literals of job 1.2 stood in
+     job 1.1's DoD, which every producer reads. Integrity-touching and not safe as it was (those
+     literals were not held out from job 1.2's producers), so it is fixed, only stricter: the
+     seal, the writer's pre-check and its prompt read the goal's other jobs' titles, briefs and
+     DoDs (`store.public_text`).
+  3. *Board stalls of 30-60 s*: host IO pressure, not konstant; 17d608a waits them out. Nothing
+     changed; recurrences are recorded below.
+  4. The verdict rule above.
 
 ## 9. Owner decisions (2026-11-01; were the open questions)
 

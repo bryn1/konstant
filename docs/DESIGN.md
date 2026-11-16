@@ -491,7 +491,7 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 
 | rule | kept as | statement |
 |---|---|---|
-| verdicts | `rules/verdicts.py` | fresh verdict files end with exactly one `# VERDICT: <word>` line; at most one `# JUDGED:` line |
+| verdicts | `rules/verdicts.py` | a **verdict file** is a `*verdict*.md` file DIRECTLY in OUT (L5-L2: OUT's top level is the verdict namespace; konstant reads a phase's verdict only from `OUT/<its catalog name, cycle suffixed>`); a file in a subdirectory, a verifier's private `OUT/verify-<stem>/` included, is evidence or deliverable whatever its name and is in every pin that covers its place. Fresh verdict files end with exactly one `# VERDICT: <word>` line; at most one `# JUDGED:` line |
 | phases | `rules/phases.py` | every verifying phase has a fresh verdict file named for it; a cycle writes a new suffixed file (`-c2`); the newest decides; after 3 cycles a non-pass verdict counts as BLOCKED |
 | judged | `rules/judged.py` | a decisive PASS verdict's `# JUDGED: <sha>` equals the content hash of OUT (minus verdicts/DONE/CYCLES/.tmp) + the git diff of the project tree vs the run base (a project that is not a git tree: every project file outside OUT), recomputed by replaying the args recorded with the pin; mismatch = edited after judging (the changed paths are named); unrecorded args (`PIN-ARGS-UNRECORDED`) / base mismatch (`PIN-BASE-DIFFERS`) = UNMET by name; the judge refuses an EMPTY state (exit 2). **Scoped pins** (L5-F2b; REVIEW L5-R2 item 5a): each verifying phase that is not its type's producer (`catalog.scoped`, the record's `own_dirs`) owns `OUT/verify-<stem>/`, which the jail binds read-only to every other phase; for a scoped verifier also every file already in OUT outside the private dirs; `task judge --for <verdict>` pins the phase's inputs (OUT outside the private dirs, the project drift) + its own dir only, so another verifier's later evidence no longer stales it; the check derives the scope from the verdict's NAME, never from the args (`PIN-SCOPE-DIFFERS`); a private dir holding files with no decisive verdict of its owner is `UNPINNED`; a pin without `--for` still covers everything |
 | done | `rules/done.py` | DONE.md rows `ID | claim | STATUS | evidence`, STATUS in PASS FAIL BLOCKED N/A UNVERIFIED; the header is only a line whose first four cells are exactly those names (F-09); FAIL/UNVERIFIED/placeholder evidence/N/A without reason = UNMET; ≥1 PASS row; with a job, one `DoD-<n>` row per row of the job's DoD (`board.dod.dod_rows`), PASS or BLOCKED, never N/A (F-21); `DECLINED | <claim> | job <id>` excuses an EXCUSABLE condition only when the claim quotes it (≥2 contiguous shared words, claim ≥3 words) AND job `<id>` carries an owner-role note/approval `DECLINED: <the same claim>` read from a reachable board (F-01: a quoted "owner statement" and "any existing job" were text the close-out agent could author); offline or unreachable = unresolved (fail closed); never excuses the rules verdicts, phases, judged, tests, verified, authorship, holdouts, backlog, research, licence; `DECLINED`/`DISPUTE`/`COPIED` rows are not matrix rows; a row whose claim is about a sealed store (the research store, the holdout store, the memory vault/index: `SEALED_CLAIM`) is ignored with a warning whatever its status, never the PASS row, never BLOCKED (no phase can read those stores; the rules research, holdouts and verified check them; `DoD-<n>` rows are never ignored; L5-6b) |
@@ -506,7 +506,7 @@ reports unverifiable claims; never resumed, never MET) · `5` the check itself f
 | research | `rules/research.py` | the run record's intake card requires research (§6.2.1): the closed researcher's `var/research/<run>/result.json` must exist (owner orchestrator; `unavailable` = a warning); unexcusable |
 | licence | `rules/licence.py` | copied code: every `COPIED` row's licence is known and compatible with the project's; a changed code file with a provenance mark has a row (owner producer); unexcusable (§6.2.1) |
 | verified | `rules/verified.py` | the run's job, once closed, has a `konstant verify` verdict newer than the run start; FAIL = UNMET, BLOCKED = BLOCKED; a board that cannot be read = UNMET (fail closed); `task check --offline` skips the rule with a warning (the evidence the runner closes with uses it, so the verifier's re-run does not wait on its own verdict) |
-| authorship | `rules/authorship.py` | runner mode: EVERY verdict file (superseded cycles too) must have been created by a run of the verifying phase it names (phase manifests, §6.5) and touched by no other phase run, and its content must equal the sha256 the last phase that touched it recorded (F-05: a change outside every phase window); otherwise UNMET `AUTHORSHIP:` (also for a verdict file no phase run created). No re-run can undo it: the loop stops (owner `none`). Inside a parallel group (one shared snapshot) a verdict file is credited by NAME to the member it names. Interactive mode: an unattributed WARNING |
+| authorship | `rules/authorship.py` | runner mode: EVERY verdict file (superseded cycles too) must have been created by the phase run konstant named it for (the manifest's `verdict`: the catalog name, cycle suffixed; L5-L2: no longer a stem match, which let a member of a parallel group create another member's next-cycle file) and touched by no other phase run, every file of a private dir `OUT/verify-<stem>/` must have been created, modified or deleted only by its owner's verifying phase (L5-L2: who wrote it, never its name, makes it the verifier's; the jail refuses the write, the manifests prove it without the jail), and its content must equal the sha256 the last phase that touched it recorded (F-05: a change outside every phase window); otherwise UNMET `AUTHORSHIP:` (also for a verdict file no phase run created). No re-run can undo it: the loop stops (owner `none`). Inside a parallel group (one shared snapshot) a verdict file is credited to the member konstant named it for, a private-dir file to the dir's owner. Interactive mode: an unattributed WARNING |
 | cleanup | `rules/cleanup.py` | DONE.md carries `CLEANUP: <what was moved/removed and where>` or `CLEANUP: NONE-NEEDED`; `[gate] cleanup = warn` (default) or `fail` |
 
 Scoped pins, where they differ from the review's sketch (REVIEW L5-R2 item 5a; recorded here as
@@ -518,7 +518,34 @@ which is the integrity rule, not a speed problem. What is narrowed is only anoth
 private dir; what the jail adds is that nobody but its owner can write that dir, and that a
 scoped verifier cannot change the OUT files it judges. Without konstant's jail (a level-4 phase
 on an adapter that does not confine) the narrowing is still safe, because every private dir is
-pinned by its own verdict, but nothing stops the write: the pin catches it afterwards.
+pinned by its own verdict, but nothing stops the write: the pin catches it afterwards, and since
+L5-L2 the authorship rule taints the run (a private dir is its owner's alone).
+
+**Verdict identity** (wave L5-L2; LEVEL5 "L5-L2 as built" has the live case). konstant, not a file
+name, says what a verdict is: the file `OUT/<cycle_name(verdict, c)>` it told one phase run to
+write (the prompt's KONSTANT-VERDICT, the manifest's `verdict`). The rule, from the integrity
+argument:
+- *What a verifier may write in its own private dir*: anything, under any name. Those files are
+  its evidence: never read as a verdict, pinned by its own verdict (an edit after its pin stales
+  it), and written by nobody else (the jail binds the dir read-only to every other phase; the
+  manifests prove it: a create/modify/delete there by any other phase run is `AUTHORSHIP`).
+- *How verdict files are identified*: by place and by the phase run konstant named them for. Only
+  `*verdict*.md` files directly in OUT are verdict files (format-checked, out of the pins, decided
+  by the highest cycle per phase); each must be created by the phase run whose target it is and
+  touched by no other. Any other top-level verdict-named file is nobody's target: `AUTHORSHIP`.
+- *What it still stops*: forging (a phase writing another phase's verdict, top level: no phase
+  run had that target -> tainted); shadowing (a verdict-named file in a private or shared subdir
+  never counts, so a higher "cycle" there cannot override the real verdict; a member of the
+  tester || reviewer group creating the tester's NEXT-cycle file at the top level is nobody's
+  target -> tainted); planting evidence in another verifier's dir (tainted, jail or not);
+  editing evidence after judging (stale pin). What it no longer does: refuse a verifier's own
+  evidence for its name (the live false positive), or keep verdict-named evidence out of its pin.
+  Two refusals got stronger on 237521d's code: a reviewer's `verify-review/TEST-verdict-c9.md`
+  PASS, and a reviewer's top-level `TEST-verdict-c2.md` created inside the parallel group, each
+  overrode the tester's FAIL there (MET), because one shared snapshot credited the file to the
+  tester by its stem. What one shared snapshot still cannot tell apart: a group member writing
+  another member's EXACT target before that member does (the jail does not stop it, the owner's
+  own write then replaces it; stated, not new).
 
 Every finding carries an owner (`producer`, `orchestrator`, `verifier:<file>`, `none`) that the
 loop resumes. Rule order is fixed because the repeat-stop compares the FIRST reason: verdicts,
@@ -569,7 +596,11 @@ The runner is the enforcing mode: konstant, not the model, drives the phases.
    harness CRASHED (exit neither 0 nor the timeout's 124) before it wrote its verdict file is run
    once more in the same cycle (`<label>-retry.log`, manifest `retried: true`; wave L5-L: a
    malformed model tool call ended a live DoD reviewer in 2 minutes, and as "no verdict file" it
-   cost the producer a whole cycle). Its verdict is then judged by every rule as before.
+   cost the producer a whole cycle). Its verdict is then judged by every rule as before. A
+   PRODUCING phase (no verdict, not the close-out, not in a parallel group) that exits 0 having
+   changed nothing - OUT's snapshot and the project's state (`judged.project_state`) both equal
+   before and after - is run once more the same way (L5-L2: live run L5-L's 11 s planner with no
+   work passed as a cycle; the unchanged work was judged again and the cycle was spent).
 4. Back-edge: a verifying phase whose verdict is FAIL/FIX/RECONSIDER re-runs the producer with the
    verdict text as context, then the verifiers again (new suffixed verdict files). Cap: 3 cycles.
 5. Close-out phase: the `orchestrator` profile writes DONE.md and CYCLES.md from the artifacts,
@@ -740,7 +771,9 @@ closed with.
   `CANARY` (`khc-` + 20 hex, written by `holdout add` when absent).
 - **Seal** (`holdout/store.py`, `konstant holdout add JOB --file F [--file F ...]`, owner): lint
   (keys, safe RUN, no test runner, non-trivial, **held out**: no expectation literal or quoted RUN
-  argument of 4+ characters in the brief, the DoD or the goal text (L5-F2b K-11), hint), the set
+  argument of 4+ characters in the brief, the DoD or the goal text (L5-F2b K-11) or the goal's
+  other jobs' titles, briefs and DoDs (L5-L2: `store.public_text`; producers read them on the
+  board), hint), the set
   rule over sealed + new (at least
   `[holdout] min_per_job`, at least one `proof`, unique canaries), then the **negative control**:
   every new scenario runs on the project's current HEAD the way the verifier will run it
@@ -880,7 +913,8 @@ A run of a job with sealed holdouts is in **factory mode** (`cli/task_run.py` `_
   masked one late instead of skipping the mask), `var/runs/`, `var/logs/`, `var/factory/`,
   `var/sessions.json`, the board DB, every `<project>@<job>` clone and the target's `.audits/`
   (`Phase.hide`), and exposes no token (`Phase.tokens = ()`). Prompt: the composed
-  `scenario-writer` profile, goal text, job title and brief, the target path, the drafts dir, the
+  `scenario-writer` profile, goal text, job title and brief, the goal's other jobs (L5-L2), the
+  target path, the drafts dir, the
   rules R1-R10 in short checkable form and three worked examples for another project
   (`holdout/draft.py` `RULES`, `EXAMPLES`; each passes the lint), and the two helpers it may run in
   its phase: `holdout new --kind proof|regression` (a skeleton whose `<FILL: ...>` values the

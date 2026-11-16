@@ -206,9 +206,10 @@ def test_a_crashed_verifier_is_retried_once_in_its_cycle_red(ws, tmp_path):
 def test_a_verifier_that_ran_to_its_end_is_never_retried_green(ws):
     """The twin: an honest FAIL (exit 0, a verdict) is a verdict, never a crash to retry."""
     res, rd = run(ws, "tester-fails-3x")
-    assert "retried once" not in res.stderr
-    assert not any(json.loads(m.read_text()).get("retried")
-                   for m in (rd / "phases").glob("*.json"))
+    assert "without its verdict" not in res.stderr        # (L5-L2: this fake coder's resumes
+    assert not any(m.get("retried") for m in (            # rewrite identical files, so the
+        json.loads(f.read_text()) for f in (rd / "phases").glob("*.json"))  # empty-producer
+        if m.get("verdict"))                                                # retry may fire)
 
 
 CLOSEOUT_TRANSCRIPT = """import os, pathlib, re, subprocess, sys, time

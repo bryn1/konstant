@@ -103,21 +103,25 @@ def konstant_cmd(cfg) -> str:
 
 
 def prompt(profile: str, job: dict, goal_text: str, target: Path, drafts: Path, need: int,
-           feedback: str = "", cli: str = "konstant") -> str:
+           feedback: str = "", cli: str = "konstant", others: str = "") -> str:
     lint_cmd = f"{cli} holdout lint --draft ."
     head = [f"# konstant scenario writer: job {job['display_id']}", f"KONSTANT-AGENT: {ROLE}",
             f"KONSTANT-JOB: {job['id']}", f"KONSTANT-DRAFTS: {drafts}",
             f"KONSTANT-TARGET: {target}", f"KONSTANT-MIN-SCENARIOS: {need}",
             f"KONSTANT-LINT: {lint_cmd}"]
     body = ["", "## Your profile", profile.strip(), "", "## The goal", goal_text.strip(), "",
-            f"## The job: {job['title']}", (job.get("brief") or "").strip(), "",
-            "## Your phase",
+            f"## The job: {job['title']}", (job.get("brief") or "").strip(), ""]
+    if others:
+        body += ["## The goal's other jobs (their producers and this job's read them: none of "
+                 "your inputs or expected outputs may appear in them)", others.strip(), ""]
+    body += ["## Your phase",
             f"Write at least {need} scenario files, at least one `KIND: proof`, as "
             f"`<name>.scenario` in {drafts} (your working directory; nothing else is writable). "
             f"The target is {target}: read it to see what exists now (it is read-only). A proof "
             "must FAIL on it as it is now and pass once the job is done; a regression must pass "
             "now and after. Use inputs and expected outputs that neither the goal nor the brief "
-            "above contains. You are a leaf: never spawn agents or sub-sessions.", "",
+            "(nor another job) above contains. You are a leaf: never spawn agents or "
+            "sub-sessions.", "",
             "## The rules (konstant checks each one; a draft that breaks one is refused)",
             draft.RULES.replace("{need}", str(need)), "",
             "## Worked examples (another project, `tempconv`: copy the SHAPE, never the content)",
@@ -160,17 +164,20 @@ def author(cfg, cat, job: dict, goal_text: str, target: Path, client, need: int,
         os.chmod(d, 0o700)
     profile = Generator(cat, Path(cfg.home)).agent_prompt(ROLE)      # one snapshot (F-08)
     attempts = int(cfg.data["holdout"]["author_attempts"])
+    text, others = store.public_text(client, job)       # what seal() lints against (L5-L2)
+    goal_text = text or goal_text
+    public = goal_text + ("\n" + others if others else "")
     ctx = {"job": job.get("display_id"), "brief": job.get("brief") or "",
-           "acceptance": job.get("acceptance") or "", "need": need, "goal": goal_text}
+           "acceptance": job.get("acceptance") or "", "need": need, "goal": public}
     cli = konstant_cmd(cfg)
     feedback, reasons = "", []
     for attempt in range(1, attempts + 1):
         drafts = _fresh(jd / "drafts")
-        draft.write_context(drafts, job, need, goal_text)
+        draft.write_context(drafts, job, need, public)
         home = _fresh(jd / "home")
         run_dir = jd / "runs" / f"{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}-a{attempt}"
         run_dir.mkdir(parents=True, mode=0o700)
-        text = prompt(profile, job, goal_text, target, drafts, need, feedback, cli)
+        text = prompt(profile, job, goal_text, target, drafts, need, feedback, cli, others)
         # memory (owner decision 2026-11-08): it reads the shared pool through an exported copy and
         # writes only the sealed pool, collected below; its phase still holds no token
         mem_env = view.prepare(client, drafts) if cfg.data["memory"]["enabled"] else {}

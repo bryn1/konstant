@@ -31,10 +31,10 @@ def words(run: Run) -> dict:
 
 
 def fresh_verdicts(run: Run) -> tuple:
-    """(fresh, stale) verdict files under OUT."""
+    """(fresh, stale) verdict files: *verdict*.md DIRECTLY in OUT (common.is_verdict_file)."""
     if not run.out.is_dir():
         return [], []
-    allv = [f for f in out_files(run.out) if is_verdict_file(f)]
+    allv = [f for f in out_files(run.out) if is_verdict_file(f, run.out)]
     fresh = [f for f in allv if os.path.getmtime(f) >= run.start]
     return fresh, [f for f in allv if f not in fresh]
 

@@ -219,7 +219,8 @@ def _trivial_canary(expect: str):
 def lint(sc: Scenario, brief: str, acceptance: str, detail: bool = False, goal: str = "") -> list:
     """Refusal lines for one parsed scenario (empty: it passes the lint). `detail`: the same
     rules and verdicts, each line naming what tripped it (only for the scenario writer itself).
-    `goal`: the goal text, which producers read too (REVIEW L5-R2 K-11)."""
+    `goal`: the goal's text and its other jobs' titles, briefs and DoDs, which producers read
+    too (REVIEW L5-R2 K-11; L5-L2: store.public_text)."""
     out = []
 
     def add(line: str, why: str = "") -> None:
@@ -253,7 +254,8 @@ def lint(sc: Scenario, brief: str, acceptance: str, detail: bool = False, goal: 
             add(f"NOT HELD OUT: {sc.hid} {what} appears in the brief",
                 "found there: " + ", ".join(_show(x) for x in in_brief))
         elif in_goal:
-            add(f"NOT HELD OUT: {sc.hid} {what} appears in the goal text",
+            add(f"NOT HELD OUT: {sc.hid} {what} appears in the goal text (the goal or "
+                "another of its jobs)",
                 "found there: " + ", ".join(_show(x) for x in in_goal))
     if len(sc.hint) > 200:
         add(f"HINT: {sc.hid} the hint is over 200 characters", f"it has {len(sc.hint)}")

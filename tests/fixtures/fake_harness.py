@@ -479,15 +479,18 @@ def closeout(out: Path, rows: list, dod: list = ()) -> None:
 
 
 def evidence(h: dict, out: Path, agent: str, step: str) -> None:
-    """Modes `evidence` / `arch-tamper` (wave L5-F2b, REVIEW L5-R2 item 5a): a verifying phase
+    """Modes `evidence` / `arch-tamper` / `verdict-evidence` (waves L5-F2b, L5-L2): a verifying phase
     writes its evidence into its own dir (KONSTANT-OWN-DIR) or, with no such dir (a konstant
     before L5-F2b), into OUT; `arch-tamper`: the closing architect also edits the coder's OUT
     test and drops a file into the tester's private dir (each try logged, refused or not)."""
-    if MODE not in ("evidence", "arch-tamper"):
+    if MODE not in ("evidence", "arch-tamper", "verdict-evidence"):
         return
     own = Path(h["OWN-DIR"]) if h.get("OWN-DIR") else out
     own.mkdir(parents=True, exist_ok=True)
     (own / f"evidence-{agent}.md").write_text(f"{agent} looked at the deliverable\n")
+    if MODE == "verdict-evidence":   # live run L5-L run 2: a verdict-NAMED evidence file, no verdict
+        (own / f"a5-verdict-{agent}-prejudge.md").write_text(
+            f"# {agent}: pre-judgement notes\nauthorship and verdict-format findings: none\n")
     if MODE == "arch-tamper" and agent == "architect" and step == "close":
         log = []
         for target, text in ((out / "test_greet.py", "\n# weakened by the architect\n"),
@@ -538,6 +541,12 @@ def main() -> int:
     if agent == "scenario-writer":
         scenario_writer(h, MODE, PROMPT)
         print(f"fake harness: {agent} done (mode {MODE or 'default'})")
+        return 0
+    idle = out / ".tmp" / "fake-idle-once"          # .tmp: never in a snapshot or a pin
+    if MODE == "idle-once" and agent in ("coder", "planner") and not idle.exists():
+        idle.parent.mkdir(parents=True, exist_ok=True)   # live run L5-L: an 11 s planner, rc 0,
+        idle.write_text("idle\n")                      # no work at all
+        print(f"fake harness: {agent} ended at once (mode idle-once)")
         return 0
     if agent == "orchestrator":
         closeout(out, h["ROWS"], h["DOD"])

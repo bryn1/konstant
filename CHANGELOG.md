@@ -33,6 +33,18 @@ review and its fixes before a release).
   (default 3). No lint rule changed; a skeleton placeholder is a new refusal.
 
 
+### Changed (wave L5-L2: verdict identity, the review items, live acceptance round 2)
+- **A verdict file is a `*verdict*.md` file directly in OUT**, created by the phase run konstant
+  named it for (no longer any verdict-named file anywhere under OUT, credited by its stem): a
+  verifier's private `OUT/verify-<stem>/` holds evidence under any name, pinned by its verdict;
+  every write there by another phase run taints the run (the manifests prove it, jail or not).
+  The live false positive (a closing architect's `verify-arch/a5-verdict-prejudge.md`) is gone,
+  and two shadowing attacks that were MET inside the tester || reviewer group are refused.
+- **The held-out lint reads the goal's other jobs** (title, brief, DoD), and the scenario writer's
+  prompt and pre-check see them: a literal another job's DoD shows is not held out.
+- **An empty producing phase** (exit 0, nothing changed in OUT or the project) is retried once in
+  its cycle, like a crashed verifier.
+
 ### Changed (wave L5-L: the live acceptance of level 5)
 - **`konstant doctor --live-preflight`**: before a live goal, ONE real jailed dsh phase runs
   through the real runner, adapter and jail, as the scoped tester of a throwaway factory job, on a

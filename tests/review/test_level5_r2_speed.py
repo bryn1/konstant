@@ -128,14 +128,15 @@ def test_5a_jail_refuses_a_verifier_writing_what_it_judged(hws):  # noqa: F811
 
 def test_5a_twin_unjailed_the_pin_still_catches_the_tamper(hws):  # noqa: F811
     """A level-4 phase without konstant's jail (the command harness, no factory state) is not
-    stopped from writing, so the pin is what catches it: the tester is judged again."""
+    stopped from writing, so the pin catches it (and since L5-L2 the manifests taint the run: a
+    private dir is written only by its owner)."""
     env = hws.henv(FAKE_HARNESS_MODE="arch-tamper", KONSTANT_NO_JAIL="1")
     res = subprocess.run([sys.executable, "-m", "konstant", "task", "run",
                           "[type:code] add greet(name)", "--project", "greeter", "--harness",
                           FAKE], capture_output=True, text=True, env=env, timeout=900,
                          cwd=str(hws.home))
-    assert "TEST-verdict" in res.stderr and "judged a different deliverable state" in \
-        res.stderr, res.stderr[-3000:]
+    both = res.stdout + res.stderr      # L5-L2: the manifests now also taint it at once (STOP,
+    assert "TEST-verdict.md judged a different deliverable state" in both, both[-3000:]  # stdout)
 
 
 # --- 5c: per-phase timeouts -------------------------------------------------------------------

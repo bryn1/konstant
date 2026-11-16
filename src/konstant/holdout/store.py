@@ -130,16 +130,36 @@ def prepare(cfg, job: dict, sealed: list, sources: list, drafts: Path | None = N
     return new
 
 
-def goal_text(client, job: dict) -> str:
-    """The text of the job's goal: producers read it (viewer token, var/factory/goals/), so a
-    scenario that copies it is not held out (REVIEW L5-R2 K-11). "" for a job of no goal."""
+def public_text(client, job: dict) -> tuple:
+    """(the goal's text, the goal's OTHER jobs' titles, briefs and DoDs): producers read both on
+    the board (viewer token, var/factory/goals/), so a scenario that copies either is not held
+    out (REVIEW L5-R2 K-11; L5-L finding 2: two held-out literals of job 1.2 stood in job 1.1's
+    DoD). ("", "") for a job of no goal; a goal the board cannot show: the title stands in."""
     gid = job.get("goal_id") or job.get("goal")
     if not gid:
-        return ""
+        return "", ""
     try:
-        return client.get(f"/api/goals/{gid}")["spec"]["goal"]["text"]
-    except Exception:  # noqa: BLE001 - a goal the board cannot show: the title stands in
-        return job.get("title") or ""
+        g = client.get(f"/api/goals/{gid}")
+        text = g["spec"]["goal"]["text"]
+    except Exception:  # noqa: BLE001
+        return job.get("title") or "", ""
+    parts = []
+    for j in g.get("jobs") or []:
+        if str(j.get("id")) == str(job.get("id")):
+            continue
+        try:
+            j = client.get(f"/api/jobs/{j['id']}")
+        except Exception:  # noqa: BLE001 - what the listing shows is still public
+            pass
+        parts += [j.get(k) or "" for k in ("title", "brief", "acceptance")]
+    return text, "\n".join(x for x in parts if x)
+
+
+def goal_text(client, job: dict) -> str:
+    """What seal() lints a scenario against besides the job's own brief and DoD: the goal's text
+    and its other jobs' (public_text)."""
+    text, others = public_text(client, job)
+    return text + ("\n" + others if others else "")
 
 
 def recover_staged(d: Path, sealed: list) -> list:

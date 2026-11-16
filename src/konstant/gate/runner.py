@@ -22,7 +22,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from konstant.gate import reaper
+from konstant.gate import reaper, record
 from konstant.gate.rules.common import CACHE_DIRS, Run, cycle_name, is_verdict_file, verdict_word
 from konstant.gate.rules.verdicts import project_changed
 
@@ -209,12 +209,16 @@ class PhaseRunner:
         elif verdict_file:
             body += [f"Write your verdict to OUT/{verdict_file}: findings, then as your LAST step "
                      f"run `{self.judge_cmd(phase)}` and put its printed `# JUDGED:` line "
-                     f"directly above the final line `# VERDICT: {all_words(r)}`. Never "
-                     "write or edit any other verdict file."]
+                     f"directly above the final line `# VERDICT: {all_words(r)}`. Write no "
+                     "file after the judge command (a file changed after your pin stales your "
+                     "own verdict, e.g. a saved transcript of it); never write or edit any other "
+                     "verdict file."]
             if self.scoped(phase):
                 from konstant.gate.rules.judged import own_dir
                 body += [f"Your own directory is OUT/{own_dir(phase['verdict'])}/: put your "
-                         "evidence, notes, logs and any test file you add there and ONLY there. "
+                         "evidence, notes, logs and any test file you add there and ONLY there "
+                         f"(files there are evidence whatever their names: konstant reads your "
+                         f"verdict only from OUT/{verdict_file}). "
                          "The rest of OUT and the other verify-* directories are what you judge: "
                          "read-only to you (konstant's jail enforces it). A change there, or in "
                          "the project, after another verifier judged it makes that verdict "
@@ -245,6 +249,8 @@ class PhaseRunner:
             label = f"{self.seq:02d}-{ph['n']}-{ph['agent']}-c{cyc}"
             jobs.append((ph, target, label, cyc, self.prompt(ph, target, feedback, closeout)))
         before = snapshot(self.out)
+        idle0 = None if closeout or len(jobs) > 1 or jobs[0][1] else \
+            record.idle_state(self.rec, before)
 
         def one(job):
             ph, _t, label, _c, prompt = job
@@ -268,10 +274,15 @@ class PhaseRunner:
             # a verifying phase whose harness CRASHED (exit not 0, not a timeout) before it wrote
             # its verdict is run once more, same cycle (live run L5-L: a malformed model tool call
             # ended the DoD reviewer in 2 min; routed as "no verdict file", it cost the planner
-            # a whole cycle). Its verdict, if any, is still judged by every rule as before.
-            if t and res.rc not in (0, 124) and not res.timed_out and not (self.out / t).exists():
-                self.log(f"konstant task: phase {label} exited {res.rc} without its verdict "
-                         "(the harness run crashed); retried once")
+            # a whole cycle). Its verdict, if any, is still judged by every rule as before. So is
+            # a PRODUCING phase that exited 0 having changed nothing (live run L5-L: an 11 s
+            # planner with no work passed as a cycle; L5-L2).
+            why = f"exited {res.rc} without its verdict (the harness run crashed)" if t and \
+                res.rc not in (0, 124) and not res.timed_out and not (self.out / t).exists() \
+                else "exited 0 having changed nothing in OUT or the project" if idle0 is not None \
+                and res.rc == 0 and record.idle_state(self.rec, snapshot(self.out)) == idle0 else ""
+            if why:
+                self.log(f"konstant task: phase {label} {why}; retried once")
                 results[i] = one((ph, t, f"{label}-retry", cyc, prompt))
                 retried.add(i)
         left = reaper.kill_leftovers() if self.isolate else 0
@@ -281,7 +292,7 @@ class PhaseRunner:
         after = snapshot(self.out)
         changes = diff(before, after)
         shas = {n: after[n] for n in changes["created"] + changes["modified"]
-                if is_verdict_file(Path(n))}
+                if is_verdict_file(n)}
         verdicts = [t for _p, t, _l, _c, _pr in jobs if t]
         manifests = []
         for i, ((ph, target, label, cyc, _pr), res) in enumerate(zip(jobs, results)):
