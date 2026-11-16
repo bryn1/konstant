@@ -210,7 +210,7 @@ def write(cfg, db_path, actor, *, kind: str, text: str, title: str = "", tags=()
                 job = None
             try:
                 guard.scan("\n".join([title, text, " ".join(tags)]), hstore.root(cfg),
-                           _briefs(conn))
+                           _briefs(conn), writer_job=job)
             except guard.StoreRefused as exc:
                 _record(conn, actor, pool=ns, kind=kind, state="refused", reason=exc.kind,
                         run=run or None, job_id=job)

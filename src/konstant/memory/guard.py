@@ -92,9 +92,13 @@ def scenarios(store_root: Path) -> list:
     return out
 
 
-def scan(text: str, store_root: Path, briefs) -> None:
+def scan(text: str, store_root: Path, briefs, writer_job=None) -> None:
     """Refuse `text` (StoreRefused) when it carries anything from the sealed store. `briefs`:
-    job id -> the job's brief + acceptance (a literal the job's own brief shows is public)."""
+    job id -> the job's brief + acceptance (a literal the job's own brief shows is public).
+    `writer_job`: the job of the phase that writes the note; a literal ITS brief shows is public
+    to that phase too, whichever job's scenario holds it (live run L5-L: two held-out literals of
+    the README job's set stood verbatim in the code job's own DoD, so every note of the code
+    job that quoted its DoD was refused and counted as a LEAK-SUSPECT, failing honest rounds)."""
     if CANARY_ANY.search(text):
         raise StoreRefused("canary", "refused: the note carries a holdout canary (khc-...); "
                            "nothing from the sealed holdout store enters memory")
@@ -111,7 +115,7 @@ def scan(text: str, store_root: Path, briefs) -> None:
             sc = lint.parse(raw, "H0")
         except lint.ScenarioError:
             continue
-        public = briefs(job) or ""
+        public = (briefs(job) or "") + "\n" + ((briefs(writer_job) or "") if writer_job else "")
         pub_fold = transforms.fold(public)
         lits = [x for x in lint.literals(sc)
                 if x.lower() not in public.lower() and transforms.fold(x) not in pub_fold]

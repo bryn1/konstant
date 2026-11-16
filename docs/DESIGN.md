@@ -1154,12 +1154,14 @@ store), Zep/Graphiti (cloud service / a graph database plus an LLM).
   `<drafts>/.memory/out/`, which konstant stores as `scenario` after the phase and removes before
   the drafts are sealed. The scan refuses a canary-shaped string, a note with three or more
   scenario key lines, and any distinctive literal (`holdout/lint.py` `literals`) of a scenario in
-  the sealed store (sealed, drafts, retired) that its own job's brief and acceptance do not show;
-  an unreadable store refuses every write (fail closed). A refusal is a `memory_writes` row and,
+  the sealed store (sealed, drafts, retired) that neither its own job's brief and acceptance nor
+  those of the WRITING phase's job show (wave L5-L: a literal the writer's own brief shows is public
+  to it; live, two held-out literals of the README job stood in the code job's DoD and failed the
+  code job's honest rounds); an unreadable store refuses every write (fail closed). A refusal is a `memory_writes` row and,
   when the write names a run whose `record.json` names a job, a `finding` trail row on that job
   with payload `{"memory_refused": kind}` (the trail route cannot set a payload); the verifier's
   holdout step (`holdout/leak.py` `memory_findings`) reads canary/scenario as LEAK and literal as
-  LEAK-SUSPECT. `memory/` is in `machinery.DIRS` and `machinery.SEALED`: masked in every jail
+  LEAK-SUSPECT, for the round whose claim the row follows only (L5-L). `memory/` is in `machinery.DIRS` and `machinery.SEALED`: masked in every jail
   (the verifier's re-run and holdout runs included), Read/Edit denied by the Claude settings,
   `deny` in the codex profile, denied to the gemini file tools; probes refuse sealed paths and
   `/api/memory` URLs; the evidence contract refuses a `VERIFY_CMD` that runs `konstant memory`
