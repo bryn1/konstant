@@ -90,3 +90,30 @@ def write(run_dir: Path, rec: dict) -> Path:
     tmp.write_text(json.dumps(rec, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
     return path
+
+
+def closeout_scratch(out: Path, run_dir: Path, m: dict, log=print) -> list:
+    """What a close-out CREATED in OUT besides DONE.md/CYCLES.md (and a verdict file, which the
+    authorship rule reports) is its scratch: moved to OUT/.tmp/closeout/, never judged (live run
+    L5-L: a timestamped re-check transcript at OUT's root, rewritten by the close-out after every
+    resume, staled the verifiers' pins faster than they could re-pin). Returns the moved paths;
+    the phase manifest records them (`moved_to_scratch`)."""
+    import os
+
+    from konstant.gate.rules.common import META_NAMES, is_verdict_file
+    out, moved = Path(out), []
+    for rel in m.get("created") or []:
+        src = out / rel
+        if Path(rel).name.lower() in META_NAMES or is_verdict_file(Path(rel)) or \
+                not src.is_file() or src.is_symlink():
+            continue
+        dst = out / ".tmp" / "closeout" / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(src, dst)
+        moved.append(rel)
+    if moved:
+        log(f"konstant task: the close-out's own files moved to OUT/.tmp/closeout/ (never "
+            f"judged): {', '.join(moved[:8])}")
+        m["moved_to_scratch"] = moved
+        (Path(run_dir) / "phases" / f"{m['label']}.json").write_text(json.dumps(m, indent=2))
+    return moved

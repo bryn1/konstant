@@ -148,10 +148,12 @@ class PhaseRunner:
         dirs = self.private_dirs()
         mine = dirs.get(phase.get("verdict")) if self.scoped(phase, closeout) else None
         ro = [d for d in dirs.values() if d != mine]
-        if mine is not None:
+        if mine is not None or closeout:
+            from konstant.gate.rules.common import META_NAMES
             names = {d.name for d in dirs.values()}
             shared = [f for f in out_files(self.out)
-                      if os.path.relpath(f, self.out).split(os.sep, 1)[0] not in names]
+                      if os.path.relpath(f, self.out).split(os.sep, 1)[0] not in names
+                      and not (closeout and f.name.lower() in META_NAMES)]
             ro += shared[:1000]
         return ro
 
@@ -196,7 +198,10 @@ class PhaseRunner:
             body += ["Write DONE.md in OUT (`ID | claim | STATUS | evidence` per DoD claim, plus "
                      "the CLEANUP line) and CYCLES.md (`cycle | trigger | action | outcome`, one "
                      "row per KONSTANT-CYCLE-ROW above), from the artifacts in OUT. Never write "
-                     "or edit a verdict file.", CLAIM_SCOPE]
+                     "or edit a verdict file. Write nothing else in OUT: the verifying phases "
+                     "judged it, and the rest of it is read-only to you; your own notes, re-checks "
+                     "and transcripts go under OUT/.tmp/closeout/ (konstant moves any other file "
+                     "you create in OUT there).", CLAIM_SCOPE]
             if self.dod_rows():
                 body += ["DONE.md carries one row per KONSTANT-DOD-ROW above, with its ID "
                          "(`DoD-<n> | <claim> | PASS or BLOCKED | <evidence>`); a DoD row is "
@@ -363,7 +368,11 @@ class PhaseRunner:
     def closeout(self, feedback: str = "") -> list:
         ph = {"n": 0, "agent": ORCHESTRATOR, "step": None, "verdict": None,
               "task": "close-out: write DONE.md and CYCLES.md from the artifacts"}
-        return self.run_group([ph], feedback=feedback, closeout=True)
+        ms = self.run_group([ph], feedback=feedback, closeout=True)
+        from konstant.gate.record import closeout_scratch
+        for m in ms:
+            closeout_scratch(self.out, self.run_dir, m, self.log)
+        return ms
 
     def rerun_producers(self, feedback: str) -> None:
         phases = self.rec["phases"]

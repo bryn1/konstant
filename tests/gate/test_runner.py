@@ -209,3 +209,70 @@ def test_a_verifier_that_ran_to_its_end_is_never_retried_green(ws):
     assert "retried once" not in res.stderr
     assert not any(json.loads(m.read_text()).get("retried")
                    for m in (rd / "phases").glob("*.json"))
+
+
+CLOSEOUT_TRANSCRIPT = """import os, pathlib, re, subprocess, sys, time
+prompt = pathlib.Path(sys.argv[1]).read_text()
+rc = subprocess.call([sys.executable, sys.argv[2], sys.argv[1]])
+if "KONSTANT-AGENT: orchestrator" in prompt:
+    out = pathlib.Path(re.search(r"^KONSTANT-OUT: (.+)$", prompt, re.M).group(1))
+    (out / "close-checks.txt").write_text(f"# close-out re-check at {time.time_ns()}\\n")
+sys.exit(rc)
+"""
+
+
+def test_a_close_out_transcript_in_out_never_stales_the_pins_red(ws, tmp_path):
+    """Live run L5-L: the close-out wrote a timestamped re-check transcript at OUT's root after
+    the verifiers pinned, and rewrote it after every resume: each verifier's pin went stale
+    again, and the job could never be MET. A close-out's own files are its scratch now."""
+    wrapper = tmp_path / "closeout_transcript.py"
+    wrapper.write_text(CLOSEOUT_TRANSCRIPT)
+    harness = (f"{sys.executable} {wrapper} {{prompt_file}} "
+               f"{REPO / 'tests' / 'fixtures' / 'fake_harness.py'}")
+    res = subprocess.run([sys.executable, "-m", "konstant", "task", "run",
+                          "[type:code] add greet()", "--project", "demo", "--harness", harness],
+                         capture_output=True, text=True, env=ws.env(), timeout=300,
+                         cwd=str(ws.home))
+    rd = sorted((ws.home / "var" / "runs").iterdir())[-1]
+    assert res.returncode == 0, res.stderr
+    assert "judged a different deliverable state" not in res.stderr, res.stderr
+    out = out_of(rd)
+    assert not (out / "close-checks.txt").exists()
+    assert (out / ".tmp" / "closeout" / "close-checks.txt").is_file()
+    m = [json.loads(p.read_text()) for p in sorted((rd / "phases").glob("*orchestrator*.json"))]
+    assert m and m[-1]["moved_to_scratch"] == ["close-checks.txt"], m
+
+
+def test_a_close_out_verdict_file_is_never_moved_away_green(tmp_path):
+    """The twin: a verdict file a close-out creates stays where the authorship rule sees it."""
+    from konstant.gate.record import closeout_scratch
+    out, rd = tmp_path / "out", tmp_path / "run"
+    (rd / "phases").mkdir(parents=True)
+    out.mkdir()
+    for n in ("TEST-verdict.md", "DONE.md", "CYCLES.md", "notes.txt"):
+        (out / n).write_text("x\n")
+    m = {"label": "06-0-orchestrator-c1", "created": ["TEST-verdict.md", "DONE.md", "CYCLES.md",
+                                                     "notes.txt"]}
+    assert closeout_scratch(out, rd, m, log=lambda s: None) == ["notes.txt"]
+    assert (out / "TEST-verdict.md").is_file() and (out / "DONE.md").is_file()
+    assert (out / ".tmp" / "closeout" / "notes.txt").is_file()
+
+
+def test_the_close_out_sees_judged_out_read_only_but_done_and_cycles_red(tmp_path):
+    """In the jail (out_ro) the close-out writes DONE.md/CYCLES.md and nothing it judged-over."""
+    from konstant import catalog
+    from konstant.gate.runner import PhaseRunner
+    cat = catalog.load()
+    out = tmp_path / "out"
+    out.mkdir()
+    for n in ("evidence-architect.md", "TEST-verdict.md", "DONE.md", "CYCLES.md"):
+        (out / n).write_text("x\n")
+    rec = {"phases": [dict(p, n=i) for i, p in enumerate(cat.phases("code"), 1)],
+           "own_dirs": cat.scoped("code"), "out": str(out), "workspace": str(tmp_path),
+           "type": "code", "task": "t", "verdict_words": cat.verdict_words(),
+           "judge_cmd": "j", "check_cmd": "c"}
+    pr = PhaseRunner(rec, cat, None, run_dir=tmp_path / "run")
+    ro = {os.path.relpath(p, out) for p in pr.out_ro({"agent": "orchestrator"}, closeout=True)}
+    assert {"evidence-architect.md", "TEST-verdict.md", "verify-test", "verify-review",
+            "verify-arch"} <= ro, ro
+    assert "DONE.md" not in ro and "CYCLES.md" not in ro, ro

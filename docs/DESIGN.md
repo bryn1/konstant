@@ -572,7 +572,12 @@ The runner is the enforcing mode: konstant, not the model, drives the phases.
    cost the producer a whole cycle). Its verdict is then judged by every rule as before.
 4. Back-edge: a verifying phase whose verdict is FAIL/FIX/RECONSIDER re-runs the producer with the
    verdict text as context, then the verifiers again (new suffixed verdict files). Cap: 3 cycles.
-5. Close-out phase: the `orchestrator` profile writes DONE.md and CYCLES.md from the artifacts.
+5. Close-out phase: the `orchestrator` profile writes DONE.md and CYCLES.md from the artifacts,
+   and nothing else in OUT (wave L5-L): in the jail every judged OUT file and every verifier's
+   private dir are read-only to it (`out_ro`), and any other file it creates in OUT is moved to
+   `OUT/.tmp/closeout/` (scratch, never judged; the manifest's `moved_to_scratch`;
+   `gate/record.py closeout_scratch`). Live, a close-out wrote a timestamped re-check transcript
+   at OUT's root after every resume and staled the verifiers' pins faster than they re-pinned.
    Its prompt scopes the claims (`gate/runner.py CLAIM_SCOPE`): only what it can read (OUT, the
    project, the task); never a row about konstant's sealed stores or the board, which the check
    covers itself (L5-6b).
