@@ -420,3 +420,36 @@ def test_a_crashed_rule_is_a_check_error_never_met(scen, monkeypatch):
 
 def test_usage_error_on_a_dir_without_a_record(tmp_path):
     assert check.run_check(tmp_path)[0] == 2
+
+
+def _private_dir_run(tmp_path):
+    from konstant.gate.rules.common import Run
+    out = tmp_path / "out"
+    for sub in ("verify-test/mut/a", "verify-test/mut/b"):         # a tester's mutation copies
+        (out / sub).mkdir(parents=True)
+        (out / sub / "test_greeter.py").write_text("def test_x():\n    assert True\n")
+    (out / "test_shared.py").write_text("def test_ok():\n    assert True\n")
+    rec = {"out": str(out), "project": None, "gate": {"jail": False, "test_cmd": "auto"},
+           "own_dirs": ["TEST-verdict.md", "REVIEW-verdict.md"]}
+    return Run(run_dir=tmp_path, rec=rec), out
+
+
+def test_a_failure_in_a_verifiers_private_dir_is_that_verifiers_red(tmp_path):
+    """Live run L5-L: the tester's mutation copies in OUT/verify-test/ (same basename twice)
+    broke pytest's collection over OUT; the rule resumed the PRODUCER, who cannot write that
+    dir, so the run could not converge. The failure is the private dir's owner's to fix."""
+    from konstant.gate.rules import tests as tests_rule
+    run, out = _private_dir_run(tmp_path)
+    found = tests_rule.check(run)
+    assert [f.owner for f in found] == ["verifier:TEST-verdict.md"], [(f.owner, f.text) for f in found]
+    assert "verify-test" in found[0].text
+
+
+def test_a_failure_in_shared_out_is_still_the_producers_green(tmp_path):
+    from konstant.gate.rules import tests as tests_rule
+    run, out = _private_dir_run(tmp_path)
+    import shutil
+    shutil.rmtree(out / "verify-test" / "mut" / "b")
+    (out / "test_shared.py").write_text("def test_bad():\n    assert False\n")
+    found = tests_rule.check(run)
+    assert [f.owner for f in found] == ["producer"], [(f.owner, f.text) for f in found]

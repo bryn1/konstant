@@ -1790,6 +1790,24 @@ dominated. In attempts 2 and 3 no stale reason named an OUT file. In attempt 1 t
 did, `out/evidence/closeout-*`, written by the close-out into shared OUT after the verifiers
 pinned. Shared OUT is in every pin by design, so the narrowing correctly does not cover it.
 
+### L5-L as built (the live acceptance after all fixes)
+
+**First a real-dsh pre-flight** (`konstant doctor --live-preflight`, DESIGN §9): ONE real jailed
+dsh phase through the real runner, adapter and jail, as the scoped tester of a throwaway factory
+job, on a scripted local endpoint (no model call), reporting from inside its own shell. On the
+L5-F2b code it reproduces that run's finding in 3 s (`missing config key GIT_CONFIG_KEY_0`, the
+pin made inside stale outside); on this wave's code every row passes, and `factory_live.sh` runs
+it before the model's first turn. What it measured of dsh 0.2.2's bash tool (a model command
+gets the harness's environment minus `/KEY|PASSWORD|SECRET|TOKEN/i` and `DSH_*` names, plus dsh's
+overrides and `DSH_*` facts; stdin `/dev/null`; a fresh `/tmp` per command) the stub dsh now
+mirrors (all but the per-command `/tmp`), so the factory suites through the stub fail on the
+L5-F2b base the way the live run did. A second real-dsh finding: dsh passes a plugin's
+per-command variables only under `DSH_*` keys, so the konstant-gate plugin's `KONSTANT_*`
+markers never reached the session's bash (the chat's refusals did not apply to its own
+commands); they are `DSH_KONSTANT_ROLE / _IN_TASK / _CHAT_SESSION` now, read in both spellings.
+
+LIVE_RESULTS_PLACEHOLDER
+
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.
 

@@ -94,13 +94,28 @@ def check(run: Run) -> list:
                                           f"(exit {rc}): {_last(tail)}", owner="producer"))
     if not out.is_dir() or not has_tests(out):
         return found
+    # each scoped verifier's private dir OUT/verify-<stem>/ is its own pytest session, owned by
+    # that verifier: the producer cannot write it, so a failure there is never the producer's
+    # to fix (live run L5-L: a tester's mutation copies collided there and the producer was
+    # resumed on them); the rest of OUT is the producer's, as before; one trace covers both
+    from konstant.gate.rules.judged import own_dir
+    private = {own_dir(v): v for v in run.rec.get("own_dirs") or []}
+    ignore = [a for d in sorted(private) if (out / d).is_dir() for a in ("--ignore", out / d)]
     env, tmp = None, None
     if run.rec.get("exercise"):
         env, tmp, rec = exercise.traced_env(str(out))
     try:
-        rc, tail = run_cmd(pytest_argv(["--rootdir", out, out]), out, env,
-                           jail_rw=rw + ([tmp] if tmp else []), run=run)
-        if rc != 0:
+        jrw = rw + ([tmp] if tmp else [])
+        for d, vf in sorted(private.items()):
+            if (out / d).is_dir() and has_tests(out / d):
+                rc, tail = run_cmd(pytest_argv(["--rootdir", out / d, out / d]), out, env,
+                                   jail_rw=jrw, run=run)
+                if rc not in (0, 5):
+                    found.append(Finding("tests", f"pytest failed in {out / d} (exit {rc}): "
+                                                  f"{_last(tail)}", owner=f"verifier:{vf}"))
+        rc, tail = run_cmd(pytest_argv(["--rootdir", out, *ignore, out]), out, env,
+                           jail_rw=jrw, run=run)
+        if rc != 0 and not (rc == 5 and ignore):     # 5: every test lies in a private dir
             return found + [Finding("tests", f"pytest failed in {out} (exit {rc}): {_last(tail)}",
                                     owner="producer")]
         if tmp is None:
