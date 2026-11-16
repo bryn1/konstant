@@ -106,13 +106,18 @@ def suspects(scenarios: list, diff: list, brief: str) -> list:
     return out
 
 
-def memory_findings(trail: list) -> tuple:
+def memory_findings(trail: list, since=None) -> tuple:
     """(LEAK lines, LEAK-SUSPECT lines) from the board's own `finding` rows of refused memory
     writes (konstant/memory/service.py; payload {"memory_refused": kind}, which the trail route
     cannot set): a phase of this job tried to store a canary or a whole scenario (it read the
-    store: LEAK), or a held-out literal (LEAK-SUSPECT: teaching to the test, through memory)."""
+    store: LEAK), or a held-out literal (LEAK-SUSPECT: teaching to the test, through memory).
+    `since`: the trail id of the claim that started the round being judged; only that round's
+    rows count (docs/LEVEL5.md 3.5: "the round fails"; live run L5-L: a refused write of round 1
+    failed every later round of the job, whose holdouts all passed)."""
     leaks, suspects = [], []
     for t in trail:
+        if since is not None and (t.get("id") or 0) <= since:
+            continue
         payload = t.get("payload") if isinstance(t.get("payload"), dict) else {}
         kind = payload.get("memory_refused")
         if t.get("kind") != "finding" or not kind:

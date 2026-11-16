@@ -304,7 +304,7 @@ def evaluate(client, cfg, job: dict, projects: list) -> dict | None:
         leaks, suspects = leak.scan(cfg.home, [scenarios[r["hid"]][1] for r in current],
                                     project=project, base=base, commit=commit, runs=runs,
                                     trail=trail, brief=job.get("brief") or "")
-        mem_leaks, mem_suspects = leak.memory_findings(trail)
+        mem_leaks, mem_suspects = leak.memory_findings(trail, _claim_trail_id(trail))
         leaks, suspects = leaks + mem_leaks, suspects + mem_suspects
     except HoldoutError as exc:
         res["blocked"].append(f"holdouts not run: {exc}")

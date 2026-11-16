@@ -389,7 +389,9 @@ A LEAK burns the job's holdout set (`state = burned`) and makes the verdict BLOC
 `completed_unverified`, as every BLOCKED verdict leaves it, so it can never ship). The factory
 escalates `LEAK` as an owner decision: find the path, then reopen the job with a fresh set, or
 cancel it. A LEAK-SUSPECT fails the
-verification round like a failed holdout and is escalated if it repeats.
+verification round like a failed holdout and is escalated if it repeats. A refused memory write
+counts for the round whose claim it follows only (L5-L: before, one refused write of round 1 failed
+every later round of the job).
 
 ### 3.6 Running holdouts (verifier only)
 

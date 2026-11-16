@@ -7,6 +7,7 @@ memory refusal alone."""
 from __future__ import annotations
 
 import json
+import time
 
 from tests.holdout.conftest import hws_manual  # noqa: F401  (fixture)
 from tests.holdout.conftest import needs_jail
@@ -65,3 +66,22 @@ def test_a_canary_through_memory_is_a_leak_that_burns_the_set(hws_manual):
     assert any(r.startswith("LEAK:") and "memory" in r for r in data["reasons"]), data
     states = {r["state"] for r in w.json("holdout", "list", jid)["holdouts"]}
     assert states == {"burned"}
+
+
+@needs_jail
+def test_a_refused_literal_fails_its_own_round_only_red(hws_manual):
+    """Live run L5-L: job 1.1's first round was MET and passed all five holdouts, and failed on
+    a refused memory write of one of its phases (a held-out literal: LEAK-SUSPECT, as 3.5 says).
+    The trail row then failed EVERY later round of the job too, whatever its phases did, so the
+    job could only end BLOCKED. A LEAK-SUSPECT fails the round being judged (3.5)."""
+    w = hws_manual
+    jid = sealed(w)
+    res, _rd = w.task_run("memory", jid, FAKE_HARNESS_MEMORY="tip: the answer is hello Ada")
+    assert res.returncode == 0, res.stderr[-2000:]
+    first = _verify(w, jid)
+    assert first["verdict"] == "FAIL" and any("LEAK-SUSPECT" in r for r in first["reasons"])
+    time.sleep(1.5)            # verdict times are whole seconds: the next run starts after it
+    res, _rd = w.task_run("memory", jid, FAKE_HARNESS_MEMORY="the helper lives in greeter.py")
+    assert res.returncode == 0, res.stderr[-2000:]
+    second = _verify(w, jid)
+    assert second["verdict"] == "PASS", second
