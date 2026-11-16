@@ -1806,7 +1806,59 @@ per-command variables only under `DSH_*` keys, so the konstant-gate plugin's `KO
 markers never reached the session's bash (the chat's refusals did not apply to its own
 commands); they are `DSH_KONSTANT_ROLE / _IN_TASK / _CHAT_SESSION` now, read in both spellings.
 
-LIVE_RESULTS_PLACEHOLDER
+**The live runs** (`tests/e2e/factory_live.sh`, the L5-7 rules: one local model for every role
+through a plain dsh copied into the workspace, `max_concurrency = 2`, the github target to a local
+bare repository with the `gh` stand-in, the request "make greeter greet by name, with a CLI and a
+README"; one 16 h box, 17:24-09:24Z; the endpoint healthy throughout, the watcher never fired).
+The pre-flight passed in both runs (28 PASS, 0 FAIL, in 4 s). Neither run shipped.
+
+| stage | L5-7 run 1 | L5-F2b | L5-L run 1 (d4d575e) | L5-L run 2 (17d608a) |
+|---|---|---|---|---|
+| P0 request / "yes" | 31 s / 20 s | 20 s / 9 s | 36 s / 18 s | 21 s / 64 s |
+| intake | 8191 s, 3 cycles, 3 jobs | 9059 s, 3 cycles, 2 jobs | HALTED at 16802 s (cycle 4) | 8125 s, 2 cycles (FIX, SHIP), 2 jobs |
+| scenario writer | 205/310/652 s, 1st attempt | 257/860 s, 1st attempt | - | 299/1016 s, 1st attempt (5, 4 sealed) |
+| job 1.1 attempt 1 | 4100 s, shipped | 9423 s UNMET | - | 5869 s MET, 5/5 holdouts PASS, verify FAIL |
+| attempt 2 / 3 | - | 7297 / 13382 s UNMET | - | 2189 s UNMET / stopped at 8555 s |
+| shipped | 1 of 3 | 0 of 2 | 0 | 0 of 2 |
+
+- **Run 1** stopped in intake after 4 h 41 min: ONE board request of the `--until-idle` factory
+  timed out (30 s; the host was in long IO stalls, measured in run 2: processes of the session
+  froze for up to 60 s), and the loop halted (exit 5), leaving its intake running. Before that,
+  the DoD reviewer's harness had crashed on a malformed model tool call (rc 1 after 118 s, no
+  verdict: routed as "no verdict file", it cost the planner a cycle) and a planner phase had
+  ended in 11 s with no work (rc 0; not detected).
+- **Run 2** (after 17d608a) waited out three board stalls (26-30 s each) and got through intake
+  (two jobs, both sets sealed first time). Job 1.1's attempt 1 was MET and its five holdouts all
+  passed, but the verdict was FAIL on a LEAK-SUSPECT: a phase's refused memory write. Its three
+  attempts then met three more konstant faults, each fixed red-then-green after the run (none run
+  live): (1) the close-out wrote a timestamped transcript at OUT's root after every resume, staling
+  the tester's pin twice (about 55 min of re-judging); (2) the refused write was a false positive,
+  because two held-out literals of job 1.2's set stood verbatim in job 1.1's own DoD, and that one
+  trail row would have failed every later round of the job too; (3) in attempt 3 the tester's
+  mutation copies in its own `verify-test/` broke pytest's collection and the producer, who cannot
+  write that dir, was resumed. Attempt 2 ended on a verdict-named evidence file the architect put
+  in `verify-arch/` (`a5-verdict-prejudge.md`: authorship and verdict-format findings, routed to a
+  verifier that does not exist; not fixed, finding 4). The factory was stopped by hand at 05:13Z
+  in attempt 3, the outcome fixed by then (attempt 3 could not converge, job 1.2 waited behind it).
+- **Scoped pins**: no stale reason in run 2 named another verifier's private dir (the L5-7 drift is
+  gone), but the close-out's shared-OUT file still staled the pins (fixed, 38a2aa5).
+- **Canaries**: run 2, 9 sealed canaries against 758 producer-readable files: 0 hits.
+
+Fixed after the runs (each red on its parent, green on its commit; DESIGN §6.5, §6.4, §7.4,
+§7.6): 17d608a (a board that stops answering is waited out by `--until-idle` for `[factory]
+down_after_s`; an internal error stops the steps it started; a crashed verifier is retried once in
+its cycle), 38a2aa5 (the close-out writes only DONE.md/CYCLES.md in OUT), 8a78294 (a refused memory
+write fails its own round only), 8d71d81 (a literal the writer's own brief shows is public to its
+notes), da1685c (a test failing in a verifier's private dir is that verifier's).
+
+Findings for the next review (not fixed here):
+  1. A phase that ends rc 0 without doing anything (run 1's 11 s planner) passes as a cycle.
+  2. The scenario writer's held-out lint reads its own job's brief and the goal text, not the
+     sibling jobs' briefs: two of job 1.2's held-out literals were in job 1.1's DoD (readable by
+     every phase through the board), so they were not held out from job 1.2's producers either.
+  3. Board stalls of 30-60 s on a loaded host: survived now, not explained (IO pressure INFERRED).
+  4. A verdict-named file in a verifier's own private dir taints the run and is routed to a
+     verifier named after the file; the rule needs its own review (it is an integrity rule).
 
 **Level 5 is reached when L5-F2 is done**, not before: two independent reviews, the second one
 after everything (ship and rollback included) exists.

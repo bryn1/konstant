@@ -51,6 +51,16 @@ review and its fixes before a release).
   `DSH_KONSTANT_CHAT_SESSION`, and konstant reads both spellings. Before this, a delegated child
   in the owner's session was not marked worker and the chat's refusals (`intake`, `holdout
   author`, `--as owner`, the factory identities) did not apply to the session's own bash.
+- **Fixed, from the two live runs of this wave** (each red-then-green, none run live after its fix):
+  `--until-idle`/`--once` wait out a board that stops answering for `[factory] down_after_s` at
+  most instead of halting on one timeout, and an internal error stops the steps the factory
+  started (a ship is never cut); a verifying phase whose harness crashed before its verdict is
+  run once more in its cycle; a close-out writes only DONE.md and CYCLES.md in OUT (the rest is
+  read-only to it, its other files are moved to `OUT/.tmp/closeout/`), so it can no longer stale
+  the verifiers' pins after every resume; a refused memory write fails the verification round
+  it belongs to only; a held-out literal that the writing phase's own brief shows is public to
+  its memory notes; a failing test in a verifier's `OUT/verify-<stem>/` is that verifier's to fix,
+  not the producer's.
 
 ### Changed (wave L5-F2b: the second review's owner-seat findings K-05, K-08, K-09, K-11, K-13, K-14, K-16..K-18, and speed)
 - **Every chat hears the factory**: one owner inbox that every `konstant dsh` session shows at its
