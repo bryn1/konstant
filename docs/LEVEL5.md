@@ -1910,6 +1910,45 @@ another member's EXACT target before it does.
      changed; recurrences are recorded below.
   4. The verdict rule above.
 
+**The live run** (`tests/e2e/factory_live.sh` on 218c9b3, the L5-L rules: one local model for
+every role through a plain dsh copied into the workspace, `max_concurrency = 2`, the github target
+to a local bare repository with the `gh` stand-in, the request "make greeter greet by name, with a
+CLI and a README"; a 16 h box from 12:06Z, used 4 h 46 min): **PASS** (`E2E-FACTORY-LIVE: PASS`,
+factory exit 0). The pre-flight passed (28 PASS, 0 FAIL). P0 held (proposed in the request's
+turn, filed on "yes"). Intake filed three jobs (B1 `greet(name)`, B2 the CLI, B3 the README) after
+one DoD-review FIX cycle; every set sealed on the writer's first attempt (3, 4, 4 scenarios).
+**Every job passed `verify` on its first attempt and shipped** as konstant's commit
+(`konstant: ship job 1.<n>`) through a pull request onto the bare repository's `main`, each with
+its post-ship probes, the project's tests and the sealed holdouts as the regression set; then
+`GOAL_DONE`, and the owner's next turn in the same chat reported the goal done from the board.
+11 sealed canaries against 649 producer-readable files: 0 hits. The one re-run was not needed.
+
+| stage | L5-7 run 1 | L5-F2b | L5-L run 1 | L5-L run 2 | **L5-L2** |
+|---|---|---|---|---|---|
+| P0 request / "yes" | 31 s / 20 s | 20 s / 9 s | 36 s / 18 s | 21 s / 64 s | 37 s / 27 s |
+| intake | 8191 s, 3 cycles, 3 jobs | 9059 s, 3 cycles, 2 jobs | HALTED at 16802 s | 8125 s, 2 cycles, 2 jobs | 7761 s, 2 cycles (FIX, SHIP), 3 jobs |
+| scenario writer | 205/310/652 s | 257/860 s | - | 299/1016 s | 355/396/909 s, 1st attempt (3, 4, 4 sealed) |
+| job 1.1 | 4100 s, shipped | 3 attempts UNMET | - | 5869 s MET, verify FAIL; then UNMET | 4993 s, verify PASS, shipped |
+| job 1.2 | attempt 1 UNMET after 5 h 08 min | not started | - | not started | 2746 s, verify PASS, shipped |
+| job 1.3 | not started | - | - | - | 1503 s, verify PASS, shipped |
+| whole run | stopped by hand at 8 h 41 min | 10 h 57 min | 4 h 41 min | 6 h 55 min | **4 h 45 min** |
+| shipped | 1 of 3 | 0 of 2 | 0 | 0 of 2 | **3 of 3** |
+
+What the run showed of the L5-L fixes (none had run live before): no close-out file staled a pin
+(38a2aa5: no pin was re-judged at all), no refused memory write (8a78294, 8d71d81 and this wave's
+sibling lint), and da1685c carried job 1.1: the reviewer's own test copies in `verify-review/`
+failed pytest's collection twice, each time routed to the REVIEWER (two reviewer re-runs and two
+close-outs, about 40 min), where L5-L run 2 had resumed a producer who could not fix it. Not
+exercised live: the verdict rule's live shape (no verifier named an evidence file `*verdict*`
+this time; 65 files in private dirs, no AUTHORSHIP line), the empty-phase retry (no phase ended
+empty) and the crashed-verifier retry. The board never stalled (0 waits; a 10 s host sampler
+over the run: 3205 samples, the longest gap 11 s, IO pressure 0), so L5-L's stalls were the
+host's load at that time. No phase hit a timeout; the endpoint watcher never fired.
+
+Left for the next review: a verifier's test copies in its own dir cost two re-runs before it
+kept them out of pytest's collection (the prompt could say so; the routing is right); inside one
+parallel group a member can still write another member's exact target first (DESIGN §6.4).
+
 ## 9. Owner decisions (2026-11-01; were the open questions)
 
 The owner answered the five questions on 2026-11-01, verbatim (typos kept; the name of his local

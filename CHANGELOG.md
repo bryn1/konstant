@@ -44,6 +44,9 @@ review and its fixes before a release).
   prompt and pre-check see them: a literal another job's DoD shows is not held out.
 - **An empty producing phase** (exit 0, nothing changed in OUT or the project) is retried once in
   its cycle, like a crashed verifier.
+- **The live acceptance passed**: the three-job greeter goal, from a plain chat request, on one
+  local model: every job verified on its first attempt and shipped, `GOAL_DONE` in the chat,
+  0 canary leaks, 4 h 45 min (docs/LEVEL5.md "L5-L2 as built").
 
 ### Changed (wave L5-L: the live acceptance of level 5)
 - **`konstant doctor --live-preflight`**: before a live goal, ONE real jailed dsh phase runs
