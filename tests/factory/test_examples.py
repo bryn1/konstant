@@ -38,7 +38,10 @@ def test_sample_project_is_the_fixtures_base(tmp_path):
         "README.md", "goal.toml", "greeter.py", "test_greeter.py"]
     proj = tmp_path / "greeter"                       # a copy: nothing is written into examples/
     shutil.copytree(EX, proj)
+    import os as _os
     env = {"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"}
+    if "PYTHONPATH" in _os.environ:   # propagate when running under a --target install (e.g. knut)
+        env["PYTHONPATH"] = _os.environ["PYTHONPATH"]
     r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                         str(proj / "test_greeter.py")], capture_output=True, text=True,
                        cwd=str(proj), env=env)
