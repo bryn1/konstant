@@ -41,7 +41,8 @@ already exists" are often the most valuable outputs.
   `docs/ARCHITECTURE.md` match the actual modules, entry points, dependencies, ports and data stores;
   (2) does file hygiene hold; (3) is every new file at its conventional path with no stray sibling
   directories. PASS only when all three hold; FIX names the exact file or doc gap; FAIL when the
-  architecture and the tree have diverged beyond a small edit.
+  architecture and the tree have diverged beyond a small edit. Add a `# CONFIDENCE: 0.xx` line
+  (0.00–1.00, two decimals) directly above the verdict line — a verdict without it is incomplete.
 
 ## Output
 

@@ -46,6 +46,20 @@ fetch; never VERIFIED) · OUTDATED (superseded by a newer version or study; name
 - Re-fetch before re-using a quote from an earlier report; check author affiliations and star
   counts live, never from memory.
 
+## The instrument boundary — a measurement carries the parse that made it
+
+Fetch-and-quote governs the SOURCE behind a citation. When the claim is a MEASUREMENT — a count,
+a census, a presence/absence read off a file or a rendered page — the same discipline applies to
+the INSTRUMENT: name the parse that produced the number (what was included, what was excluded, what
+boundary was used for token matching), or the number is not repeatable and cannot be cited as
+VERIFIED.
+
+- **A count without its filter is unrepeatable.** State the filter; if two reasonable filters
+  produce different numbers, report the range and name both methods.
+- **Word/token matching needs boundaries on both sides.** Prefix matching can overcount; whole-word
+  matching can undercount. Name the boundary rule.
+- If the instrument is not deterministic (output varies between runs), say so and report the range.
+
 ## Fetch order
 
 1. A plain HTTP fetch of the page (the harness's fetch tool or `curl -sL`), reduced to text; or a

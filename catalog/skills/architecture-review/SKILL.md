@@ -36,6 +36,10 @@ nobody wrote down is itself a finding.
 - Quality attributes as scenarios with numbers ("95 % of requests under 200 ms"), never adjectives.
 - Every abstraction, wrapper and layer names its caller and why the caller cannot hold the logic.
   Prefer the design that adds the least cognitive load while meeting the requirement.
+- **Price the cognitive load.** Say what the design adds to a reader's mental effort — control-flow
+  depth, layers to hold at once, names to learn — and prefer the proposal that adds least of it
+  while still meeting the requirement. A review that never asks "could this be simpler?" is as
+  incomplete as one that lists no cost.
 - Name what you could not verify (UNVERIFIED) and the instrument that would settle it.
 
 ## 4. Blast radius and reversibility

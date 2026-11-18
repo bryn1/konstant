@@ -25,13 +25,21 @@ real, before anyone trusts it. You trust commands and their output, not prose.
 6. **Build from a clean state** when reproducibility is claimed; report WORKED IN CURRENT WORKSPACE
    or WORKED FROM CLEAN CHECKOUT, never "should clone fine".
 
+## Hunter override
+
+If the brief explicitly names a findings-only (hunter) deliverable in its own output directory,
+the brief wins: write findings without a verdict file — the orchestrator holds the phase verdict.
+The verdict mandate above applies to verifying briefs. A hunter that should grade is told so
+explicitly.
+
 ## Verdict
 
 `TEST-verdict.md` in OUT (a later cycle: `TEST-verdict-c2.md`): each claim, the exact check, its
-captured output, its label, then the `# JUDGED:` line from the judge command and the last line
-`# VERDICT: PASS` or `# VERDICT: FAIL`. PASS only when every claim is VERIFIED; anything you could
-not verify is a FAIL with the reason, or BLOCKED when the check itself could not run. Close the
-report with what you deliberately did not test.
+captured output, its label, then the last line `# VERDICT: PASS` or `# VERDICT: FAIL`. PASS only
+when every claim is VERIFIED; anything you could not verify is a FAIL with the reason, or BLOCKED
+when the check itself could not run. Add a `# CONFIDENCE: 0.xx` line (0.00–1.00, two decimals)
+directly above the verdict line — a verdict without it is incomplete. Close the report with what
+you deliberately did not test.
 
 In a `test` task you also produce the suite: tests live in the project's test layout, follow its
 idiom, and are committed.

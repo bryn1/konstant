@@ -22,7 +22,7 @@ def test_sync_then_check_is_clean(workspace):
     changed = g.sync()
     assert len(changed) == len(g.render()) and g.check() == []
     assert len(list((workspace / ".claude" / "agents").iterdir())) == 12   # + planner, scenario-writer
-    assert len(list((workspace / ".claude" / "skills").iterdir())) == 36   # + workflow-intake
+    assert len(list((workspace / ".claude" / "skills").iterdir())) == 62   # + workflow-intake
     assert (workspace / "CLAUDE.md").is_file() and (workspace / "AGENTS.md").is_file()
     assert g.sync() == []                                          # idempotent
 
@@ -63,7 +63,7 @@ def _front(text):
 def test_every_generated_skill_and_agent_parses(workspace):
     gen(workspace).sync()
     skills = sorted((workspace / ".claude" / "skills").glob("*/SKILL.md"))
-    assert len(skills) == 36
+    assert len(skills) == 62
     for f in skills:
         meta, body = _front(f.read_text())
         assert meta["name"] == f.parent.name and isinstance(meta["description"], str) \

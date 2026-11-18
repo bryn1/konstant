@@ -49,7 +49,9 @@ reduction). A `reason:` line schedules a split, it never absolves a mixed file.
 ## Dead code is capability that does not run
 
 Before calling a build, port or refactor done, find modules nothing imports, functions nothing
-calls and scripts nothing runs:
+calls and scripts nothing runs. Also check for single-concern violations: a file that mixes two
+concerns (data-fetching AND business logic, for example) is a split candidate regardless of size —
+any `concern_check.py` or similar tool that flags MIXED files should be run before sign-off.
 
 ```
 python3 .claude/skills/coding-discipline/scripts/dead_code.py <repo> --live <entry dirs> [--allow allow.txt]

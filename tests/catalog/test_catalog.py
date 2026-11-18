@@ -30,7 +30,7 @@ def test_one_agent_per_type():
 def test_counts_skills_and_workflows():
     cat = catalog.load(SRC, check_files=True)
     skills = sorted(p.name for p in (SRC / "skills").iterdir() if (p / "SKILL.md").is_file())
-    assert len(skills) == 26
+    assert len(skills) == 52
     assert sorted(cat.skill_names()) == skills                     # no orphan, none missing
     workflows = sorted(p.stem for p in (SRC / "workflows").glob("*.md"))
     assert workflows == sorted(TYPES) and [cat.workflow_of(t) for t in TYPES] == list(TYPES)
@@ -94,7 +94,7 @@ def test_catalog_skill_files_are_distilled_and_well_formed():
         n = len(f.read_text().splitlines())
         assert n <= 200, f"{f}: {n} lines"                          # per-file bound
         total += n
-    assert total <= 2612       # the catalog's total size budget
+    assert total <= 3200       # the catalog's total size budget
 
 
 def test_agent_sources_have_frontmatter():

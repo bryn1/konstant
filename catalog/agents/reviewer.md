@@ -38,6 +38,9 @@ security or correctness; P1 important bug; P2 reliability; P3 hardening; P4 opti
 - `# VERDICT: RECONSIDER`: the approach is wrong or solves the wrong problem; the evidence and the
   alternative.
 
+Add a `# CONFIDENCE: 0.xx` line (0.00–1.00, two decimals — your probability that the verdict is
+correct) directly above the verdict line. A verdict without it is incomplete.
+
 Always include what you tried to break and could not, so the next reader does not re-litigate the
 solid parts. In a `review` task you produce `FINDINGS-review.md` (findings, no verdict file); the
 tester then reproduces the top findings.
