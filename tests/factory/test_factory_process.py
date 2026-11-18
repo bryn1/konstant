@@ -37,6 +37,7 @@ def heartbeat(s) -> dict:
         return {}
 
 
+@needs_jail
 def test_D7_second_factory_refused_red_then_stop_and_start_green(tmp_path):
     s = make_lws(tmp_path, goal=False)
     try:
@@ -156,6 +157,7 @@ def test_no_stall_while_the_factory_makes_progress_green(tmp_path):
         s.w.stop_board()
 
 
+@needs_jail
 def test_hung_loop_heartbeat_goes_stale_in_status_and_doctor(tmp_path):
     s = make_lws(tmp_path, goal=False)
     try:

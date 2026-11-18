@@ -101,6 +101,7 @@ def test_D2_cost_budget_on_a_harness_that_cannot_measure_it_red(tmp_path):
         s.w.stop_board()
 
 
+@needs_jail
 def test_D2_cost_budget_on_a_measuring_harness_green(tmp_path):
     """The allowed twin: claude with --output-format json reports usage, so the same limit is
     accepted (the dry run plans the intake instead of refusing)."""
