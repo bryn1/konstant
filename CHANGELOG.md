@@ -2,6 +2,20 @@
 
 All notable changes to konstant. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-11-22
+
+### Added
+- **`[gate] test_project`** (default `true`): set to `false` to skip the project-level pytest leg
+  of the `tests` rule. Useful when the project's test suite requires dependencies not present in
+  the konstant jail, or when an external evaluation (e.g. SWE-bench Docker grading) already
+  verifies the fix. OUT-level tests are unaffected.
+- **`[gate] done_only_max_resumes`** (default unset): a lower cap on DoD-loop resumes that kicks
+  in when every remaining unmet finding comes from an excusable rule (`done`, `cleanup`,
+  `hygiene`, `lastmile` — not `tests`, `judged`, `verdicts`, `phases`, or other UNEXCUSABLE
+  rules). Set to `1` to stop re-running phases after a single attempt to fix cosmetic DONE.md
+  issues, saving 2-3 cycles on runs where the actual deliverable is correct but the close-out
+  agent wrote the evidence wrong.
+
 ## [Unreleased]
 
 Level 5, the dark factory (docs/LEVEL5.md; waves L5-1 to L5-7, pending the second independent

@@ -48,7 +48,8 @@ def default_out(project, run_dir: Path, stamp: str, slug: str) -> Path:
     return run_dir / "out"
 
 
-GATE_KEYS = ("max_cycles", "max_resumes", "test_cmd", "cleanup", "hygiene", "jail")
+GATE_KEYS = ("max_cycles", "max_resumes", "done_only_max_resumes", "test_cmd", "test_project",
+             "cleanup", "hygiene", "jail")
 
 
 def catalog_fields(cat, ttype: str, gate_cfg: dict) -> dict:

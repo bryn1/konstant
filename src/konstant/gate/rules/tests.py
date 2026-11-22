@@ -86,7 +86,7 @@ def check(run: Run) -> list:
                                                     f"(exit {rc}): {tail.strip()[-200:]}",
                                            owner="producer")]
     found = []
-    if project and project.is_dir() and project_has_tests(project, out):
+    if project and project.is_dir() and run.gate.get("test_project", True) and project_has_tests(project, out):
         rc, tail = run_cmd(pytest_argv(["--rootdir", project, project]), project, jail_rw=rw,
                            run=run)
         if rc not in (0, 5):                    # 5 = pytest collected nothing: nothing broke

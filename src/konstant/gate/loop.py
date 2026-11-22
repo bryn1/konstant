@@ -74,6 +74,14 @@ def dod_loop(pr: PhaseRunner, board, max_resumes: int, err) -> tuple:
         if resumes >= max_resumes:
             err(f"konstant task: UNMET after {resumes} resumes: {first.line()}")
             return code, lines
+        done_only_max = rec.get("gate", {}).get("done_only_max_resumes")
+        if done_only_max is not None:
+            unmet = [f for f in findings if f.severity == "unmet"]
+            if unmet and all(f.rule not in check_mod.UNEXCUSABLE for f in unmet):
+                if resumes >= int(done_only_max):
+                    err(f"konstant task: STOP (done_only_max_resumes={done_only_max}) - only "
+                        f"cosmetic findings after {resumes} resumes: {first.line()}")
+                    return code, lines
         prev, resumes, rnd = norm, resumes + 1, rnd + 1
         feedback = "The mechanical DoD check is UNMET:\n" + "\n".join(f"- {ln}" for ln in lines)
         err(f"konstant task: resume {resumes}/{max_resumes} ({first.owner}): {first.line()}")

@@ -86,7 +86,9 @@ DEFAULTS: dict = {
     "gate": {
         "max_cycles": 3,
         "max_resumes": 3,
+        "done_only_max_resumes": None,   # lower cap when only cosmetic rules (done/cleanup/hygiene) are unmet
         "test_cmd": "auto",
+        "test_project": True,            # set false to skip the project-level pytest leg
         "cleanup": "warn",
         "verify_after_close": True,
         "hygiene": {"target": 250, "hard": 400, "tests": 600, "grown": 600},
