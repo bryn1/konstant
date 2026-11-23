@@ -453,3 +453,104 @@ def test_a_failure_in_shared_out_is_still_the_producers_green(tmp_path):
     (out / "test_shared.py").write_text("def test_bad():\n    assert False\n")
     found = tests_rule.check(run)
     assert [f.owner for f in found] == ["producer"], [(f.owner, f.text) for f in found]
+
+
+# --- test_project gate option (v0.2.0) ------------------------------------------
+
+def _project_tests_run(tmp_path, test_project: bool):
+    """A Run whose project holds a failing test file and OUT has no tests."""
+    from konstant.gate.rules.common import Run
+    out = tmp_path / "out"
+    out.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "test_bad.py").write_text("import nonexistent_xyz_module\ndef test_x(): pass\n")
+    rec = {"out": str(out), "project": str(project),
+           "gate": {"jail": False, "test_cmd": "auto", "test_project": test_project}}
+    return Run(run_dir=tmp_path, rec=rec)
+
+
+def test_test_project_true_runs_project_pytest(tmp_path):
+    """Default behaviour: project-level pytest runs and reports failures."""
+    from konstant.gate.rules import tests as tests_rule
+    run = _project_tests_run(tmp_path, test_project=True)
+    found = tests_rule.check(run)
+    assert found, "expected a finding when project pytest fails"
+    assert any("project" in f.text for f in found)
+
+
+def test_test_project_false_skips_project_pytest(tmp_path):
+    """[gate] test_project = false: project-level pytest is never run, no finding produced."""
+    from konstant.gate.rules import tests as tests_rule
+    run = _project_tests_run(tmp_path, test_project=False)
+    found = tests_rule.check(run)
+    assert not found, f"expected no findings when test_project=false, got: {found}"
+
+
+# --- done_only_max_resumes gate option (v0.2.0) ----------------------------------
+
+def test_done_only_max_resumes_stops_early_on_cosmetic_findings(tmp_path):
+    """When every unmet finding is from a non-UNEXCUSABLE rule and resumes >= cap, stop.
+
+    Sequence with done_only_max_resumes=1:
+      call 1 → resumes=0, 0>=1? No → phase runs; resumes becomes 1
+      call 2 → resumes=1, 1>=1? Yes → STOP UNMET
+    Total: 2 check calls, code=UNMET.
+    Each call uses a unique message so the 'repeated reason' guard does not fire first.
+    """
+    from unittest.mock import patch, MagicMock
+    from konstant.gate import loop, check as check_mod
+    from konstant.gate.rules.common import Finding
+
+    pr = MagicMock()
+    pr.rec = {"gate": {"done_only_max_resumes": 1}, "run_dir": str(tmp_path), "out": str(tmp_path)}
+    pr.run_dir = tmp_path
+
+    calls = []
+
+    def fake_check(*a, **kw):
+        n = len(calls) + 1
+        calls.append(n)
+        f = Finding("done", f"DONE.md missing (call {n})", owner="producer")
+        return check_mod.UNMET, [f"[done] DONE.md missing (call {n})"], [], [f]
+
+    with patch.object(check_mod, "run_check", fake_check):
+        code, _ = loop.dod_loop(pr, None, max_resumes=3, err=lambda m: None)
+
+    assert code == check_mod.UNMET, "should stop at UNMET after cap reached"
+    assert len(calls) == 2, (
+        f"expected 2 check calls (resumes=0 → phase → resumes=1 → cap hits), got {len(calls)}")
+
+
+def test_done_only_max_resumes_not_applied_when_unexcusable(tmp_path):
+    """When an UNEXCUSABLE finding is present, done_only_max_resumes is ignored.
+
+    Sequence with done_only_max_resumes=0 and an UNEXCUSABLE finding on calls 1-2:
+      call 1 → UNEXCUSABLE → cap check skipped → phase runs; resumes becomes 1
+      call 2 → UNEXCUSABLE → cap check skipped → phase runs; resumes becomes 2
+      call 3 → MET → return MET
+    Total: 3 check calls, code=MET.
+    """
+    from unittest.mock import patch, MagicMock
+    from konstant.gate import loop, check as check_mod
+    from konstant.gate.rules.common import Finding
+
+    pr = MagicMock()
+    pr.rec = {"gate": {"done_only_max_resumes": 0}, "run_dir": str(tmp_path), "out": str(tmp_path)}
+    pr.run_dir = tmp_path
+
+    calls = []
+
+    def fake_check(*a, **kw):
+        n = len(calls) + 1
+        calls.append(n)
+        if n <= 2:
+            f = Finding("tests", f"pytest failed (call {n})", owner="producer")
+            return check_mod.UNMET, [f"[tests] pytest failed (call {n})"], [], [f]
+        return check_mod.MET, [], [], []
+
+    with patch.object(check_mod, "run_check", fake_check):
+        code, _ = loop.dod_loop(pr, None, max_resumes=3, err=lambda m: None)
+
+    assert code == check_mod.MET, "unexcusable finding should not be gated by done_only_max_resumes"
+    assert len(calls) == 3, f"expected 3 check calls (2 UNMET + 1 MET), got {len(calls)}"

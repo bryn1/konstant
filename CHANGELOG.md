@@ -2,6 +2,13 @@
 
 All notable changes to konstant. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-23
+
+### Added
+- **Pytest tests for `test_project` and `done_only_max_resumes`** (`tests/gate/test_rules.py`):
+  two-sided coverage for both v0.2.0 gate options (green: option works as intended; red: missing
+  option means the old behaviour still applies).
+
 ## [0.2.0] - 2026-11-22
 
 ### Added
