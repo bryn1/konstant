@@ -77,7 +77,8 @@ class Run:
 def out_files(out: Path):
     """Every file under OUT except run/scratch dirs and caches."""
     for root, dirs, files in os.walk(out):
-        dirs[:] = sorted(d for d in dirs if d not in CACHE_DIRS and d not in RUN_DIRS)
+        dirs[:] = sorted(d for d in dirs if d not in CACHE_DIRS and d not in RUN_DIRS
+                         and not d.startswith(".tmp-"))
         for fn in sorted(files):
             if not fn.endswith(".pyc"):
                 yield Path(root) / fn

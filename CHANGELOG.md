@@ -2,6 +2,16 @@
 
 All notable changes to konstant. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-11-24
+
+### Fixed
+- **LICENCE rule false positives from scratch venvs** (`src/konstant/gate/rules/common.py`):
+  `out_files()` now skips any directory whose name starts with `.tmp-` (e.g. `.tmp-venv`,
+  `.tmp-astropy`, `.tmp-envs`). Previously the exact name `.tmp` was excluded but the
+  hyphenated variants used for jail scratch environments were walked, so every dependency
+  with an `SPDX-License-Identifier:` header triggered a spurious LICENCE finding.
+  Two new tests confirm the exclusion is active and covers all `.tmp-<name>` patterns.
+
 ## [0.2.1] - 2026-11-23
 
 ### Added

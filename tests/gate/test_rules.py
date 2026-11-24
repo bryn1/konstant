@@ -554,3 +554,53 @@ def test_done_only_max_resumes_not_applied_when_unexcusable(tmp_path):
 
     assert code == check_mod.MET, "unexcusable finding should not be gated by done_only_max_resumes"
     assert len(calls) == 3, f"expected 3 check calls (2 UNMET + 1 MET), got {len(calls)}"
+
+
+# --- licence: .tmp-* scratch venv exclusion ------------------------------------------------
+
+def test_licence_out_files_skips_tmp_scratch_dirs(tmp_path):
+    """out_files must not walk into .tmp-<name> scratch dirs (e.g. jail venvs).
+
+    A Python file inside OUT/.tmp-venv/lib/site-packages/ must not appear in the
+    licence rule's changed() output — it is a dependency, not agent-written code.
+    If it did appear, every dependency with an SPDX header would generate a spurious
+    LICENCE finding.  The companion test below checks that files outside .tmp-* still
+    appear (the exclusion is not a no-op).
+    """
+    from konstant.gate.rules.common import out_files
+    out = tmp_path / "OUT"
+    # a real output file (should be yielded)
+    real = out / "solution.py"
+    real.parent.mkdir(parents=True)
+    real.write_text("# SPDX-License-Identifier: MIT\n")
+    # a file inside a .tmp-venv scratch dir (must be skipped)
+    scratch = out / ".tmp-venv" / "lib" / "site-packages" / "erfa" / "core.py"
+    scratch.parent.mkdir(parents=True)
+    scratch.write_text("# SPDX-License-Identifier: BSD-3-Clause\n")
+    # a file inside a plain .tmp dir (already in RUN_DIRS, must also be skipped)
+    tmp_file = out / ".tmp" / "work.py"
+    tmp_file.parent.mkdir(parents=True)
+    tmp_file.write_text("temp\n")
+
+    found = [str(f) for f in out_files(out)]
+    assert any("solution.py" in f for f in found), "real output file must be yielded"
+    assert not any(".tmp-venv" in f for f in found), ".tmp-venv must be excluded"
+    assert not any(".tmp" + "/" in f or ".tmp" + "\\" in f for f in found), ".tmp must be excluded"
+
+
+def test_licence_out_files_skips_multiple_tmp_scratch_dirs(tmp_path):
+    """out_files skips all .tmp-<name> patterns, not just one known name."""
+    from konstant.gate.rules.common import out_files
+    out = tmp_path / "OUT"
+    real = out / "patch.py"
+    real.parent.mkdir(parents=True)
+    real.write_text("fixed = True\n")
+    for name in (".tmp-astropy", ".tmp-envs", ".tmp-build"):
+        d = out / name / "sub"
+        d.mkdir(parents=True)
+        (d / "pkg.py").write_text("code\n")
+
+    found = [str(f) for f in out_files(out)]
+    assert any("patch.py" in f for f in found)
+    for name in (".tmp-astropy", ".tmp-envs", ".tmp-build"):
+        assert not any(name in f for f in found), f"{name} must be excluded"
