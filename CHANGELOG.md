@@ -2,41 +2,11 @@
 
 All notable changes to konstant. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.2.2] - 2026-11-24
-
-### Fixed
-- **LICENCE rule false positives from scratch venvs** (`src/konstant/gate/rules/common.py`):
-  `out_files()` now skips any directory whose name starts with `.tmp-` (e.g. `.tmp-venv`,
-  `.tmp-astropy`, `.tmp-envs`). Previously the exact name `.tmp` was excluded but the
-  hyphenated variants used for jail scratch environments were walked, so every dependency
-  with an `SPDX-License-Identifier:` header triggered a spurious LICENCE finding.
-  Two new tests confirm the exclusion is active and covers all `.tmp-<name>` patterns.
-
-## [0.2.1] - 2026-11-23
-
-### Added
-- **Pytest tests for `test_project` and `done_only_max_resumes`** (`tests/gate/test_rules.py`):
-  two-sided coverage for both v0.2.0 gate options (green: option works as intended; red: missing
-  option means the old behaviour still applies).
-
-## [0.2.0] - 2026-11-22
-
-### Added
-- **`[gate] test_project`** (default `true`): set to `false` to skip the project-level pytest leg
-  of the `tests` rule. Useful when the project's test suite requires dependencies not present in
-  the konstant jail, or when an external evaluation (e.g. SWE-bench Docker grading) already
-  verifies the fix. OUT-level tests are unaffected.
-- **`[gate] done_only_max_resumes`** (default unset): a lower cap on DoD-loop resumes that kicks
-  in when every remaining unmet finding comes from an excusable rule (`done`, `cleanup`,
-  `hygiene`, `lastmile` — not `tests`, `judged`, `verdicts`, `phases`, or other UNEXCUSABLE
-  rules). Set to `1` to stop re-running phases after a single attempt to fix cosmetic DONE.md
-  issues, saving 2-3 cycles on runs where the actual deliverable is correct but the close-out
-  agent wrote the evidence wrong.
-
 ## [Unreleased]
 
-Level 5, the dark factory (docs/LEVEL5.md; waves L5-1 to L5-7, pending the second independent
-review and its fixes before a release).
+## [0.3.0] - 2026-11-24
+
+Level 5, the dark factory (docs/LEVEL5.md; waves L5-1 to L5-7).
 
 ### Added
 - **Sealed holdouts** (`holdout add/list/check/show`, the scenario writer): held-out acceptance
@@ -145,6 +115,37 @@ review and its fixes before a release).
   test-runner and editor config, package scripts (K-15).
 ### Security
 - Fixes from the first independent level-5 review (H-01..H-09; docs/LEVEL5.md "L5-F1 as built").
+
+## [0.2.2] - 2026-11-24
+
+### Fixed
+- **LICENCE rule false positives from scratch venvs** (`src/konstant/gate/rules/common.py`):
+  `out_files()` now skips any directory whose name starts with `.tmp-` (e.g. `.tmp-venv`,
+  `.tmp-astropy`, `.tmp-envs`). Previously the exact name `.tmp` was excluded but the
+  hyphenated variants used for jail scratch environments were walked, so every dependency
+  with an `SPDX-License-Identifier:` header triggered a spurious LICENCE finding.
+  Two new tests confirm the exclusion is active and covers all `.tmp-<name>` patterns.
+
+## [0.2.1] - 2026-11-23
+
+### Added
+- **Pytest tests for `test_project` and `done_only_max_resumes`** (`tests/gate/test_rules.py`):
+  two-sided coverage for both v0.2.0 gate options (green: option works as intended; red: missing
+  option means the old behaviour still applies).
+
+## [0.2.0] - 2026-11-22
+
+### Added
+- **`[gate] test_project`** (default `true`): set to `false` to skip the project-level pytest leg
+  of the `tests` rule. Useful when the project's test suite requires dependencies not present in
+  the konstant jail, or when an external evaluation (e.g. SWE-bench Docker grading) already
+  verifies the fix. OUT-level tests are unaffected.
+- **`[gate] done_only_max_resumes`** (default unset): a lower cap on DoD-loop resumes that kicks
+  in when every remaining unmet finding comes from an excusable rule (`done`, `cleanup`,
+  `hygiene`, `lastmile` — not `tests`, `judged`, `verdicts`, `phases`, or other UNEXCUSABLE
+  rules). Set to `1` to stop re-running phases after a single attempt to fix cosmetic DONE.md
+  issues, saving 2-3 cycles on runs where the actual deliverable is correct but the close-out
+  agent wrote the evidence wrong.
 
 ## [0.1.0] - 2026-10-31
 

@@ -18,3 +18,5 @@ __pycache__/
 
 # lock files from tools konstant does not use
 uv.lock
+/.audits/
+/.tmp/

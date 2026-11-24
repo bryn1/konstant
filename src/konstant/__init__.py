@@ -1,2 +1,1 @@
-"""konstant: a self-contained workspace for running coding agents with discipline."""
-__version__ = "0.2.2"
+__version__: str = "0.3.0"
