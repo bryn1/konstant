@@ -5,6 +5,7 @@ import json
 import sqlite3
 import stat
 
+from konstant import __version__
 from konstant.board import auth
 
 ROLES = ("owner", "orchestrator", "worker", "verifier", "viewer")
@@ -58,7 +59,9 @@ def test_board_refuses_to_start_on_a_malformed_policy(fresh):
 def test_running_board(ws):
     assert "running" in ws.ok("board", "status").stdout
     assert "already running" in ws.ok("board", "start").stdout
-    assert ws.ok("version").stdout.strip() == "konstant 0.1.0"
+    # not a pinned release string: the row proves `version` prints the package's own version
+    # (the sibling that owns src/konstant/__init__.py bumps it every release; pinning goes red)
+    assert ws.ok("version").stdout.strip() == f"konstant {__version__}"
     projects = json.loads(ws.ok("project", "list", "--json").stdout)
     slugs = [p["slug"] for p in projects]
     # the module's shared workspace: `demo` from the fixture, `gitted` only once

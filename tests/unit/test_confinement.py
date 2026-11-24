@@ -55,6 +55,11 @@ def test_closed_drops_credential_variables_and_sockets(monkeypatch):
 
 def test_credentials_pass_named_locations_only(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    # machinery.credentials() also masks a relocated agent home from the ENV (HOME_ENV); the
+    # exact-count row below is about the NAMED locations only, so the harness's own env (this
+    # seat sets DSH_HOME) must not leak in — the row then goes red if a HOME_ENV var leaks
+    for var in machinery.HOME_ENV:
+        monkeypatch.delenv(var, raising=False)
     c = parse({"credentials": ["~/.ssh"]})
     masked = c.masked_credentials()
     assert str(tmp_path / ".ssh") not in masked and str(tmp_path / ".aws") in masked

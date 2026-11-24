@@ -64,11 +64,16 @@ def _offline_install(tree: Path, wheels: Path):
                           text=True, timeout=900, cwd=str(tree), env=env)
 
 
-def _download(wheels: Path, *what):
+def _download(wheels: Path, *what, require=()):
     dl = subprocess.run([sys.executable, "-m", "pip", "download", "-q", "-d", str(wheels), *what],
                         capture_output=True, text=True, timeout=600)
     if dl.returncode != 0:
         pytest.skip(f"no package index reachable to build the wheel dir: {dl.stderr[-200:]}")
+    # pip on an offline box can exit 0 and pull NOTHING (only the local tree's own wheel): the
+    # gate is that the required distributions actually landed, not pip's exit code
+    missing = [r for r in require if not any(r in p.name for p in wheels.iterdir())]
+    if missing:
+        pytest.skip(f"no package index reachable to build the wheel dir (missing: {missing})")
 
 
 @pytest.mark.skipif(SKIP_INSTALL, reason="KONSTANT_SKIP_INSTALL_TESTS=1")
@@ -80,7 +85,7 @@ def test_F17_offline_install_from_a_pip_download_dir(tmp_path):
     (`... <folder> setuptools wheel`) then installs."""
     tree = test_install._copy_release_tree(tmp_path / "k")
     wheels = tmp_path / "wheels"
-    _download(wheels, str(tree))
+    _download(wheels, str(tree), require=("fastapi",))   # the deps install.sh needs
     res = _offline_install(tree, wheels)
     if res.returncode == 0:
         assert "konstant" in res.stdout and "installed" in res.stdout
@@ -91,7 +96,8 @@ def test_F17_offline_install_from_a_pip_download_dir(tmp_path):
     assert "Traceback" not in res.stderr
     tree2 = test_install._copy_release_tree(tmp_path / "k2")
     wheels2 = tmp_path / "wheels2"
-    _download(wheels2, str(tree2), "setuptools", "wheel")
+    _download(wheels2, str(tree2), "setuptools", "wheel",
+              require=("fastapi", "setuptools"))
     res = _offline_install(tree2, wheels2)
     assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
     assert "konstant" in res.stdout and "installed" in res.stdout

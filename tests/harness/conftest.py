@@ -17,11 +17,15 @@ GOLDEN = Path(__file__).resolve().parents[1] / "fixtures" / "golden" / "harness"
 @pytest.fixture()
 def home(tmp_path, monkeypatch) -> Path:
     """An empty HOME: no ~/.ssh, ~/.claude/CLAUDE.md or ~/.codex of the operator leak into a
-    rendering or a reach verdict."""
+    rendering or a reach verdict. The agent homes relocatable through the env (machinery.
+    HOME_ENV) are cleared with it — a seat that runs the suite from inside one of those agents
+    (a dsh session sets DSH_HOME) must not render it into a golden."""
     h = tmp_path / "home"
     h.mkdir()
     monkeypatch.setenv("HOME", str(h))
-    monkeypatch.delenv("CODEX_HOME", raising=False)
+    from konstant import machinery
+    for var in machinery.HOME_ENV:
+        monkeypatch.delenv(var, raising=False)
     return h
 
 

@@ -25,6 +25,7 @@ import pytest
 
 from konstant import config as config_mod
 from konstant.holdout import draft, lint
+from tests.cli.conftest import fix_pythonpath
 from tests.fixtures.fake_harness import B1_BRIEF
 from tests.fixtures.fake_scenario import LIVE_DRAFTS, SCENARIOS
 from tests.holdout.conftest import make_ws, needs_jail
@@ -164,11 +165,10 @@ def test_feedback_carries_each_drafts_reasons_name_and_text(tmp_path):
 # --- the pre-check CLI: no board, no store, allowed inside a phase ----------------------------
 
 def kcli(home: Path, *args, cwd=None) -> subprocess.CompletedProcess:
-    import os as _os
-    env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(home), "LANG": "C.UTF-8",
-           "KONSTANT_HOME": str(home), "KONSTANT_IN_TASK": "1", "KONSTANT_IDENTITY": "scenario"}
-    if "PYTHONPATH" in _os.environ:   # propagate when running under a --target install (e.g. knut)
-        env["PYTHONPATH"] = _os.environ["PYTHONPATH"]
+    env = fix_pythonpath({"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(home),
+                          "LANG": "C.UTF-8",
+                          "KONSTANT_HOME": str(home), "KONSTANT_IN_TASK": "1",
+                          "KONSTANT_IDENTITY": "scenario"})
     return subprocess.run([sys.executable, "-m", "konstant", "holdout", *map(str, args)],
                           capture_output=True, text=True, env=env, cwd=str(cwd or home),
                           timeout=60)

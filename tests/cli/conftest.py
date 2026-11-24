@@ -6,6 +6,7 @@ a user or an agent would run it. The board is stopped at teardown.
 from __future__ import annotations
 
 import os
+import site
 import socket
 import subprocess
 import sys
@@ -14,6 +15,37 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+# this interpreter's user site-packages ("" when disabled) and the HOME it hangs under: where a
+# source checkout keeps konstant's own deps when nothing else does (tomli on Python 3.10)
+USER_SITE = site.getusersitepackages() if site.ENABLE_USER_SITE else ""
+USER_HOME = str(Path(USER_SITE).parents[3]) if USER_SITE else ""
+
+
+def fix_pythonpath(env: dict) -> dict:
+    """Make what THIS interpreter can import also importable in a test subprocess.
+
+    Two harness-wide faults the copied environment carries: (1) the documented `PYTHONPATH=src`
+    is relative to the pytest invocation dir, and every test subprocess runs with cwd = a temp
+    workspace, where it resolves to nothing (`No module named konstant`) — each entry is
+    resolved against REPO, the dir that invocation runs from; (2) a test that redirects HOME
+    (a phase's fake home, tests/factory/conftest.py) hides this interpreter's user
+    site-packages, where a source checkout keeps konstant's own deps — an install keeps them
+    HOME-independent, so under a redirected HOME the dir is put on the path. A minimal env that
+    does not name PYTHONPATH inherits the caller's (8074df3: a child running `-m
+    konstant`/`-m pytest` needs this run's import path, e.g. knut's sealed re-run). The one
+    place this is done; env() below and the hand-built subprocess envs
+    (tests/holdout/test_author_reliability.py, tests/factory/test_examples.py) call it here."""
+    raw = env.get("PYTHONPATH", os.environ.get("PYTHONPATH", ""))
+    entries = [p for p in raw.split(os.pathsep) if p]
+    entries = [str(REPO / p) if not Path(p).is_absolute() else p for p in entries]
+    if USER_SITE and env.get("HOME", USER_HOME) != USER_HOME and os.path.isdir(USER_SITE):
+        entries.append(USER_SITE)
+    entries = list(dict.fromkeys(entries))
+    if entries:
+        env["PYTHONPATH"] = os.pathsep.join(entries)
+    else:
+        env.pop("PYTHONPATH", None)
+    return env
 
 
 def free_port() -> int:
@@ -36,7 +68,7 @@ class Workspace:
         if passthrough:
             env["KONSTANT_ENV_PASSTHROUGH"] = passthrough
         env.update(KONSTANT_HOME=str(self.home), **extra)
-        return env
+        return fix_pythonpath(env)
 
     def stop_board(self) -> None:
         """`board stop`, and when that cannot run (a test broke konstant.toml, the CLI refuses)

@@ -63,12 +63,15 @@ def test_F01_declined_quotes_do_not_turn_a_failed_run_met(rws):
 def test_F05_a_detached_producer_process_cannot_flip_the_verdict(rws):
     res, rd = run(rws, "daemon")
     out = out_of(rd)
-    try:
-        flipped = [f.name for f in out.glob("*verdict*.md") if "flipped" in f.read_text()]
-        assert not flipped, flipped
-        assert res.returncode != 0, res.stderr
-    finally:
-        _kill_daemons(out)
+    # silence the watcher BEFORE reading the verdicts: escaping the runner's process group and
+    # living 120 s is the finding itself, so a flip it writes AFTER `task run` has finished its
+    # last verdict check races this row and is not a product defect. Both rows keep their
+    # meaning: a flip that landed while the run judged the verdicts is still on disk here, and
+    # a flip the runner ACCEPTED goes red on the return code.
+    _kill_daemons(out)
+    flipped = [f.name for f in out.glob("*verdict*.md") if "flipped" in f.read_text()]
+    assert not flipped, flipped
+    assert res.returncode != 0, res.stderr
 
 
 def test_F08_a_producer_cannot_rewrite_the_testers_profile_mid_run(rws):
