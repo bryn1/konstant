@@ -45,6 +45,13 @@ REPO=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd -P)
 PY=${PYTHON:-python3}
 BUILD_PY="$REPO/.venv/bin/python"
 [ -x "$BUILD_PY" ] || BUILD_PY="$PY"
+# where this interpreter keeps konstant's own deps when nothing else does (tomli on Python 3.10):
+# the user-site dir, captured BEFORE the HOME redirect below — the private HOME hides it from the
+# pre-install from-source legs (an install keeps its deps HOME-independent; fix_pythonpath in
+# tests/cli/conftest.py does the same for the test subprocesses)
+USER_SITE=$("$BUILD_PY" -m site --user-site 2>/dev/null || true)
+[ -n "$USER_SITE" ] && [ -d "$USER_SITE" ] || USER_SITE=""
+SRC_PYTHONPATH="$REPO/src${USER_SITE:+:$USER_SITE}"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/konstant-factory-e2e.XXXXXX")
 # a private HOME after the install: nothing of the caller's (agent homes, git hooks, git config) is
 # loaded or written by the legs (install.sh keeps the caller's HOME: its Python may need a user-site
@@ -90,13 +97,13 @@ unset KONSTANT_HOME KONSTANT_IN_TASK KONSTANT_RUN KONSTANT_ROLE KONSTANT_CATALOG
 
 # --- release tarball, fresh install ------------------------------------------------------------
 step "release tarball"
-VER=$(PYTHONPATH="$REPO/src" "$BUILD_PY" -c 'import konstant; print(konstant.__version__)')
+VER=$(PYTHONPATH="$SRC_PYTHONPATH" "$BUILD_PY" -c 'import konstant; print(konstant.__version__)')
 if [ $# -ge 1 ]; then
   TARBALL=$(readlink -f "$1"); echo "using $TARBALL"
 else
   DENY=(--no-denylist)
   [ -f "$REPO/release/denylist.local.txt" ] && DENY=(--denylist "$REPO/release/denylist.local.txt")
-  run env PYTHONPATH="$REPO/src" "$BUILD_PY" -m konstant.release build --version "$VER" \
+  run env PYTHONPATH="$SRC_PYTHONPATH" "$BUILD_PY" -m konstant.release build --version "$VER" \
       --worktree --root "$REPO" --dist "$WORK/dist" "${DENY[@]}"
   want_rc 0; want_out 'RESULT: CLEAN'
   TARBALL="$WORK/dist/konstant-$VER.tar.gz"
