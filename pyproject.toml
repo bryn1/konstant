@@ -41,4 +41,7 @@ konstant = ["board/migrations/*.sql", "board/static/*", "harnesses/dsh_gate/kons
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-p no:cacheprovider"
+# the suite imports konstant from this checkout, bare or not; the documented PYTHONPATH=src
+# stays valid (fix_pythonpath in tests/cli/conftest.py dedupes the entry)
+pythonpath = ["src"]
 filterwarnings = ["ignore:Using .httpx. with .starlette.testclient. is deprecated"]

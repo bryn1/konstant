@@ -32,19 +32,17 @@ def fix_pythonpath(env: dict) -> dict:
     site-packages, where a source checkout keeps konstant's own deps — an install keeps them
     HOME-independent, so under a redirected HOME the dir is put on the path. A minimal env that
     does not name PYTHONPATH inherits the caller's (8074df3: a child running `-m
-    konstant`/`-m pytest` needs this run's import path, e.g. knut's sealed re-run). The one
+    konstant`/`-m pytest` needs this run's import path, e.g. knut's sealed re-run); REPO's own
+    src is always the first entry, so a child imports konstant exactly as the parent does (the
+    bare run, PYTHONPATH unset) and the documented `src` entry dedupes to one. The one
     place this is done; env() below and the hand-built subprocess envs
     (tests/holdout/test_author_reliability.py, tests/factory/test_examples.py) call it here."""
     raw = env.get("PYTHONPATH", os.environ.get("PYTHONPATH", ""))
-    entries = [p for p in raw.split(os.pathsep) if p]
+    entries = [str(REPO / "src")] + [p for p in raw.split(os.pathsep) if p]
     entries = [str(REPO / p) if not Path(p).is_absolute() else p for p in entries]
     if USER_SITE and env.get("HOME", USER_HOME) != USER_HOME and os.path.isdir(USER_SITE):
         entries.append(USER_SITE)
-    entries = list(dict.fromkeys(entries))
-    if entries:
-        env["PYTHONPATH"] = os.pathsep.join(entries)
-    else:
-        env.pop("PYTHONPATH", None)
+    env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(entries))
     return env
 
 
