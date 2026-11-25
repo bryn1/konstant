@@ -20,7 +20,7 @@ work is actually done, with code that reads artifacts instead of asking a model.
   `verified`, never the identity that closed it.
 - **Task gate**: a deterministic classifier maps a task to one of nine task types. Each type runs
   as fixed phases with one agent profile, and verdict files are written by the phases that verify.
-- **DoD check**: `konstant task check` applies 13 mechanical Definition-of-Done rules to the files
+- **DoD check**: `konstant task check` applies 14 mechanical Definition-of-Done rules to the files
   a run produced, such as fresh verdicts, a content-hash pin, tests that pass, no stray files and
   honest DONE.md rows. No model is involved. The phase runner resumes the failing phase a bounded
   number of times.
@@ -172,8 +172,8 @@ deleting the folder.
 From a downloaded tarball instead of the one-liner:
 
 ```sh
-sha256sum -c konstant-0.1.0.tar.gz.sha256         # the .sha256 downloaded next to the tarball
-tar xzf konstant-0.1.0.tar.gz && cd konstant-0.1.0
+sha256sum -c konstant-0.3.0.tar.gz.sha256         # the .sha256 downloaded next to the tarball
+tar xzf konstant-0.3.0.tar.gz && cd konstant-0.3.0
 ./install.sh --yes                     # venv, package, config, board DB, tokens, agent files, doctor
 bin/konstant board start               # the board on 127.0.0.1 (port in konstant.toml)
 bin/konstant project add demo --init-git
@@ -218,7 +218,7 @@ catalog/              # types.yaml (the one source), agents/, skills/, workflows
 release/patterns.toml # public-safety scan patterns (maintainer tooling)
 tests/                # unit, board, cli, gate, verify, catalog, release, e2e/
 examples/greeter/     # the sample project and goal for the factory (level 5)
-docs/                 # QUICKSTART, CONCEPTS, CLI, HARNESSES, DSH, DESIGN
+docs/                 # QUICKSTART, CONCEPTS, CLI, HARNESSES, DSH, DESIGN, LEVEL5
 ```
 
 Created by `./install.sh` (git-ignored): `konstant.toml`, `.venv/`, `var/` (board.db, secrets/,
