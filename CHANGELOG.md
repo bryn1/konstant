@@ -116,6 +116,15 @@ Level 5, the dark factory (docs/LEVEL5.md; waves L5-1 to L5-7).
 ### Security
 - Fixes from the first independent level-5 review (H-01..H-09; docs/LEVEL5.md "L5-F1 as built").
 
+### Known limits
+- The 5 test skips stand on environments this box cannot provide: a reachable package index,
+  chromadb (optional backend), the maintainer-local denylist file, root-user rows.
+- Release assets carry same-origin checksums only; detached signatures are a named hardening
+  item, not shipped.
+- The release scan reads regular-file tar members; `git archive` cannot produce others and
+  `get.sh` refuses non-regular members — exploitability of a hand-built tarball under non-GNU
+  `tar` is the one unresolved fact of the release audit (left `needs_validation`).
+
 ## [0.2.2] - 2026-11-24
 
 ### Fixed
